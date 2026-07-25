@@ -527,10 +527,15 @@ class ChatPanel(QWidget):
     def _stop_generation(self) -> None:
         if self._thread:
             self._thread.cancel()
+            self.stop_btn.setEnabled(False)
+            self.stop_btn.setText("Stopping…")
+            self._show_status("Stopping — finishing the current token…")
 
     def _set_busy(self, busy: bool) -> None:
         self.send_btn.setVisible(not busy)
         self.stop_btn.setVisible(busy)
+        self.stop_btn.setEnabled(True)
+        self.stop_btn.setText("Stop")
         self.input_edit.setEnabled(not busy)
 
     def _show_status(self, msg: str) -> None:

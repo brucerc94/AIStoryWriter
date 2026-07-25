@@ -113,8 +113,8 @@ class ProjectsPanel(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setMinimumWidth(220)
-        self.setMaximumWidth(320)
+        self.setMinimumWidth(260)
+        self.setMaximumWidth(420)
         self._projects: dict[str, Project] = {}
         self._build_ui()
         self.refresh()
@@ -127,9 +127,9 @@ class ProjectsPanel(QWidget):
         # Header
         header = QFrame()
         header.setStyleSheet(f"background: {COLOR_SURFACE}; border-bottom: 1px solid {COLOR_BORDER};")
-        header.setFixedHeight(50)
+        header.setFixedHeight(54)
         h_layout = QHBoxLayout(header)
-        h_layout.setContentsMargins(14, 0, 10, 0)
+        h_layout.setContentsMargins(16, 0, 12, 0)
 
         title_lbl = QLabel("Projects")
         title_lbl.setStyleSheet(f"color: {COLOR_TEXT}; font-weight: 700; font-size: 14px; background: transparent;")
@@ -138,8 +138,15 @@ class ProjectsPanel(QWidget):
 
         self.new_btn = QPushButton("+")
         self.new_btn.setObjectName("accent")
-        self.new_btn.setFixedSize(28, 28)
+        self.new_btn.setFixedSize(30, 30)
         self.new_btn.setToolTip("New project")
+        # The base QPushButton rule sets padding: 6px 14px, which alone
+        # eats the entire 30px fixed width and leaves no room to actually
+        # draw the "+" glyph. Override it explicitly so the button is
+        # visible instead of an empty purple square.
+        self.new_btn.setStyleSheet(
+            "QPushButton#accent { padding: 0; font-size: 18px; font-weight: 700; }"
+        )
         self.new_btn.clicked.connect(self._create_project)
         h_layout.addWidget(self.new_btn)
 

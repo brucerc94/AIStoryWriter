@@ -202,11 +202,18 @@ class LLMEngine:
         stop: Optional[list[str]] = None,
         stream: bool = False,
         stream_callback: Optional[Callable[[str], None]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> str:
         """
         Run inference.
         If stream=True and stream_callback is provided, calls stream_callback
         with each token as it arrives, and returns the full text at the end.
+
+        cancel_check: optional callable polled between tokens (streaming
+        only). If it returns True, generation stops immediately and
+        whatever was produced so far is returned — this is what makes the
+        UI's "Stop" button actually interrupt an in-progress response
+        instead of only preventing the *next* task from starting.
         """
         if not _llama_available:
             raise RuntimeError("llama-cpp-python is not installed.")
@@ -216,7 +223,7 @@ class LLMEngine:
         with self._lock:
             if stream and stream_callback:
                 return self._stream_generate(
-                    messages, max_tokens, temperature, top_p, stop, stream_callback
+                    messages, max_tokens, temperature, top_p, stop, stream_callback, cancel_check
                 )
             else:
                 return self._blocking_generate(
@@ -249,6 +256,7 @@ class LLMEngine:
         top_p: float,
         stop: Optional[list[str]],
         stream_callback: Callable[[str], None],
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> str:
         chunks = []
         response_iter = self._model.create_chat_completion(
@@ -259,7 +267,15 @@ class LLMEngine:
             stop=stop or [],
             stream=True,
         )
-        for chunk in response_iter:
+        response_iter = iter(response_iter)
+        while True:
+            if cancel_check is not None and cancel_check():
+                logger.info("[llm_engine] Generation cancelled — stopping stream early.")
+                break
+            try:
+                chunk = next(response_iter)
+            except StopIteration:
+                break
             delta = chunk["choices"][0]["delta"]
             token = delta.get("content", "")
             if token:

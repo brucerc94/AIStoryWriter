@@ -185,11 +185,16 @@ class WorkflowWorker(QObject):
                 temperature=effective_temp,
                 stream=True,
                 stream_callback=on_token,
+                cancel_check=lambda: self._cancelled,
             )
         except Exception as e:
             logger.error(f"[{task.value}] inference error: {e}\n{traceback.format_exc()}")
             self.error_occurred.emit(f"Inference error: {e}\n{traceback.format_exc()}")
             return ""
+
+        if self._cancelled:
+            logger.info(f"[{task.value}] generation stopped by user "
+                        f"({len(result)} chars generated before stop).")
 
         logger.info(f"[{task.value}] inference complete: {len(result)} chars generated.")
 
@@ -412,8 +417,10 @@ class WorkflowWorker(QObject):
                 temperature=self._effective_temperature(0.3),
                 stream=True,
                 stream_callback=on_token,
+                cancel_check=lambda: self._cancelled,
             )
         except Exception as e:
+            logger.error(f"[conversation_summary] error: {e}")
             self.error_occurred.emit(f"Summary error: {e}")
             return
 

@@ -252,7 +252,7 @@ class CharacterCard(QFrame):
         del_btn = QPushButton("✕")
         del_btn.setObjectName("subtle")
         del_btn.setFixedWidth(28)
-        del_btn.setStyleSheet(f"color: {COLOR_ERROR};")
+        del_btn.setStyleSheet(f"QPushButton#subtle {{ color: {COLOR_ERROR}; padding: 0; }}")
         del_btn.clicked.connect(lambda: self.delete_requested.emit(self.char_id))
         btn_row.addWidget(del_btn)
         layout.addLayout(btn_row)
@@ -485,6 +485,9 @@ class ChaptersTab(QWidget):
         add_ch_btn.setObjectName("accent")
         add_ch_btn.setFixedSize(24, 24)
         add_ch_btn.setToolTip("Add chapter manually")
+        add_ch_btn.setStyleSheet(
+            "QPushButton#accent { padding: 0; font-size: 16px; font-weight: 700; }"
+        )
         add_ch_btn.clicked.connect(self._add_chapter)
         ch_header.addWidget(add_ch_btn)
         left_layout.addLayout(ch_header)

@@ -132,7 +132,7 @@ class MainWindow(QMainWindow):
         self.splitter.addWidget(right_container)
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
-        self.splitter.setSizes([260, 1140])
+        self.splitter.setSizes([300, 1100])
 
         root_layout.addWidget(self.splitter)
         self.setCentralWidget(central)
