@@ -10,6 +10,7 @@ All heavy work runs in a background QThread so the UI stays responsive.
 from __future__ import annotations
 
 import traceback
+import logging
 from typing import Callable, Optional
 
 from PySide6.QtCore import QObject, QThread, Signal
@@ -170,6 +171,7 @@ class WorkflowWorker(QObject):
                 stream_callback=on_token,
             )
         except Exception as e:
+            logging.getLogger("llm_engine").exception("Inference error during _run_inference")
             self.error_occurred.emit(f"Inference error: {e}\n{traceback.format_exc()}")
             return ""
 
@@ -186,6 +188,7 @@ class WorkflowWorker(QObject):
         try:
             self._dispatch()
         except Exception as e:
+            logging.getLogger("llm_engine").exception("Unhandled workflow error")
             self.error_occurred.emit(f"Workflow error: {e}\n{traceback.format_exc()}")
         finally:
             self.finished.emit()
