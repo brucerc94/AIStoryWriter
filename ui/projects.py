@@ -42,26 +42,63 @@ from ui.styles import (
 )
 
 
-class ProjectListItem(QListWidgetItem):
-    def __init__(self, project: Project) -> None:
-        super().__init__()
-        self.project_id = project.id
-        self._update(project)
+class ProjectListRow(QWidget):
+    """
+    A single row in the projects list: title + subtitle on the left, a
+    visible delete button on the right. Delete no longer requires
+    discovering the right-click context menu.
+    """
 
-    def _update(self, project: Project) -> None:
+    open_requested = Signal(str)    # project_id
+    delete_requested = Signal(str)  # project_id
+
+    def __init__(self, project: Project, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.project_id = project.id
+        self._build(project)
+
+    def _build(self, project: Project) -> None:
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 8, 6, 8)
+        layout.setSpacing(6)
+
+        text_col = QVBoxLayout()
+        text_col.setSpacing(2)
+        text_col.setContentsMargins(0, 0, 0, 0)
+
+        title_lbl = QLabel(project.title)
+        title_lbl.setStyleSheet(
+            f"color: {COLOR_TEXT}; font-size: 13px; font-weight: 600; background: transparent;"
+        )
+        text_col.addWidget(title_lbl)
+
         try:
             dt = datetime.fromisoformat(project.updated_at)
             date_str = dt.strftime("%b %d, %Y")
         except Exception:
             date_str = ""
-
         chapters = len(project.chapters)
         ch_str = f"{chapters} chapter{'s' if chapters != 1 else ''}"
+        subtitle_lbl = QLabel(f"{ch_str} · {date_str}" if date_str else ch_str)
+        subtitle_lbl.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px; background: transparent;")
+        text_col.addWidget(subtitle_lbl)
 
-        self.setText(project.title)
-        self.setToolTip(f"{project.title} · {ch_str} · {date_str}")
-        self.setData(Qt.UserRole, project.id)
-        self.setData(Qt.UserRole + 1, project.title)
+        layout.addLayout(text_col, 1)
+
+        self.delete_btn = QPushButton("🗑")
+        self.delete_btn.setObjectName("subtle")
+        self.delete_btn.setFixedSize(26, 26)
+        self.delete_btn.setToolTip("Delete project")
+        self.delete_btn.setCursor(Qt.PointingHandCursor)
+        self.delete_btn.setStyleSheet("QPushButton#subtle { font-size: 13px; padding: 0; }")
+        self.delete_btn.clicked.connect(lambda: self.delete_requested.emit(self.project_id))
+        layout.addWidget(self.delete_btn)
+
+    def mousePressEvent(self, event) -> None:
+        # Clicks on the delete button are handled by the button itself and
+        # never reach here. Any other click on the row opens the project.
+        self.open_requested.emit(self.project_id)
+        super().mousePressEvent(event)
 
 
 class ProjectsPanel(QWidget):
@@ -158,8 +195,17 @@ class ProjectsPanel(QWidget):
         visible = [p for p in projects if not query or query in p.title.lower()]
 
         for proj in visible:
-            item = ProjectListItem(proj)
+            item = QListWidgetItem()
+            item.setData(Qt.UserRole, proj.id)
+            item.setData(Qt.UserRole + 1, proj.title)
+
+            row = ProjectListRow(proj)
+            row.open_requested.connect(self._on_row_open)
+            row.delete_requested.connect(self._on_row_delete)
+
+            item.setSizeHint(row.sizeHint())
             self.list_widget.addItem(item)
+            self.list_widget.setItemWidget(item, row)
 
         has_items = len(visible) > 0
         self.list_widget.setVisible(has_items)
@@ -174,6 +220,15 @@ class ProjectsPanel(QWidget):
         pid = item.data(Qt.UserRole)
         if pid:
             self.project_selected.emit(pid)
+
+    def _on_row_open(self, project_id: str) -> None:
+        self.select_project(project_id)
+        self.project_selected.emit(project_id)
+
+    def _on_row_delete(self, project_id: str) -> None:
+        proj = self._projects.get(project_id)
+        title = proj.title if proj else "this project"
+        self._delete_project(project_id, title)
 
     def _context_menu(self, pos) -> None:
         item = self.list_widget.itemAt(pos)

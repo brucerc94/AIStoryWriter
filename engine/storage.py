@@ -7,6 +7,7 @@ No database. No SQLite. No cloud.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 from pathlib import Path
@@ -20,6 +21,7 @@ from engine.models import (
     Project,
 )
 
+logger = logging.getLogger("storage")
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 SETTINGS_FILE = DATA_DIR / "settings.json"
@@ -141,9 +143,11 @@ def load_project(project_id: str) -> Optional[Project]:
                 except Exception:
                     pass
 
+        logger.info(f"Loaded project '{project.title}' ({project_id}), "
+                    f"{len(project.chapters)} chapter(s), {len(project.chat_messages)} chat message(s).")
         return project
     except Exception as e:
-        print(f"[Storage] Error loading project {project_id}: {e}")
+        logger.error(f"Error loading project {project_id}: {e}")
         return None
 
 
@@ -215,11 +219,23 @@ def save_project(project: Project) -> None:
         md_f = chdir / f"chapter_{ch.number:03d}.md"
         md_f.write_text(content, encoding="utf-8")
 
+    logger.info(f"Saved project '{project.title}' ({project.id}).")
+
 
 def delete_project(project_id: str) -> None:
     pdir = project_dir(project_id)
+    title = project_id
+    project_file = pdir / "project.json"
+    if project_file.exists():
+        try:
+            title = json.loads(project_file.read_text(encoding="utf-8")).get("title", project_id)
+        except Exception:
+            pass
     if pdir.exists():
         shutil.rmtree(pdir)
+        logger.info(f"Deleted project '{title}' ({project_id}).")
+    else:
+        logger.warning(f"Delete requested for project {project_id}, but it doesn't exist on disk.")
 
 
 def rename_project(project_id: str, new_title: str) -> None:
@@ -227,8 +243,10 @@ def rename_project(project_id: str, new_title: str) -> None:
     project_file = pdir / "project.json"
     if project_file.exists():
         data = json.loads(project_file.read_text(encoding="utf-8"))
+        old_title = data.get("title", "")
         data["title"] = new_title
         project_file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        logger.info(f"Renamed project ({project_id}): '{old_title}' -> '{new_title}'.")
 
 
 # ──────────────────────────────────────────────

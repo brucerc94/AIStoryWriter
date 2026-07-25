@@ -12,6 +12,7 @@ which ChatPanel owns and drives.
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 from PySide6.QtCore import Qt
@@ -33,6 +34,8 @@ from ui.projects import ProjectsPanel
 from ui.settings import ModelsPanel, SettingsPanel
 from ui.story import StoryPanel
 from ui.styles import COLOR_BORDER, COLOR_SURFACE, COLOR_TEXT_DIM, COLOR_TEXT_MUTED
+
+logger = logging.getLogger("ui.main")
 
 
 class EmptyStateWidget(QWidget):
@@ -163,6 +166,7 @@ class MainWindow(QMainWindow):
     def _open_project(self, project_id: str) -> None:
         project = storage.load_project(project_id)
         if project is None:
+            logger.error(f"Could not load project {project_id}")
             self.status.showMessage(f"Could not load project {project_id}", 5000)
             return
 
@@ -174,12 +178,14 @@ class MainWindow(QMainWindow):
         self.project_title_bar.setText(project.title)
         self.projects_panel.select_project(project_id)
         self._show_workspace()
+        logger.info(f"Opened project '{project.title}' ({project_id})")
         self.status.showMessage(f"Opened '{project.title}'", 3000)
 
     def _on_project_deleted(self, project_id: str) -> None:
         if self._current_project and self._current_project.id == project_id:
             self._current_project = None
             self._show_empty_state()
+        logger.info(f"Project deleted ({project_id})")
         self.status.showMessage("Project deleted", 3000)
 
     def _on_project_edited(self) -> None:
@@ -204,6 +210,7 @@ class MainWindow(QMainWindow):
     def _run_task(self, task: TaskType, extra_input: str) -> None:
         if not self._current_project:
             return
+        logger.info(f"Task requested: {task.value} (project='{self._current_project.title}')")
         self.tabs.setCurrentWidget(self.chat_panel)
         self.chat_panel.run_task(task, extra_input)
 

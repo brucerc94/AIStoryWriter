@@ -9,6 +9,7 @@ All heavy work runs in a background QThread so the UI stays responsive.
 
 from __future__ import annotations
 
+import logging
 import traceback
 from typing import Callable, Optional
 
@@ -31,6 +32,8 @@ from engine.models import (
     WorkflowStatus,
 )
 from engine import storage
+
+logger = logging.getLogger("workflow")
 
 
 class WorkflowWorker(QObject):
@@ -78,6 +81,7 @@ class WorkflowWorker(QObject):
             # Fall back to chat model
             model_path = self.project.model_assignments.get(TaskType.CHAT)
         if not model_path:
+            logger.error(f"No model assigned for task '{task.value}' (and no chat fallback).")
             self.error_occurred.emit(
                 f"No model assigned for task '{task.value}'. "
                 "Please assign a model in the Models tab."
@@ -86,6 +90,7 @@ class WorkflowWorker(QObject):
 
         engine = get_engine()
         if not engine.is_available:
+            logger.error("llama-cpp-python is not installed.")
             self.error_occurred.emit(
                 "llama-cpp-python is not installed.\n"
                 "Run: pip install llama-cpp-python"
@@ -100,6 +105,10 @@ class WorkflowWorker(QObject):
             gpu = self.settings.default_gpu_layers
             threads = self.settings.default_threads
 
+        logger.info(
+            f"[{task.value}] requesting model load: {model_path} "
+            f"(n_ctx={ctx}, n_gpu_layers={gpu}, n_threads={threads})"
+        )
         try:
             engine.load_model(
                 model_path,
@@ -110,6 +119,7 @@ class WorkflowWorker(QObject):
             )
             return True
         except Exception as e:
+            logger.error(f"Failed to load model '{model_path}': {e}")
             self.error_occurred.emit(f"Failed to load model: {e}")
             return False
 
@@ -139,6 +149,7 @@ class WorkflowWorker(QObject):
     ) -> str:
         """Load model, build context, run inference, optionally store in chat."""
         if self._cancelled:
+            logger.info(f"[{task.value}] cancelled before inference started.")
             return ""
 
         if not self._load_model_for_task(task):
@@ -154,6 +165,12 @@ class WorkflowWorker(QObject):
             max_context_tokens=3200,
         )
 
+        effective_temp = self._effective_temperature(temperature)
+        logger.info(
+            f"[{task.value}] running inference: {len(messages)} messages, "
+            f"temperature={effective_temp}, max_tokens={max_tokens}"
+        )
+
         accumulated = []
 
         def on_token(token: str) -> None:
@@ -165,13 +182,16 @@ class WorkflowWorker(QObject):
             result = engine.generate(
                 messages=messages,
                 max_tokens=max_tokens,
-                temperature=self._effective_temperature(temperature),
+                temperature=effective_temp,
                 stream=True,
                 stream_callback=on_token,
             )
         except Exception as e:
+            logger.error(f"[{task.value}] inference error: {e}\n{traceback.format_exc()}")
             self.error_occurred.emit(f"Inference error: {e}\n{traceback.format_exc()}")
             return ""
+
+        logger.info(f"[{task.value}] inference complete: {len(result)} chars generated.")
 
         if add_to_chat:
             # Record user message and assistant response in chat history
@@ -183,9 +203,12 @@ class WorkflowWorker(QObject):
         return result
 
     def run(self) -> None:
+        logger.info(f"[workflow] Task started: {self.task.value} (project='{self.project.title}')")
         try:
             self._dispatch()
+            logger.info(f"[workflow] Task finished: {self.task.value}")
         except Exception as e:
+            logger.error(f"[workflow] Task error: {self.task.value}: {e}\n{traceback.format_exc()}")
             self.error_occurred.emit(f"Workflow error: {e}\n{traceback.format_exc()}")
         finally:
             self.finished.emit()
