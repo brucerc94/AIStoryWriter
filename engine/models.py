@@ -247,6 +247,8 @@ class AppSettings:
     theme: str = "dark"
     font_size: int = 13
     auto_save: bool = True
+    temperature: float = 0.7
+    custom_system_prompt: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -257,6 +259,8 @@ class AppSettings:
             "theme": self.theme,
             "font_size": self.font_size,
             "auto_save": self.auto_save,
+            "temperature": self.temperature,
+            "custom_system_prompt": self.custom_system_prompt,
         }
 
     @classmethod

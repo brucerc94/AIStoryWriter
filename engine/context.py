@@ -146,8 +146,17 @@ def build_summarization_prompt(messages_to_summarize: list[ChatMessage]) -> str:
     )
 
 
-def build_system_prompt(project: Project, task: TaskType) -> str:
-    """Return an appropriate system prompt for the given task."""
+def build_system_prompt(
+    project: Project, task: TaskType, custom_instructions: str = ""
+) -> str:
+    """
+    Return an appropriate system prompt for the given task.
+
+    custom_instructions: optional author-provided text (from Settings)
+    appended at the very end, after the task-specific instructions, so it
+    always has the final word — useful for persistent style/content rules
+    that should apply no matter which task is running.
+    """
     base = (
         f"You are an AI assistant helping to write a novel titled '{project.title}'. "
         "You are deeply familiar with the story world, characters, and plot. "
@@ -215,4 +224,9 @@ def build_system_prompt(project: Project, task: TaskType) -> str:
     if project.synopsis:
         base += f"\n\nStory Synopsis:\n{project.synopsis}"
 
-    return f"{base}\n\n{instruction}".strip()
+    prompt = f"{base}\n\n{instruction}".strip()
+
+    if custom_instructions and custom_instructions.strip():
+        prompt += f"\n\n## Additional Author Instructions\n{custom_instructions.strip()}"
+
+    return prompt

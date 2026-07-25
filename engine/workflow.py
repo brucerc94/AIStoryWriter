@@ -113,6 +113,22 @@ class WorkflowWorker(QObject):
             self.error_occurred.emit(f"Failed to load model: {e}")
             return False
 
+    def _effective_temperature(self, task_default: float) -> float:
+        """
+        Settings.temperature (from the Settings tab) overrides every
+        per-task default so the author has direct, explicit control.
+        Falls back to the task's own default if no settings are attached.
+        """
+        if self.settings is not None:
+            return getattr(self.settings, "temperature", task_default)
+        return task_default
+
+    def _custom_system_instructions(self) -> str:
+        """Author-provided instructions from Settings, appended to every prompt."""
+        if self.settings is not None:
+            return getattr(self.settings, "custom_system_prompt", "") or ""
+        return ""
+
     def _run_inference(
         self,
         task: TaskType,
@@ -128,7 +144,9 @@ class WorkflowWorker(QObject):
         if not self._load_model_for_task(task):
             return ""
 
-        system_prompt = build_system_prompt(self.project, task)
+        system_prompt = build_system_prompt(
+            self.project, task, custom_instructions=self._custom_system_instructions()
+        )
         messages = build_context_for_model(
             self.project,
             user_message,
@@ -147,7 +165,7 @@ class WorkflowWorker(QObject):
             result = engine.generate(
                 messages=messages,
                 max_tokens=max_tokens,
-                temperature=temperature,
+                temperature=self._effective_temperature(temperature),
                 stream=True,
                 stream_callback=on_token,
             )
@@ -348,6 +366,10 @@ class WorkflowWorker(QObject):
             return
 
         system = "You are a helpful assistant that summarizes conversations."
+        custom_instructions = self._custom_system_instructions()
+        if custom_instructions:
+            system += f"\n\n## Additional Author Instructions\n{custom_instructions}"
+
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
@@ -364,7 +386,7 @@ class WorkflowWorker(QObject):
             result = engine.generate(
                 messages=messages,
                 max_tokens=1024,
-                temperature=0.3,
+                temperature=self._effective_temperature(0.3),
                 stream=True,
                 stream_callback=on_token,
             )

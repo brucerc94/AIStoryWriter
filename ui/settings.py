@@ -15,6 +15,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QFrame,
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -191,6 +193,40 @@ class AppSettingsWidget(QWidget):
 
         layout.addWidget(box)
 
+        # ── Generation settings ──
+        gen_box = QGroupBox("Generation")
+        gen_form = QFormLayout(gen_box)
+        gen_form.setSpacing(10)
+        gen_form.setContentsMargins(14, 18, 14, 14)
+
+        # Temperature — overrides every task's built-in default
+        self.temperature_spin = QDoubleSpinBox()
+        self.temperature_spin.setRange(0.0, 2.0)
+        self.temperature_spin.setSingleStep(0.05)
+        self.temperature_spin.setDecimals(2)
+        self.temperature_spin.setValue(0.7)
+        self.temperature_spin.setToolTip(
+            "Controls randomness for every task (chat, chapters, reviews, "
+            "memory updates, summaries). 0.0 = deterministic/focused, "
+            "2.0 = max randomness. Overrides each task's built-in default."
+        )
+        gen_form.addRow("Temperature", self.temperature_spin)
+
+        # Custom system prompt — appended to every auto-generated prompt
+        self.system_prompt_input = QPlainTextEdit()
+        self.system_prompt_input.setPlaceholderText(
+            "Optional instructions appended to every system prompt, for every task "
+            "(chat, writing, review, memory, summaries).\n\n"
+            "Examples:\n"
+            "- Tone/POV/style rules the model should always follow\n"
+            "- Content rating notes\n"
+            "- House style guide reminders"
+        )
+        self.system_prompt_input.setFixedHeight(140)
+        gen_form.addRow("Custom System Prompt", self.system_prompt_input)
+
+        layout.addWidget(gen_box)
+
         save_btn = QPushButton("Save App Settings")
         save_btn.setObjectName("accent")
         save_btn.clicked.connect(self._save)
@@ -203,6 +239,8 @@ class AppSettingsWidget(QWidget):
         self.gpu_spin.setValue(settings.default_gpu_layers)
         self.threads_spin.setValue(settings.default_threads)
         self.autosave_check.setChecked(settings.auto_save)
+        self.temperature_spin.setValue(settings.temperature)
+        self.system_prompt_input.setPlainText(settings.custom_system_prompt)
 
     def _browse_models_dir(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "Select Models Directory")
@@ -217,6 +255,8 @@ class AppSettingsWidget(QWidget):
         self._settings.default_gpu_layers = self.gpu_spin.value()
         self._settings.default_threads = self.threads_spin.value()
         self._settings.auto_save = self.autosave_check.isChecked()
+        self._settings.temperature = self.temperature_spin.value()
+        self._settings.custom_system_prompt = self.system_prompt_input.toPlainText().strip()
         storage.save_settings(self._settings)
         self.settings_changed.emit(self._settings)
 
