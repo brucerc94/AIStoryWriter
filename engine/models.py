@@ -247,8 +247,14 @@ class AppSettings:
     theme: str = "dark"
     font_size: int = 13
     auto_save: bool = True
-    temperature: float = 0.7
+    # Appended to the end of every auto-generated system prompt (all tasks),
+    # so the author can add persistent style/content instructions without
+    # editing code — e.g. tone guidance, content-rating notes, POV rules.
     custom_system_prompt: str = ""
+    # Overrides the per-task default temperature everywhere (chat, chapter
+    # writing, review, memory updates, summarization). 0.0 = deterministic,
+    # 2.0 = max randomness.
+    temperature: float = 0.7
 
     def to_dict(self) -> dict:
         return {
@@ -259,8 +265,8 @@ class AppSettings:
             "theme": self.theme,
             "font_size": self.font_size,
             "auto_save": self.auto_save,
-            "temperature": self.temperature,
             "custom_system_prompt": self.custom_system_prompt,
+            "temperature": self.temperature,
         }
 
     @classmethod

@@ -99,21 +99,10 @@ class ProjectsPanel(QWidget):
         h_layout.addWidget(title_lbl)
         h_layout.addStretch()
 
-        self.new_btn = QPushButton("＋")
+        self.new_btn = QPushButton("+")
         self.new_btn.setObjectName("accent")
-        self.new_btn.setFixedSize(32, 32)
+        self.new_btn.setFixedSize(28, 28)
         self.new_btn.setToolTip("New project")
-        self.new_btn.setStyleSheet(
-            "QPushButton#accent {"
-            "background-color: #7c5cbf;"
-            "color: white;"
-            "border: none;"
-            "border-radius: 999px;"
-            "font-size: 18px;"
-            "font-weight: 700;"
-            "padding: 0;"
-            "}"
-        )
         self.new_btn.clicked.connect(self._create_project)
         h_layout.addWidget(self.new_btn)
 

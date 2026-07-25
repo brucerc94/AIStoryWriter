@@ -30,6 +30,38 @@ def _messages_token_count(messages: list[dict]) -> int:
     return total
 
 
+def _repair_alternation(messages: list[dict]) -> list[dict]:
+    """
+    Guarantee the list strictly alternates user/assistant/user/assistant…
+    and starts with "user".
+
+    Trimming old messages to fit the token budget removes them one at a
+    time from the front, which can leave a dangling "assistant" reply
+    whose paired "user" prompt got trimmed away. Most llama.cpp chat
+    templates hard-require strict alternation (with the conversation,
+    excluding the optional system message, starting on "user") and raise
+    a jinja ValueError otherwise — so repair the window before it's ever
+    sent to the model rather than trusting it's already well-formed.
+    """
+    # A window can't start with a lone assistant reply — drop it, and any
+    # further leading assistant turns, until it starts with "user".
+    while messages and messages[0]["role"] != "user":
+        messages.pop(0)
+
+    # Merge any remaining consecutive same-role turns instead of dropping
+    # content, so nothing the user typed or the model wrote is lost.
+    repaired: list[dict] = []
+    for m in messages:
+        if repaired and repaired[-1]["role"] == m["role"]:
+            repaired[-1] = {
+                "role": m["role"],
+                "content": repaired[-1]["content"] + "\n\n" + m["content"],
+            }
+        else:
+            repaired.append(dict(m))
+    return repaired
+
+
 def build_context_for_model(
     project: Project,
     user_message: str,
@@ -87,9 +119,26 @@ def build_context_for_model(
         removed = recent_msgs.pop(0)
         total -= _estimate_tokens(removed["content"])
 
+    # Trimming above can break strict user/assistant alternation — fix it
+    # before this ever reaches the model.
+    recent_msgs = _repair_alternation(recent_msgs)
+
+    # If the repaired window's last turn is already "user" (e.g. the
+    # trailing assistant reply was merged/dropped), fold the new user
+    # message into it instead of producing back-to-back "user" turns.
+    if recent_msgs and recent_msgs[-1]["role"] == "user":
+        recent_msgs[-1] = {
+            "role": "user",
+            "content": recent_msgs[-1]["content"] + "\n\n" + user_message,
+        }
+        trailing_user_msg = None
+    else:
+        trailing_user_msg = {"role": "user", "content": user_message}
+
     messages: list[dict] = [{"role": "system", "content": system_content}]
     messages.extend(recent_msgs)
-    messages.append({"role": "user", "content": user_message})
+    if trailing_user_msg is not None:
+        messages.append(trailing_user_msg)
 
     return messages
 
