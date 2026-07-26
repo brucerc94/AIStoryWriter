@@ -33,7 +33,6 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSplitter,
-    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -53,6 +52,7 @@ from ui.styles import (
     COLOR_WARNING,
     FONT_SERIF,
 )
+from ui.widgets import SizeAdjustingTabWidget
 
 
 class SectionHeader(QWidget):
@@ -550,6 +550,14 @@ class ChaptersTab(QWidget):
         self.review_btn.clicked.connect(self._review_chapter)
         action_row.addWidget(self.review_btn)
 
+        self.rewrite_btn = QPushButton("↻ Rewrite with Feedback")
+        self.rewrite_btn.setToolTip(
+            "Rewrites this chapter using the feedback from the last Review. "
+            "Run Review first."
+        )
+        self.rewrite_btn.clicked.connect(self._rewrite_chapter)
+        action_row.addWidget(self.rewrite_btn)
+
         self.memory_btn = QPushButton("Update Memory")
         self.memory_btn.clicked.connect(self._update_memory)
         action_row.addWidget(self.memory_btn)
@@ -646,6 +654,20 @@ class ChaptersTab(QWidget):
         self._project.current_chapter = self._current_chapter.number
         self.task_requested.emit(TaskType.REVIEW_CHAPTER, "")
 
+    def _rewrite_chapter(self) -> None:
+        if not self._current_chapter or not self._project:
+            return
+        if not self._current_chapter.last_review.strip():
+            QMessageBox.information(
+                self,
+                "No Review Yet",
+                "Click \"Review\" first to get feedback on this chapter, "
+                "then \"Rewrite with Feedback\" to apply it.",
+            )
+            return
+        self._project.current_chapter = self._current_chapter.number
+        self.task_requested.emit(TaskType.REWRITE_CHAPTER, "")
+
     def _update_memory(self) -> None:
         if not self._current_chapter or not self._project:
             return
@@ -685,6 +707,7 @@ class ChaptersTab(QWidget):
 
 
 class WorldTab(QWidget):
+    task_requested = Signal(TaskType, str)
     content_changed = Signal(str)
 
     def __init__(self, parent=None) -> None:
@@ -693,9 +716,15 @@ class WorldTab(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
 
-        title_lbl = QLabel("World & Setting")
-        title_lbl.setStyleSheet(f"font-size: 15px; font-weight: 700; color: {COLOR_TEXT};")
-        layout.addWidget(title_lbl)
+        header = SectionHeader("World & Setting", "Generate with AI")
+        if header.action_btn:
+            header.action_btn.setToolTip(
+                "Adds to your existing world notes — doesn't overwrite them."
+            )
+            header.action_btn.clicked.connect(
+                lambda: self.task_requested.emit(TaskType.GENERATE_WORLD, "")
+            )
+        layout.addWidget(header)
 
         self.editor = MarkdownEditor(
             placeholder=(
@@ -776,7 +805,7 @@ class StoryPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self.tabs = QTabWidget()
+        self.tabs = SizeAdjustingTabWidget()
         self.tabs.setDocumentMode(True)
 
         self.synopsis_tab = SynopsisTab()
@@ -794,6 +823,7 @@ class StoryPanel(QWidget):
         self.tabs.addTab(self.chars_tab, "Characters")
 
         self.world_tab = WorldTab()
+        self.world_tab.task_requested.connect(self.task_requested)
         self.world_tab.content_changed.connect(self._on_world_changed)
         self.tabs.addTab(self.world_tab, "World")
 
@@ -822,6 +852,8 @@ class StoryPanel(QWidget):
         self._project = project
         self.synopsis_tab.load(project)
         self.outline_tab.load(project)
+        self.chars_tab.load(project)
+        self.world_tab.load(project)
         self.memory_tab.load(project)
         self.chapters_tab.refresh_after_generation(project)
 

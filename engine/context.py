@@ -254,6 +254,14 @@ def build_system_prompt(
             "- Continuity errors\n"
             "Give specific feedback and suggest improvements."
         ),
+        TaskType.REWRITE_CHAPTER: (
+            "Rewrite the chapter below to address the review feedback provided. "
+            "Keep what's already working — voice, strong scenes, dialogue that "
+            "lands — and fix specifically what the feedback flagged (pacing, "
+            "continuity, prose issues, etc.). Write the full revised chapter "
+            "content. Do not summarize the changes or add commentary — output "
+            "only the rewritten chapter text."
+        ),
         TaskType.UPDATE_MEMORY: (
             "Update the story memory file based on the latest chapter. "
             "Extract and record:\n"
@@ -266,6 +274,15 @@ def build_system_prompt(
         TaskType.CONVERSATION_SUMMARY: (
             "Summarize the provided conversation history for future reference. "
             "Be concise but complete. Capture all story decisions and context."
+        ),
+        TaskType.GENERATE_WORLD: (
+            "Write detailed worldbuilding notes for this novel. Cover whichever "
+            "of these are relevant to the story: geography and key locations, "
+            "time period and technology level, magic or other special systems "
+            "and their rules, political/social structures, culture and customs, "
+            "and history relevant to the plot. Format as Markdown with headings. "
+            "If world notes already exist below, add to and expand them rather "
+            "than contradicting or repeating them."
         ),
     }
 
@@ -281,6 +298,9 @@ def build_system_prompt(
 
     if project.outline and task != TaskType.GENERATE_OUTLINE:
         base += f"\n\n## Outline\n{project.outline}"
+
+    if project.world:
+        base += f"\n\n## World & Setting\n{project.world}"
 
     prompt = f"{base}\n\n{instruction}".strip()
 

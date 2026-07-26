@@ -22,7 +22,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QSplitter,
     QStatusBar,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -34,6 +33,7 @@ from ui.projects import ProjectsPanel
 from ui.settings import ModelsPanel, SettingsPanel
 from ui.story import StoryPanel
 from ui.styles import COLOR_BORDER, COLOR_SURFACE, COLOR_TEXT_DIM, COLOR_TEXT_MUTED
+from ui.widgets import SizeAdjustingTabWidget
 
 logger = logging.getLogger("ui.main")
 
@@ -62,6 +62,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("AI Story Studio")
         self.resize(1400, 900)
+        self.setMinimumSize(900, 600)
 
         self._settings: AppSettings = storage.load_settings()
         self._current_project: Optional[Project] = None
@@ -108,7 +109,7 @@ class MainWindow(QMainWindow):
         )
         right_layout.addWidget(self.project_title_bar)
 
-        self.tabs = QTabWidget()
+        self.tabs = SizeAdjustingTabWidget()
         self.tabs.setDocumentMode(True)
 
         self.story_panel = StoryPanel()

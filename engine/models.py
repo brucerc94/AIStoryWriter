@@ -16,8 +16,10 @@ class TaskType(str, Enum):
     WRITE_SYNOPSIS = "write_synopsis"
     GENERATE_OUTLINE = "generate_outline"
     REVIEW_OUTLINE = "review_outline"
+    GENERATE_WORLD = "generate_world"
     WRITE_CHAPTER = "write_chapter"
     REVIEW_CHAPTER = "review_chapter"
+    REWRITE_CHAPTER = "rewrite_chapter"
     UPDATE_MEMORY = "update_memory"
     CONVERSATION_SUMMARY = "conversation_summary"
     CHAT = "chat"
@@ -122,6 +124,7 @@ class Chapter:
     summary: str = ""
     content: str = ""
     reviewed: bool = False
+    last_review: str = ""
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
     def to_dict(self) -> dict:
@@ -132,6 +135,7 @@ class Chapter:
             "summary": self.summary,
             "content": self.content,
             "reviewed": self.reviewed,
+            "last_review": self.last_review,
         }
 
     @classmethod
@@ -143,6 +147,7 @@ class Chapter:
             summary=d.get("summary", ""),
             content=d.get("content", ""),
             reviewed=d.get("reviewed", False),
+            last_review=d.get("last_review", ""),
         )
 
 
@@ -152,8 +157,10 @@ class ModelAssignment:
     write_synopsis: str = ""
     generate_outline: str = ""
     review_outline: str = ""
+    generate_world: str = ""
     write_chapter: str = ""
     review_chapter: str = ""
+    rewrite_chapter: str = ""
     update_memory: str = ""
     conversation_summary: str = ""
     chat: str = ""
@@ -169,8 +176,10 @@ class ModelAssignment:
             "write_synopsis": self.write_synopsis,
             "generate_outline": self.generate_outline,
             "review_outline": self.review_outline,
+            "generate_world": self.generate_world,
             "write_chapter": self.write_chapter,
             "review_chapter": self.review_chapter,
+            "rewrite_chapter": self.rewrite_chapter,
             "update_memory": self.update_memory,
             "conversation_summary": self.conversation_summary,
             "chat": self.chat,
@@ -193,8 +202,10 @@ class TaskTemperatures:
     write_synopsis: float = 0.7
     generate_outline: float = 0.7
     review_outline: float = 0.7
+    generate_world: float = 0.7
     write_chapter: float = 0.8
     review_chapter: float = 0.7
+    rewrite_chapter: float = 0.7
     update_memory: float = 0.7
     conversation_summary: float = 0.3
     chat: float = 0.7
@@ -210,8 +221,10 @@ class TaskTemperatures:
             "write_synopsis": self.write_synopsis,
             "generate_outline": self.generate_outline,
             "review_outline": self.review_outline,
+            "generate_world": self.generate_world,
             "write_chapter": self.write_chapter,
             "review_chapter": self.review_chapter,
+            "rewrite_chapter": self.rewrite_chapter,
             "update_memory": self.update_memory,
             "conversation_summary": self.conversation_summary,
             "chat": self.chat,

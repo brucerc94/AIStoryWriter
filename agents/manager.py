@@ -33,6 +33,7 @@ class ManagerAgent:
             TaskType.WRITE_CHAPTER,
             TaskType.GENERATE_OUTLINE,
             TaskType.WRITE_SYNOPSIS,
+            TaskType.GENERATE_WORLD,
             TaskType.REVIEW_CHAPTER,
             TaskType.REVIEW_OUTLINE,
             TaskType.UPDATE_MEMORY,

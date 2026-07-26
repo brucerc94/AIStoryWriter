@@ -235,6 +235,65 @@ class WorkflowWorker(QObject):
             added += 1
         return added
 
+    def _extract_and_merge_world_info(self, source_text: str) -> None:
+        """
+        After the model writes a synopsis/outline/chapter, quietly ask it to
+        pull out any NEW worldbuilding details (locations, rules/systems,
+        history, culture, technology) not already covered in project.world,
+        and append them — mirroring how Story Memory already accumulates,
+        rather than trying to structurally dedupe free-form world text.
+
+        Silent: no chat bubble, no step_started/step_finished signal.
+        """
+        if not source_text or not source_text.strip():
+            return
+        if not self._load_model_for_task(TaskType.UPDATE_MEMORY):
+            logger.warning("Skipping world-info extraction: no model assigned for Update Memory.")
+            return
+
+        existing_world = self.project.world.strip() or "(nothing recorded yet)"
+        prompt = (
+            "Below are the story's existing world-building notes, followed by "
+            "newly written story text. Extract ONLY genuinely NEW world-building "
+            "details from the new text — locations, rules/systems, history, "
+            "culture, technology — that are NOT already covered in the existing "
+            "notes. Do not repeat anything already listed. Format as a short "
+            "Markdown bullet list. If there is nothing new, respond with "
+            "exactly: NO_NEW_WORLD_DETAILS\n\n"
+            f"## Existing World Notes\n{existing_world}\n\n"
+            f"## New Text\n{source_text[:6000]}\n\n"
+            "New details (bullet list, or NO_NEW_WORLD_DETAILS):"
+        )
+        messages = [
+            {
+                "role": "system",
+                "content": "You extract new worldbuilding details as a concise Markdown bullet list.",
+            },
+            {"role": "user", "content": prompt},
+        ]
+
+        engine = get_engine()
+        try:
+            raw = engine.generate(
+                messages=messages,
+                max_tokens=600,
+                temperature=0.3,
+                stream=True,
+                stream_callback=lambda _t: None,  # silent — no chat UI noise
+                cancel_check=lambda: self._cancelled,
+            )
+        except Exception as e:
+            logger.warning(f"World-info extraction failed (non-fatal): {e}")
+            return
+
+        cleaned = raw.strip()
+        if not cleaned or "NO_NEW_WORLD_DETAILS" in cleaned.upper():
+            return
+
+        sep = "\n\n" if self.project.world.strip() else ""
+        self.project.world = (self.project.world.rstrip() + sep + cleaned).strip()
+        logger.info("Added new world-building details extracted from generated text.")
+
     def _run_inference(
         self,
         task: TaskType,
@@ -323,10 +382,14 @@ class WorkflowWorker(QObject):
             self._run_generate_outline()
         elif task == TaskType.REVIEW_OUTLINE:
             self._run_review_outline()
+        elif task == TaskType.GENERATE_WORLD:
+            self._run_generate_world()
         elif task == TaskType.WRITE_CHAPTER:
             self._run_write_chapter()
         elif task == TaskType.REVIEW_CHAPTER:
             self._run_review_chapter()
+        elif task == TaskType.REWRITE_CHAPTER:
+            self._run_rewrite_chapter()
         elif task == TaskType.UPDATE_MEMORY:
             self._run_update_memory()
         elif task == TaskType.CONVERSATION_SUMMARY:
@@ -355,6 +418,7 @@ class WorkflowWorker(QObject):
         if result:
             self.project.synopsis = result
             self._extract_and_merge_characters(result)
+            self._extract_and_merge_world_info(result)
             storage.save_project(self.project)
             self.step_finished.emit("Synopsis", result)
 
@@ -374,6 +438,7 @@ class WorkflowWorker(QObject):
         if result:
             self.project.outline = result
             self._extract_and_merge_characters(result)
+            self._extract_and_merge_world_info(result)
             storage.save_project(self.project)
             self.step_finished.emit("Outline", result)
 
@@ -389,6 +454,30 @@ class WorkflowWorker(QObject):
         if result:
             storage.save_project(self.project)
             self.step_finished.emit("Outline Review", result)
+
+    def _run_generate_world(self) -> None:
+        self.step_started.emit("Generating world & setting...")
+        prompt = (
+            self.extra_input
+            if self.extra_input
+            else (
+                f"Write detailed worldbuilding notes for '{self.project.title}', "
+                "covering geography, history, rules/systems, culture, and "
+                "technology as relevant to the story."
+            )
+        )
+        result = self._run_inference(
+            TaskType.GENERATE_WORLD, prompt, add_to_chat=True, max_tokens=2000
+        )
+        if result:
+            # Append rather than overwrite — world notes accumulate over time,
+            # same as Story Memory, instead of replacing manual notes the
+            # author already wrote.
+            sep = "\n\n---\n\n" if self.project.world.strip() else ""
+            self.project.world = (self.project.world.rstrip() + sep + result).strip()
+            self._extract_and_merge_characters(result)
+            storage.save_project(self.project)
+            self.step_finished.emit("World & Setting", result)
 
     def _run_write_chapter(self) -> None:
         # Never trust project.current_chapter alone — if it's stale (e.g.
@@ -432,6 +521,7 @@ class WorkflowWorker(QObject):
                 self.project.chapters.append(ch)
 
             self._extract_and_merge_characters(result)
+            self._extract_and_merge_world_info(result)
             storage.save_project(self.project)
             self.step_finished.emit(f"Chapter {chapter_num}", result)
 
@@ -452,10 +542,49 @@ class WorkflowWorker(QObject):
             TaskType.REVIEW_CHAPTER, prompt, add_to_chat=True, max_tokens=2048
         )
         if result:
-            if chapter:
-                chapter.reviewed = True
+            chapter.reviewed = True
+            chapter.last_review = result  # keep it so "Rewrite with Feedback" can use it
             storage.save_project(self.project)
             self.step_finished.emit(f"Review of Chapter {chapter_num}", result)
+
+    def _run_rewrite_chapter(self) -> None:
+        chapter_num = self.project.current_chapter
+        if chapter_num == 0:
+            chapter_num = len(self.project.chapters)
+
+        chapter = next((c for c in self.project.chapters if c.number == chapter_num), None)
+        if not chapter:
+            self.error_occurred.emit(f"Chapter {chapter_num} not found.")
+            return
+
+        if not chapter.last_review.strip():
+            self.error_occurred.emit(
+                f"No review feedback saved for Chapter {chapter_num} yet. "
+                "Click \"Review\" first, then \"Rewrite with Feedback\"."
+            )
+            return
+
+        self.step_started.emit(f"Rewriting Chapter {chapter_num} with review feedback...")
+
+        prompt = (
+            self.extra_input
+            if self.extra_input
+            else (
+                f"Chapter {chapter_num}: '{chapter.title}'\n\n"
+                f"Current content:\n{chapter.content}\n\n"
+                f"Review feedback to address:\n{chapter.last_review}"
+            )
+        )
+        result = self._run_inference(
+            TaskType.REWRITE_CHAPTER, prompt, add_to_chat=True, max_tokens=4000
+        )
+        if result:
+            chapter.content = result
+            chapter.reviewed = False  # it changed — worth another look before moving on
+            chapter.last_review = ""
+            self._extract_and_merge_characters(result)
+            storage.save_project(self.project)
+            self.step_finished.emit(f"Rewrite of Chapter {chapter_num}", result)
 
     def _run_update_memory(self) -> None:
         self.step_started.emit("Updating story memory...")

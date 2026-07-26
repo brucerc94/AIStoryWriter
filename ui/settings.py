@@ -51,8 +51,10 @@ TASK_LABELS: dict[TaskType, str] = {
     TaskType.WRITE_SYNOPSIS: "Write Synopsis",
     TaskType.GENERATE_OUTLINE: "Generate Outline",
     TaskType.REVIEW_OUTLINE: "Review Outline",
+    TaskType.GENERATE_WORLD: "Generate World",
     TaskType.WRITE_CHAPTER: "Write Chapter",
     TaskType.REVIEW_CHAPTER: "Review Chapter",
+    TaskType.REWRITE_CHAPTER: "Rewrite Chapter",
     TaskType.UPDATE_MEMORY: "Update Story Memory",
     TaskType.CONVERSATION_SUMMARY: "Conversation Summary",
 }
