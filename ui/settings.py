@@ -59,9 +59,13 @@ TASK_LABELS: dict[TaskType, str] = {
 
 
 class ModelPicker(QWidget):
-    """A row with a task label and a model path combo/file picker."""
+    """A row with a task label, a model path combo/file picker, and that
+    task's own generation temperature — different models often want very
+    different temperatures (fast/precise for summaries vs. large/creative
+    for chapters), so it lives right next to the model it applies to."""
 
     model_changed = Signal(TaskType, str)
+    temperature_changed = Signal(TaskType, float)
 
     def __init__(self, task: TaskType, models: list[str], parent=None) -> None:
         super().__init__(parent)
@@ -71,7 +75,7 @@ class ModelPicker(QWidget):
         layout.setSpacing(8)
 
         lbl = QLabel(TASK_LABELS.get(task, task.value))
-        lbl.setFixedWidth(180)
+        lbl.setFixedWidth(160)
         lbl.setStyleSheet(f"color: {COLOR_TEXT}; font-size: 13px;")
         layout.addWidget(lbl)
 
@@ -88,6 +92,23 @@ class ModelPicker(QWidget):
         browse_btn.clicked.connect(self._browse)
         layout.addWidget(browse_btn)
 
+        temp_lbl = QLabel("Temp")
+        temp_lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 11px;")
+        layout.addWidget(temp_lbl)
+
+        self.temp_spin = QDoubleSpinBox()
+        self.temp_spin.setRange(0.0, 2.0)
+        self.temp_spin.setSingleStep(0.05)
+        self.temp_spin.setDecimals(2)
+        self.temp_spin.setValue(0.7)
+        self.temp_spin.setFixedWidth(70)
+        self.temp_spin.setToolTip(
+            f"Generation temperature for {TASK_LABELS.get(task, task.value)}. "
+            "0.0 = deterministic/focused, 2.0 = max randomness."
+        )
+        self.temp_spin.valueChanged.connect(self._on_temperature_changed)
+        layout.addWidget(self.temp_spin)
+
     def set_value(self, path: str) -> None:
         # Find by data
         for i in range(self.combo.count()):
@@ -101,6 +122,17 @@ class ModelPicker(QWidget):
 
     def get_value(self) -> str:
         return self.combo.currentData() or ""
+
+    def set_temperature(self, temperature: float) -> None:
+        self.temp_spin.blockSignals(True)
+        self.temp_spin.setValue(temperature)
+        self.temp_spin.blockSignals(False)
+
+    def get_temperature(self) -> float:
+        return self.temp_spin.value()
+
+    def _on_temperature_changed(self, value: float) -> None:
+        self.temperature_changed.emit(self.task, value)
 
     def update_models(self, models: list[str]) -> None:
         current = self.get_value()
@@ -199,18 +231,11 @@ class AppSettingsWidget(QWidget):
         gen_form.setSpacing(10)
         gen_form.setContentsMargins(14, 18, 14, 14)
 
-        # Temperature — overrides every task's built-in default
-        self.temperature_spin = QDoubleSpinBox()
-        self.temperature_spin.setRange(0.0, 2.0)
-        self.temperature_spin.setSingleStep(0.05)
-        self.temperature_spin.setDecimals(2)
-        self.temperature_spin.setValue(0.7)
-        self.temperature_spin.setToolTip(
-            "Controls randomness for every task (chat, chapters, reviews, "
-            "memory updates, summaries). 0.0 = deterministic/focused, "
-            "2.0 = max randomness. Overrides each task's built-in default."
-        )
-        gen_form.addRow("Temperature", self.temperature_spin)
+        # NOTE: temperature now lives per-task in the Models tab, next to
+        # each task's assigned GGUF model — different models need very
+        # different temperatures, so a single global value here didn't
+        # give real control. Only the custom system prompt (which makes
+        # sense as one shared value across every task) stays here.
 
         # Custom system prompt — appended to every auto-generated prompt
         self.system_prompt_input = QPlainTextEdit()
@@ -239,7 +264,6 @@ class AppSettingsWidget(QWidget):
         self.gpu_spin.setValue(settings.default_gpu_layers)
         self.threads_spin.setValue(settings.default_threads)
         self.autosave_check.setChecked(settings.auto_save)
-        self.temperature_spin.setValue(settings.temperature)
         self.system_prompt_input.setPlainText(settings.custom_system_prompt)
 
     def _browse_models_dir(self) -> None:
@@ -255,7 +279,6 @@ class AppSettingsWidget(QWidget):
         self._settings.default_gpu_layers = self.gpu_spin.value()
         self._settings.default_threads = self.threads_spin.value()
         self._settings.auto_save = self.autosave_check.isChecked()
-        self._settings.temperature = self.temperature_spin.value()
         self._settings.custom_system_prompt = self.system_prompt_input.toPlainText().strip()
         storage.save_settings(self._settings)
         self.settings_changed.emit(self._settings)
@@ -314,6 +337,7 @@ class ModelsPanel(QWidget):
         for task in TaskType:
             picker = ModelPicker(task, self._available_models)
             picker.model_changed.connect(self._on_model_changed)
+            picker.temperature_changed.connect(self._on_temperature_changed)
             self._pickers[task] = picker
             box_layout.addWidget(picker)
 
@@ -345,6 +369,7 @@ class ModelsPanel(QWidget):
         self._project = project
         for task, picker in self._pickers.items():
             picker.set_value(project.model_assignments.get(task))
+            picker.set_temperature(project.task_temperatures.get(task))
 
     def update_available_models(self, models_dir: str) -> None:
         models = storage.list_gguf_models(models_dir)
@@ -372,6 +397,13 @@ class ModelsPanel(QWidget):
         if not self._project:
             return
         self._project.model_assignments.set(task, path)
+        storage.save_project(self._project)
+        self.assignments_changed.emit()
+
+    def _on_temperature_changed(self, task: TaskType, value: float) -> None:
+        if not self._project:
+            return
+        self._project.task_temperatures.set(task, value)
         storage.save_project(self._project)
         self.assignments_changed.emit()
 

@@ -625,14 +625,19 @@ class ChaptersTab(QWidget):
             self.project_changed.emit()
 
     def _write_chapter(self) -> None:
+        """
+        Always writes the NEXT chapter in the story — regardless of which
+        chapter happens to be selected/open in the editor. Previously this
+        used the *selected* chapter's number when one was open, which meant
+        that after writing Chapter 1 (which then stayed selected), clicking
+        "Write Chapter" again silently regenerated Chapter 1 instead of
+        moving on to Chapter 2.
+        """
         if not self._project:
             return
-        if self._current_chapter:
-            num = self._current_chapter.number
-        else:
-            num = max((c.number for c in self._project.chapters), default=0) + 1
+        next_num = max((c.number for c in self._project.chapters), default=0) + 1
 
-        self._project.current_chapter = num - 1  # worker adds 1
+        self._project.current_chapter = next_num - 1  # worker adds 1
         self.task_requested.emit(TaskType.WRITE_CHAPTER, "")
 
     def _review_chapter(self) -> None:

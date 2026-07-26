@@ -273,6 +273,15 @@ def build_system_prompt(
     if project.synopsis:
         base += f"\n\nStory Synopsis:\n{project.synopsis}"
 
+    if project.characters:
+        chars = "\n".join(
+            f"- {c.name} ({c.role}): {c.description}" for c in project.characters
+        )
+        base += f"\n\n## Established Characters\n{chars}"
+
+    if project.outline and task != TaskType.GENERATE_OUTLINE:
+        base += f"\n\n## Outline\n{project.outline}"
+
     prompt = f"{base}\n\n{instruction}".strip()
 
     if custom_instructions and custom_instructions.strip():

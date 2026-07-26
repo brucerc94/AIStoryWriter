@@ -9,6 +9,7 @@ All heavy work runs in a background QThread so the UI stays responsive.
 
 from __future__ import annotations
 
+import json
 import logging
 import traceback
 from typing import Callable, Optional
@@ -25,6 +26,7 @@ from engine.context import (
 )
 from engine.models import (
     Chapter,
+    Character,
     ChatMessage,
     MessageRole,
     Project,
@@ -123,15 +125,9 @@ class WorkflowWorker(QObject):
             self.error_occurred.emit(f"Failed to load model: {e}")
             return False
 
-    def _effective_temperature(self, task_default: float) -> float:
-        """
-        Settings.temperature (from the Settings tab) overrides every
-        per-task default so the author has direct, explicit control.
-        Falls back to the task's own default if no settings are attached.
-        """
-        if self.settings is not None:
-            return getattr(self.settings, "temperature", task_default)
-        return task_default
+    def _task_temperature(self, task: TaskType) -> float:
+        """Per-task temperature, set from the Models tab next to that task's model."""
+        return self.project.task_temperatures.get(task)
 
     def _custom_system_instructions(self) -> str:
         """Author-provided instructions from Settings, appended to every prompt."""
@@ -139,12 +135,111 @@ class WorkflowWorker(QObject):
             return getattr(self.settings, "custom_system_prompt", "") or ""
         return ""
 
+    def _extract_and_merge_characters(self, source_text: str) -> None:
+        """
+        After the model writes a synopsis/outline/chapter, quietly ask it to
+        pull out any named characters mentioned and add genuinely new ones
+        to project.characters — otherwise characters the AI introduces only
+        ever live inside prose text and never show up in the Characters tab.
+
+        This runs silently: no chat bubble, no step_started/step_finished
+        signal. It reuses whatever model is assigned to Update Memory
+        (same "extract structured info from prose" flavor of task) so it
+        doesn't need its own model-assignment slot.
+        """
+        if not source_text or not source_text.strip():
+            return
+        if not self._load_model_for_task(TaskType.UPDATE_MEMORY):
+            logger.warning("Skipping character extraction: no model assigned for Update Memory.")
+            return
+
+        existing_names = ", ".join(c.name for c in self.project.characters) or "(none yet)"
+        prompt = (
+            "Extract every named character mentioned in the text below. "
+            "Respond with ONLY a JSON array — no markdown fences, no commentary, "
+            "nothing before or after it. If there are no named characters, "
+            "respond with exactly: []\n\n"
+            "Each array element must be an object with exactly these keys:\n"
+            '  "name": the character\'s name\n'
+            '  "role": one of "protagonist", "antagonist", "supporting", "minor"\n'
+            '  "description": one concise sentence\n\n'
+            f"Characters already tracked (skip these unless the text reveals "
+            f"something significant enough to be worth its own new entry): {existing_names}\n\n"
+            f"Text:\n{source_text[:6000]}\n\n"
+            "JSON array:"
+        )
+        messages = [
+            {
+                "role": "system",
+                "content": "You extract structured character data as strict JSON. Output JSON only.",
+            },
+            {"role": "user", "content": prompt},
+        ]
+
+        engine = get_engine()
+        try:
+            raw = engine.generate(
+                messages=messages,
+                max_tokens=800,
+                temperature=0.2,
+                stream=True,
+                stream_callback=lambda _t: None,  # silent — no chat UI noise
+                cancel_check=lambda: self._cancelled,
+            )
+        except Exception as e:
+            logger.warning(f"Character extraction failed (non-fatal): {e}")
+            return
+
+        added = self._merge_extracted_characters(raw)
+        if added:
+            logger.info(f"Auto-added {added} new character(s) from generated text.")
+
+    def _merge_extracted_characters(self, raw_json: str) -> int:
+        text = raw_json.strip()
+        # Models sometimes wrap JSON in ```json fences despite instructions
+        # not to — strip that before parsing.
+        if text.startswith("```"):
+            text = text.strip("`")
+            if text.lower().startswith("json"):
+                text = text[4:]
+            text = text.strip()
+
+        try:
+            data = json.loads(text)
+        except Exception:
+            logger.warning(
+                f"Character extraction: model didn't return valid JSON, skipping. "
+                f"Raw (truncated): {text[:200]!r}"
+            )
+            return 0
+
+        if not isinstance(data, list):
+            return 0
+
+        existing_lower = {c.name.strip().lower() for c in self.project.characters}
+        added = 0
+        for entry in data:
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name", "")).strip()
+            if not name or name.lower() in existing_lower:
+                continue
+            role = str(entry.get("role", "supporting")).strip().lower()
+            if role not in ("protagonist", "antagonist", "supporting", "minor"):
+                role = "supporting"
+            description = str(entry.get("description", "")).strip()
+            self.project.characters.append(
+                Character(name=name, role=role, description=description)
+            )
+            existing_lower.add(name.lower())
+            added += 1
+        return added
+
     def _run_inference(
         self,
         task: TaskType,
         user_message: str,
         add_to_chat: bool = True,
-        temperature: float = 0.7,
         max_tokens: int = 2048,
     ) -> str:
         """Load model, build context, run inference, optionally store in chat."""
@@ -165,10 +260,10 @@ class WorkflowWorker(QObject):
             max_context_tokens=3200,
         )
 
-        effective_temp = self._effective_temperature(temperature)
+        temperature = self._task_temperature(task)
         logger.info(
             f"[{task.value}] running inference: {len(messages)} messages, "
-            f"temperature={effective_temp}, max_tokens={max_tokens}"
+            f"temperature={temperature}, max_tokens={max_tokens}"
         )
 
         accumulated = []
@@ -182,7 +277,7 @@ class WorkflowWorker(QObject):
             result = engine.generate(
                 messages=messages,
                 max_tokens=max_tokens,
-                temperature=effective_temp,
+                temperature=temperature,
                 stream=True,
                 stream_callback=on_token,
                 cancel_check=lambda: self._cancelled,
@@ -259,6 +354,7 @@ class WorkflowWorker(QObject):
         result = self._run_inference(TaskType.WRITE_SYNOPSIS, prompt, add_to_chat=True, max_tokens=1024)
         if result:
             self.project.synopsis = result
+            self._extract_and_merge_characters(result)
             storage.save_project(self.project)
             self.step_finished.emit("Synopsis", result)
 
@@ -277,6 +373,7 @@ class WorkflowWorker(QObject):
         )
         if result:
             self.project.outline = result
+            self._extract_and_merge_characters(result)
             storage.save_project(self.project)
             self.step_finished.emit("Outline", result)
 
@@ -294,7 +391,14 @@ class WorkflowWorker(QObject):
             self.step_finished.emit("Outline Review", result)
 
     def _run_write_chapter(self) -> None:
-        chapter_num = self.project.current_chapter + 1
+        # Never trust project.current_chapter alone — if it's stale (e.g.
+        # left over from before a chapter was manually deleted, or set
+        # incorrectly by some other UI action) always continue forward
+        # from whichever chapter number is actually highest on disk.
+        highest_existing = max(
+            (c.number for c in self.project.chapters), default=0
+        )
+        chapter_num = max(self.project.current_chapter, highest_existing) + 1
         self.step_started.emit(f"Writing Chapter {chapter_num}...")
 
         # Find chapter summary from outline if available
@@ -311,7 +415,7 @@ class WorkflowWorker(QObject):
             )
 
         result = self._run_inference(
-            TaskType.WRITE_CHAPTER, prompt, add_to_chat=True, max_tokens=4000, temperature=0.8
+            TaskType.WRITE_CHAPTER, prompt, add_to_chat=True, max_tokens=4000
         )
         if result:
             # Save chapter
@@ -327,6 +431,7 @@ class WorkflowWorker(QObject):
                 )
                 self.project.chapters.append(ch)
 
+            self._extract_and_merge_characters(result)
             storage.save_project(self.project)
             self.step_finished.emit(f"Chapter {chapter_num}", result)
 
@@ -414,7 +519,7 @@ class WorkflowWorker(QObject):
             result = engine.generate(
                 messages=messages,
                 max_tokens=1024,
-                temperature=self._effective_temperature(0.3),
+                temperature=self._task_temperature(TaskType.CONVERSATION_SUMMARY),
                 stream=True,
                 stream_callback=on_token,
                 cancel_check=lambda: self._cancelled,

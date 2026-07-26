@@ -182,6 +182,47 @@ class ModelAssignment:
 
 
 @dataclass
+class TaskTemperatures:
+    """
+    Per-task generation temperature, set from the Models tab right next to
+    each task's assigned GGUF model. Different models often need very
+    different temperatures (a small fast model for summaries vs. a large
+    creative model for chapters), so this lives per-task rather than as a
+    single global value.
+    """
+    write_synopsis: float = 0.7
+    generate_outline: float = 0.7
+    review_outline: float = 0.7
+    write_chapter: float = 0.8
+    review_chapter: float = 0.7
+    update_memory: float = 0.7
+    conversation_summary: float = 0.3
+    chat: float = 0.7
+
+    def get(self, task: TaskType) -> float:
+        return getattr(self, task.value, 0.7)
+
+    def set(self, task: TaskType, temperature: float) -> None:
+        setattr(self, task.value, temperature)
+
+    def to_dict(self) -> dict:
+        return {
+            "write_synopsis": self.write_synopsis,
+            "generate_outline": self.generate_outline,
+            "review_outline": self.review_outline,
+            "write_chapter": self.write_chapter,
+            "review_chapter": self.review_chapter,
+            "update_memory": self.update_memory,
+            "conversation_summary": self.conversation_summary,
+            "chat": self.chat,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "TaskTemperatures":
+        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
+
+
+@dataclass
 class Project:
     title: str
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -194,6 +235,7 @@ class Project:
     chat_messages: list[ChatMessage] = field(default_factory=list)
     chat_summary: str = ""
     model_assignments: ModelAssignment = field(default_factory=ModelAssignment)
+    task_temperatures: TaskTemperatures = field(default_factory=TaskTemperatures)
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
     workflow_status: WorkflowStatus = WorkflowStatus.IDLE
@@ -211,6 +253,7 @@ class Project:
             "memory": self.memory,
             "chat_summary": self.chat_summary,
             "model_assignments": self.model_assignments.to_dict(),
+            "task_temperatures": self.task_temperatures.to_dict(),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "workflow_status": self.workflow_status.value,
@@ -221,6 +264,7 @@ class Project:
     @classmethod
     def from_dict(cls, d: dict) -> "Project":
         ma = ModelAssignment.from_dict(d.get("model_assignments", {}))
+        tt = TaskTemperatures.from_dict(d.get("task_temperatures", {}))
         return cls(
             id=d.get("id", str(uuid.uuid4())),
             title=d["title"],
@@ -230,6 +274,7 @@ class Project:
             memory=d.get("memory", ""),
             chat_summary=d.get("chat_summary", ""),
             model_assignments=ma,
+            task_temperatures=tt,
             created_at=d.get("created_at", datetime.now().isoformat()),
             updated_at=d.get("updated_at", datetime.now().isoformat()),
             workflow_status=WorkflowStatus(d.get("workflow_status", "idle")),
