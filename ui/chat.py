@@ -7,6 +7,7 @@ Supports streaming token output, message bubbles, summarized message indicators.
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -46,6 +47,8 @@ from ui.styles import (
     FONT_SANS,
     FONT_SERIF,
 )
+
+logger = logging.getLogger("ui.chat")
 
 
 class AutoResizeTextEdit(QTextEdit):
@@ -286,10 +289,27 @@ class ChatMessagesArea(QWidget):
     def finalize_streaming(self) -> Optional[str]:
         """Remove streaming bubble, return accumulated text."""
         if self._streaming_bubble:
-            text = self._streaming_bubble.get_text()
-            self._streaming_bubble.setParent(None)
-            self._streaming_bubble.deleteLater()
+            bubble = self._streaming_bubble
             self._streaming_bubble = None
+            try:
+                text = bubble.get_text()
+            except RuntimeError:
+                # The underlying Qt/C++ object was already destroyed — e.g.
+                # a project reload rebuilt the message list out from under
+                # an in-flight generation. Nothing to recover here, but we
+                # must NOT let this exception escape: callers rely on this
+                # method completing so they can still emit project_updated
+                # and refresh the rest of the UI.
+                logger.warning(
+                    "finalize_streaming: bubble was already destroyed "
+                    "(likely a project reload happened mid-generation)."
+                )
+                return None
+            try:
+                bubble.setParent(None)
+                bubble.deleteLater()
+            except RuntimeError:
+                pass
             return text
         return None
 
@@ -422,8 +442,31 @@ class ChatPanel(QWidget):
 
     def load_project(self, project: Project) -> None:
         self._project = project
+        if self._thread and self._thread.isRunning():
+            # A task is actively streaming into a live bubble right now.
+            # Rebuilding the message list here would delete that bubble
+            # out from under the running WorkflowThread and crash when it
+            # tries to finalize — e.g. from clicking the same project
+            # again in the sidebar mid-generation. Just update which
+            # project we're pointed at; _on_step_finished() will refresh
+            # the message list safely once the task actually completes.
+            logger.info("load_project: task in progress, deferring message list refresh.")
+            return
         self.messages_widget.load_messages(project.chat_messages)
         QTimer.singleShot(100, self._scroll_to_bottom)
+
+    def sync_project_reference(self, project: Project) -> None:
+        """
+        Swap which Project object we point to, without touching the message
+        UI at all. Used right after a task finishes to pick up the freshly
+        reloaded-from-disk object that Story/Models panels now use — so a
+        later task_requested (e.g. "review chapter 2") builds its
+        WorkflowThread from the same object those panels just mutated,
+        instead of a stale copy that never saw the change. Safe to call
+        even while a thread is technically still winding down, since it
+        never rebuilds any widgets.
+        """
+        self._project = project
 
     def _scroll_to_bottom(self) -> None:
         sb = self.scroll_area.verticalScrollBar()

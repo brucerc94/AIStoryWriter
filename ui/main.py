@@ -206,6 +206,14 @@ class MainWindow(QMainWindow):
         self._current_project = refreshed
         self.story_panel.refresh_after_task(refreshed)
         self.models_panel.load_project(refreshed)
+        # Keep ChatPanel's project object in sync with everyone else's.
+        # Without this, StoryPanel/ModelsPanel end up mutating a *different*
+        # in-memory Project object (this freshly reloaded one) than the one
+        # ChatPanel actually hands to WorkflowThread — so things like
+        # "which chapter number to target" set from the Chapters tab would
+        # silently have no effect on the next task, since the thread reads
+        # them off ChatPanel's stale copy instead.
+        self.chat_panel.sync_project_reference(refreshed)
         self.projects_panel.refresh()
 
     def _run_task(self, task: TaskType, extra_input: str) -> None:

@@ -142,10 +142,10 @@ class WorkflowWorker(QObject):
         to project.characters — otherwise characters the AI introduces only
         ever live inside prose text and never show up in the Characters tab.
 
-        This runs silently: no chat bubble, no step_started/step_finished
-        signal. It reuses whatever model is assigned to Update Memory
-        (same "extract structured info from prose" flavor of task) so it
-        doesn't need its own model-assignment slot.
+        No chat bubble for this (keeps the chat transcript clean), but it
+        does emit step_started so the status bar shows *something* is still
+        happening — otherwise the UI looks finished-but-frozen for however
+        long this extra inference call takes.
         """
         if not source_text or not source_text.strip():
             return
@@ -153,6 +153,7 @@ class WorkflowWorker(QObject):
             logger.warning("Skipping character extraction: no model assigned for Update Memory.")
             return
 
+        self.step_started.emit("Checking for new characters to track...")
         existing_names = ", ".join(c.name for c in self.project.characters) or "(none yet)"
         prompt = (
             "Extract every named character mentioned in the text below. "
@@ -243,7 +244,7 @@ class WorkflowWorker(QObject):
         and append them — mirroring how Story Memory already accumulates,
         rather than trying to structurally dedupe free-form world text.
 
-        Silent: no chat bubble, no step_started/step_finished signal.
+        No chat bubble, but does emit step_started for status-bar feedback.
         """
         if not source_text or not source_text.strip():
             return
@@ -251,6 +252,7 @@ class WorkflowWorker(QObject):
             logger.warning("Skipping world-info extraction: no model assigned for Update Memory.")
             return
 
+        self.step_started.emit("Checking for new world details...")
         existing_world = self.project.world.strip() or "(nothing recorded yet)"
         prompt = (
             "Below are the story's existing world-building notes, followed by "
