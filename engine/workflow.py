@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import traceback
+import unicodedata
 from typing import Callable, Optional
 
 from PySide6.QtCore import QObject, QThread, Signal
@@ -135,6 +137,12 @@ class WorkflowWorker(QObject):
             return getattr(self.settings, "custom_system_prompt", "") or ""
         return ""
 
+    def _response_language(self) -> str:
+        """Language to write responses in, from Settings."""
+        if self.settings is not None:
+            return getattr(self.settings, "response_language", "") or ""
+        return ""
+
     def _extract_and_merge_characters(self, source_text: str) -> None:
         """
         After the model writes a synopsis/outline/chapter, quietly ask it to
@@ -155,15 +163,22 @@ class WorkflowWorker(QObject):
 
         self.step_started.emit("Checking for new characters to track...")
         existing_names = ", ".join(c.name for c in self.project.characters) or "(none yet)"
+        language = self._response_language()
+        language_note = (
+            f' The "description" value should be written in {language}.'
+            if language else ""
+        )
         prompt = (
             "Extract every named character mentioned in the text below. "
             "Respond with ONLY a JSON array — no markdown fences, no commentary, "
             "nothing before or after it. If there are no named characters, "
             "respond with exactly: []\n\n"
-            "Each array element must be an object with exactly these keys:\n"
+            "Each array element must be an object with exactly these keys "
+            "(keep these key names and the role value in English — only the "
+            f"description text should be translated):\n"
             '  "name": the character\'s name\n'
             '  "role": one of "protagonist", "antagonist", "supporting", "minor"\n'
-            '  "description": one concise sentence\n\n'
+            f'  "description": one concise sentence.{language_note}\n\n'
             f"Characters already tracked (skip these unless the text reveals "
             f"something significant enough to be worth its own new entry): {existing_names}\n\n"
             f"Text:\n{source_text[:6000]}\n\n"
@@ -254,14 +269,16 @@ class WorkflowWorker(QObject):
 
         self.step_started.emit("Checking for new world details...")
         existing_world = self.project.world.strip() or "(nothing recorded yet)"
+        language = self._response_language()
+        language_note = f" Write it in {language}." if language else ""
         prompt = (
             "Below are the story's existing world-building notes, followed by "
             "newly written story text. Extract ONLY genuinely NEW world-building "
             "details from the new text — locations, rules/systems, history, "
             "culture, technology — that are NOT already covered in the existing "
             "notes. Do not repeat anything already listed. Format as a short "
-            "Markdown bullet list. If there is nothing new, respond with "
-            "exactly: NO_NEW_WORLD_DETAILS\n\n"
+            f"Markdown bullet list.{language_note} If there is nothing new, "
+            "respond with exactly: NO_NEW_WORLD_DETAILS\n\n"
             f"## Existing World Notes\n{existing_world}\n\n"
             f"## New Text\n{source_text[:6000]}\n\n"
             "New details (bullet list, or NO_NEW_WORLD_DETAILS):"
@@ -312,7 +329,10 @@ class WorkflowWorker(QObject):
             return ""
 
         system_prompt = build_system_prompt(
-            self.project, task, custom_instructions=self._custom_system_instructions()
+            self.project,
+            task,
+            custom_instructions=self._custom_system_instructions(),
+            language=self._response_language(),
         )
         messages = build_context_for_model(
             self.project,
@@ -401,8 +421,116 @@ class WorkflowWorker(QObject):
     # Task implementations
     # ──────────────────────────────────────────────
 
+    def _detect_chapter_continuation_request(self, message: str) -> Optional[int]:
+        """
+        Heuristic: does this chat message look like "continue chapter 3" /
+        "sigue con el capítulo 3" / "sigue escribiendo" / "continúa la
+        historia"? Returns the target chapter number if so, else None.
+
+        This lets chapters keep growing through ordinary conversation
+        instead of being capped at whatever a single Write Chapter call
+        produces — "continue" in chat actually appends to the chapter's
+        saved content rather than just being a normal chat reply about it.
+        """
+        if not self.project.chapters:
+            return None
+
+        lower = message.lower()
+        # Strip accents so "continúa"/"continua", "está"/"esta", etc. all
+        # match the same plain-ASCII verb stems below.
+        normalized = (
+            unicodedata.normalize("NFKD", lower)
+            .encode("ascii", "ignore")
+            .decode("ascii")
+        )
+        continuation_verbs = (
+            "continu", "sigue", "sigamos", "sigas", "segui",
+            "keep writing", "keep going", "escribe mas", "escribi mas",
+        )
+        if not any(v in normalized for v in continuation_verbs):
+            return None
+
+        # Explicit chapter number mentioned?
+        m = re.search(r"(?:cap[ií]tulo|chapter)\s*(\d+)", lower)
+        if m:
+            num = int(m.group(1))
+            if any(c.number == num for c in self.project.chapters):
+                return num
+            return None  # they named a chapter that doesn't exist — don't guess
+
+        # No explicit number — only treat this as "continue the chapter" if
+        # it clearly seems to be about the story (mentions capítulo/chapter/
+        # historia/story) or is a short, plainly imperative message like
+        # just "continúa" / "sigue" on its own.
+        mentions_story = any(
+            w in normalized for w in ("cap", "chapter", "historia", "story", "escena", "scene")
+        )
+        if mentions_story or len(message.strip()) <= 40:
+            return max(c.number for c in self.project.chapters)
+
+        return None
+
+    def _run_chat_continue_chapter(self, chapter_num: int) -> None:
+        chapter = next((c for c in self.project.chapters if c.number == chapter_num), None)
+        if not chapter:
+            # Shouldn't happen (detection already checked), but fall back
+            # to a normal chat reply rather than doing nothing.
+            result = self._run_inference(TaskType.CHAT, self.extra_input, add_to_chat=True)
+            if result:
+                self._maybe_summarize()
+                storage.save_project(self.project)
+                self.step_finished.emit("Chat", result)
+            return
+
+        self.step_started.emit(f"Continuing Chapter {chapter_num}...")
+
+        tail = chapter.content[-800:].strip() if chapter.content else ""
+        model_prompt = (
+            f"Continue writing Chapter {chapter_num}: '{chapter.title}' of "
+            f"'{self.project.title}'. Continue seamlessly from exactly where "
+            "it left off — do not repeat or re-summarize what's already "
+            "written, and do not restart the scene."
+        )
+        if tail:
+            model_prompt += f"\n\nThe chapter currently ends with:\n...{tail}"
+        if self.extra_input.strip():
+            model_prompt += f"\n\nAuthor's note for this continuation: {self.extra_input.strip()}"
+
+        # add_to_chat=False on purpose: the chat transcript should show what
+        # the author actually typed (e.g. "sigue con el capítulo 3"), not
+        # the long constructed prompt we're actually sending the model.
+        result = self._run_inference(
+            TaskType.WRITE_CHAPTER, model_prompt, add_to_chat=False, max_tokens=4000
+        )
+        if result:
+            sep = "\n\n" if chapter.content.strip() else ""
+            chapter.content = (chapter.content.rstrip() + sep + result).strip()
+            chapter.reviewed = False  # it grew — worth another look before moving on
+
+            user_msg = ChatMessage(role=MessageRole.USER, content=self.extra_input)
+            assistant_msg = ChatMessage(
+                role=MessageRole.ASSISTANT,
+                content=(
+                    f"*(Continued Chapter {chapter_num} — {len(result)} "
+                    f"characters added to it.)*\n\n{result}"
+                ),
+            )
+            self.project.chat_messages.append(user_msg)
+            self.project.chat_messages.append(assistant_msg)
+
+            self._extract_and_merge_characters(result)
+            self._extract_and_merge_world_info(result)
+            storage.save_project(self.project)
+            self.step_finished.emit(f"Continued Chapter {chapter_num}", result)
+
     def _run_chat(self) -> None:
         self.step_started.emit("Generating response...")
+
+        target_chapter_num = self._detect_chapter_continuation_request(self.extra_input)
+        if target_chapter_num is not None:
+            self._run_chat_continue_chapter(target_chapter_num)
+            return
+
         result = self._run_inference(TaskType.CHAT, self.extra_input, add_to_chat=True)
         if result:
             self._maybe_summarize()
@@ -481,6 +609,33 @@ class WorkflowWorker(QObject):
             storage.save_project(self.project)
             self.step_finished.emit("World & Setting", result)
 
+    def _extract_chapter_outline_section(self, chapter_number: int) -> str:
+        """
+        Pull out just THIS chapter's entry from the full outline (expects
+        "## Chapter N: Title" headings, which is exactly the format
+        GENERATE_OUTLINE's instructions ask the model to produce).
+        Returns "" if no matching heading is found.
+        """
+        outline = self.project.outline
+        if not outline:
+            return ""
+        lines = outline.split("\n")
+        target = f"## Chapter {chapter_number}"
+        next_marker = f"## Chapter {chapter_number + 1}"
+        capture = False
+        result = []
+        for line in lines:
+            if target in line and (
+                len(line) == len(target)
+                or not line[len(target):len(target) + 1].isdigit()
+            ):
+                capture = True
+            elif next_marker in line and capture:
+                break
+            if capture:
+                result.append(line)
+        return "\n".join(result).strip()
+
     def _run_write_chapter(self) -> None:
         # Never trust project.current_chapter alone — if it's stale (e.g.
         # left over from before a chapter was manually deleted, or set
@@ -492,18 +647,41 @@ class WorkflowWorker(QObject):
         chapter_num = max(self.project.current_chapter, highest_existing) + 1
         self.step_started.emit(f"Writing Chapter {chapter_num}...")
 
-        # Find chapter summary from outline if available
-        chapter_context = ""
+        prompt_parts = [f"Write Chapter {chapter_num} of '{self.project.title}'."]
+
         if self.project.outline:
-            chapter_context = f"\nOutline:\n{self.project.outline}"
+            specific = self._extract_chapter_outline_section(chapter_num)
+            if specific:
+                prompt_parts.append(
+                    "This chapter's planned outline entry — follow this "
+                    f"specifically, don't just restate the general premise:\n{specific}"
+                )
+            else:
+                # Couldn't find a "## Chapter N" heading for this number
+                # (outline format may differ) — fall back to the full
+                # outline so the model has SOME guidance rather than none.
+                prompt_parts.append(
+                    f"Full outline (no specific Chapter {chapter_num} heading "
+                    f"found in it — use it to judge what should happen next):"
+                    f"\n{self.project.outline}"
+                )
+
+        if chapter_num > 1:
+            prev = next(
+                (c for c in self.project.chapters if c.number == chapter_num - 1), None
+            )
+            if prev and prev.content:
+                tail = prev.content[-800:].strip()
+                prompt_parts.append(
+                    f"End of the previous chapter — continue seamlessly from "
+                    f"here, don't repeat it or re-summarize what already "
+                    f"happened:\n...{tail}"
+                )
 
         if self.extra_input:
             prompt = self.extra_input
         else:
-            prompt = (
-                f"Write Chapter {chapter_num} of '{self.project.title}'."
-                f"{chapter_context}"
-            )
+            prompt = "\n\n".join(prompt_parts)
 
         result = self._run_inference(
             TaskType.WRITE_CHAPTER, prompt, add_to_chat=True, max_tokens=4000
@@ -630,6 +808,9 @@ class WorkflowWorker(QObject):
             return
 
         system = "You are a helpful assistant that summarizes conversations."
+        language = self._response_language()
+        if language:
+            system += f" Write the summary in {language}."
         custom_instructions = self._custom_system_instructions()
         if custom_instructions:
             system += f"\n\n## Additional Author Instructions\n{custom_instructions}"

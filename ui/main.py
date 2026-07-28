@@ -17,9 +17,14 @@ from typing import Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenu,
+    QMessageBox,
+    QPushButton,
     QSplitter,
     QStatusBar,
     QVBoxLayout,
@@ -27,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from engine import storage
+from engine import export as book_export
 from engine.models import AppSettings, Project, TaskType
 from ui.chat import ChatPanel
 from ui.projects import ProjectsPanel
@@ -100,14 +106,29 @@ class MainWindow(QMainWindow):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)
 
-        self.project_title_bar = QLabel("")
-        self.project_title_bar.setFixedHeight(40)
-        self.project_title_bar.setStyleSheet(
-            f"background: {COLOR_SURFACE}; color: {COLOR_TEXT_DIM}; "
-            f"font-size: 14px; font-weight: 600; padding: 0 16px; "
-            f"border-bottom: 1px solid {COLOR_BORDER};"
+        title_bar = QFrame()
+        title_bar.setFixedHeight(40)
+        title_bar.setStyleSheet(
+            f"background: {COLOR_SURFACE}; border-bottom: 1px solid {COLOR_BORDER};"
         )
-        right_layout.addWidget(self.project_title_bar)
+        title_bar_layout = QHBoxLayout(title_bar)
+        title_bar_layout.setContentsMargins(16, 0, 12, 0)
+
+        self.project_title_bar = QLabel("")
+        self.project_title_bar.setStyleSheet(
+            f"color: {COLOR_TEXT_DIM}; font-size: 14px; font-weight: 600; "
+            "background: transparent;"
+        )
+        title_bar_layout.addWidget(self.project_title_bar)
+        title_bar_layout.addStretch()
+
+        self.export_btn = QPushButton("⇩ Export Book")
+        self.export_btn.setObjectName("subtle")
+        self.export_btn.setToolTip("Export the whole novel (synopsis + all chapters) to Word or PDF.")
+        self.export_btn.clicked.connect(self._show_export_menu)
+        title_bar_layout.addWidget(self.export_btn)
+
+        right_layout.addWidget(title_bar)
 
         self.tabs = SizeAdjustingTabWidget()
         self.tabs.setDocumentMode(True)
@@ -222,6 +243,65 @@ class MainWindow(QMainWindow):
         logger.info(f"Task requested: {task.value} (project='{self._current_project.title}')")
         self.tabs.setCurrentWidget(self.chat_panel)
         self.chat_panel.run_task(task, extra_input)
+
+    # ──────────────────────────────────────────────
+    # Export
+    # ──────────────────────────────────────────────
+
+    def _show_export_menu(self) -> None:
+        if not self._current_project:
+            self.status.showMessage("Open a project first.", 3000)
+            return
+
+        menu = QMenu(self)
+        docx_action = menu.addAction("Export as Word (.docx)…")
+        pdf_action = menu.addAction("Export as PDF (.pdf)…")
+        chosen = menu.exec(self.export_btn.mapToGlobal(self.export_btn.rect().bottomLeft()))
+
+        if chosen == docx_action:
+            self._export_book("docx")
+        elif chosen == pdf_action:
+            self._export_book("pdf")
+
+    def _export_book(self, fmt: str) -> None:
+        project = self._current_project
+        if not project:
+            return
+
+        safe_title = "".join(
+            c for c in project.title if c.isalnum() or c in (" ", "-", "_")
+        ).strip() or "novel"
+
+        if fmt == "docx":
+            filter_str = "Word Document (*.docx)"
+            default_name = f"{safe_title}.docx"
+        else:
+            filter_str = "PDF Document (*.pdf)"
+            default_name = f"{safe_title}.pdf"
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Book", default_name, filter_str
+        )
+        if not path:
+            return
+
+        try:
+            if fmt == "docx":
+                book_export.export_to_docx(project, path)
+            else:
+                book_export.export_to_pdf(project, path)
+        except RuntimeError as e:
+            logger.error(f"Export failed: {e}")
+            QMessageBox.warning(self, "Export Failed", str(e))
+            return
+        except Exception as e:
+            logger.error(f"Export failed: {e}")
+            QMessageBox.critical(self, "Export Failed", f"Could not export the book:\n{e}")
+            return
+
+        logger.info(f"Exported '{project.title}' to {path}")
+        self.status.showMessage(f"Exported to {path}", 5000)
+        QMessageBox.information(self, "Export Complete", f"Saved to:\n{path}")
 
     # ──────────────────────────────────────────────
     # Settings

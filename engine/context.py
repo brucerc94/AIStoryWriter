@@ -196,7 +196,10 @@ def build_summarization_prompt(messages_to_summarize: list[ChatMessage]) -> str:
 
 
 def build_system_prompt(
-    project: Project, task: TaskType, custom_instructions: str = ""
+    project: Project,
+    task: TaskType,
+    custom_instructions: str = "",
+    language: str = "",
 ) -> str:
     """
     Return an appropriate system prompt for the given task.
@@ -205,12 +208,25 @@ def build_system_prompt(
     appended at the very end, after the task-specific instructions, so it
     always has the final word — useful for persistent style/content rules
     that should apply no matter which task is running.
+
+    language: if set, an explicit instruction to respond in that language
+    is placed right up front. Every built-in instruction here is written
+    in English, which otherwise biases local models toward answering in
+    English even when the story/characters/everything else is in another
+    language — an explicit instruction is the reliable fix, not hoping a
+    translated scaffold alone will carry the model's output language.
     """
     base = (
         f"You are an AI assistant helping to write a novel titled '{project.title}'. "
         "You are deeply familiar with the story world, characters, and plot. "
         "You respond only in the context of this story."
     )
+
+    if language and language.strip():
+        base += (
+            f" IMPORTANT: Always write your response in {language.strip()}, "
+            "regardless of the language these instructions are written in."
+        )
 
     task_instructions = {
         TaskType.CHAT: (

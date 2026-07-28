@@ -239,6 +239,18 @@ class AppSettingsWidget(QWidget):
         # give real control. Only the custom system prompt (which makes
         # sense as one shared value across every task) stays here.
 
+        # Response language — every built-in instruction/prompt in this app
+        # is written in English, which otherwise biases local models toward
+        # answering in English regardless of what language your story is in.
+        self.language_input = QLineEdit()
+        self.language_input.setPlaceholderText("e.g. Español, English, Français…")
+        self.language_input.setToolTip(
+            "The model is told explicitly to respond in this language, "
+            "since the app's own built-in instructions are all in English. "
+            "Leave blank to not add this instruction."
+        )
+        gen_form.addRow("Response Language", self.language_input)
+
         # Custom system prompt — appended to every auto-generated prompt
         self.system_prompt_input = QPlainTextEdit()
         self.system_prompt_input.setPlaceholderText(
@@ -266,6 +278,7 @@ class AppSettingsWidget(QWidget):
         self.gpu_spin.setValue(settings.default_gpu_layers)
         self.threads_spin.setValue(settings.default_threads)
         self.autosave_check.setChecked(settings.auto_save)
+        self.language_input.setText(settings.response_language)
         self.system_prompt_input.setPlainText(settings.custom_system_prompt)
 
     def _browse_models_dir(self) -> None:
@@ -281,6 +294,7 @@ class AppSettingsWidget(QWidget):
         self._settings.default_gpu_layers = self.gpu_spin.value()
         self._settings.default_threads = self.threads_spin.value()
         self._settings.auto_save = self.autosave_check.isChecked()
+        self._settings.response_language = self.language_input.text().strip()
         self._settings.custom_system_prompt = self.system_prompt_input.toPlainText().strip()
         storage.save_settings(self._settings)
         self.settings_changed.emit(self._settings)

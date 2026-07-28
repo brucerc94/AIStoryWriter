@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from engine import storage
 from engine.models import ChatMessage, MessageRole, Project, TaskType
 from engine.workflow import WorkflowThread
 from ui.styles import (
@@ -349,6 +351,34 @@ class ChatPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        # Header toolbar
+        header = QFrame()
+        header.setFixedHeight(40)
+        header.setStyleSheet(
+            f"background: {COLOR_SURFACE}; border-bottom: 1px solid {COLOR_BORDER};"
+        )
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(14, 0, 10, 0)
+
+        header_lbl = QLabel("Chat")
+        header_lbl.setStyleSheet(
+            f"color: {COLOR_TEXT_DIM}; font-size: 12px; font-weight: 600; "
+            "text-transform: uppercase; letter-spacing: 0.05em; background: transparent;"
+        )
+        header_layout.addWidget(header_lbl)
+        header_layout.addStretch()
+
+        self.clear_chat_btn = QPushButton("🗑 Clear Chat")
+        self.clear_chat_btn.setObjectName("subtle")
+        self.clear_chat_btn.setToolTip(
+            "Clears the conversation history only. Synopsis, outline, "
+            "chapters, world notes, and story memory are untouched."
+        )
+        self.clear_chat_btn.clicked.connect(self._clear_chat)
+        header_layout.addWidget(self.clear_chat_btn)
+
+        layout.addWidget(header)
+
         # Status bar for model loading / task info
         self.status_bar = QLabel("")
         self.status_bar.setFixedHeight(28)
@@ -573,6 +603,41 @@ class ChatPanel(QWidget):
             self.stop_btn.setEnabled(False)
             self.stop_btn.setText("Stopping…")
             self._show_status("Stopping — finishing the current token…")
+
+    def _clear_chat(self) -> None:
+        """
+        Clears the conversation history only. Synopsis, outline, chapters,
+        world notes, and story memory all live on the Project separately
+        and are completely untouched — this only resets project.chat_messages
+        and the rolling conversation summary, so you can start a fresh
+        conversation without losing any of the actual story.
+        """
+        if not self._project:
+            return
+        if self._thread and self._thread.isRunning():
+            QMessageBox.information(
+                self, "Busy", "Wait for the current task to finish before clearing the chat."
+            )
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Clear Chat",
+            "Clear the conversation history?\n\n"
+            "This only resets the chat — your synopsis, outline, chapters, "
+            "world notes, and story memory are kept exactly as they are.\n\n"
+            "This cannot be undone.",
+            QMessageBox.Yes | QMessageBox.Cancel,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        self._project.chat_messages = []
+        self._project.chat_summary = ""
+        storage.save_project(self._project)
+
+        self.messages_widget.load_messages(self._project.chat_messages)
+        self.project_updated.emit()
 
     def _set_busy(self, busy: bool) -> None:
         self.send_btn.setVisible(not busy)

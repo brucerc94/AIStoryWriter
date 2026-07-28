@@ -313,6 +313,10 @@ class AppSettings:
     # writing, review, memory updates, summarization). 0.0 = deterministic,
     # 2.0 = max randomness.
     temperature: float = 0.7
+    # Language the model should respond in, regardless of what language the
+    # (English) built-in instructions are written in. Empty = no explicit
+    # instruction (model picks based on context, usually English).
+    response_language: str = "Español"
 
     def to_dict(self) -> dict:
         return {
@@ -325,6 +329,7 @@ class AppSettings:
             "auto_save": self.auto_save,
             "custom_system_prompt": self.custom_system_prompt,
             "temperature": self.temperature,
+            "response_language": self.response_language,
         }
 
     @classmethod
