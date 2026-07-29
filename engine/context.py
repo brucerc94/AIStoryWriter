@@ -143,6 +143,56 @@ def build_context_for_model(
     return messages
 
 
+def estimate_context_usage(
+    project: Project,
+    user_message: str,
+    system_prompt: str,
+    max_context_tokens: int = 3200,
+) -> dict:
+    """
+    Estimate how much of the context window will be consumed before generation.
+
+    The numbers are approximate, but they are good enough for console logging
+    and for spotting when a prompt is getting too close to the model limit.
+    """
+    system_parts = [system_prompt.strip()]
+
+    if project.memory.strip():
+        system_parts.append("\n\n## Story Memory\n" + project.memory.strip())
+
+    if project.chat_summary.strip():
+        system_parts.append(
+            "\n\n## Conversation Summary (older messages)\n" + project.chat_summary.strip()
+        )
+
+    system_content = "\n".join(system_parts)
+
+    eligible = [
+        m for m in project.chat_messages
+        if m.role in (MessageRole.USER, MessageRole.ASSISTANT)
+        and not m.summarized
+    ]
+    window = eligible[-project.recent_message_window:]
+    recent_msgs = [{"role": m.role.value, "content": m.content} for m in window]
+
+    system_tokens = _estimate_tokens(system_content)
+    user_tokens = _estimate_tokens(user_message)
+    history_tokens = _messages_token_count(recent_msgs)
+    reply_headroom = 512
+    estimated_total = system_tokens + user_tokens + history_tokens + reply_headroom
+
+    return {
+        "system_tokens": system_tokens,
+        "user_tokens": user_tokens,
+        "history_tokens": history_tokens,
+        "reply_headroom": reply_headroom,
+        "estimated_total": estimated_total,
+        "estimated_remaining": max(0, max_context_tokens - estimated_total),
+        "max_context_tokens": max_context_tokens,
+        "recent_messages": len(recent_msgs),
+    }
+
+
 def should_summarize(project: Project, threshold: int = 30) -> bool:
     """
     Returns True when there are enough old unsummarized messages

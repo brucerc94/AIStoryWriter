@@ -22,6 +22,7 @@ from engine.chat import get_engine
 from engine.context import (
     build_context_for_model,
     build_system_prompt,
+    estimate_context_usage,
     build_summarization_prompt,
     mark_old_messages_summarized,
     should_summarize,
@@ -340,12 +341,34 @@ class WorkflowWorker(QObject):
             system_prompt,
             max_context_tokens=3200,
         )
+        context_stats = estimate_context_usage(
+            self.project,
+            user_message,
+            system_prompt,
+            max_context_tokens=3200,
+        )
 
         temperature = self._task_temperature(task)
         logger.info(
             f"[{task.value}] running inference: {len(messages)} messages, "
             f"temperature={temperature}, max_tokens={max_tokens}"
         )
+        logger.info(
+            f"[{task.value}] context budget: "
+            f"{context_stats['estimated_total']}/{context_stats['max_context_tokens']} tokens "
+            f"(remaining≈{context_stats['estimated_remaining']}, "
+            f"system={context_stats['system_tokens']}, "
+            f"history={context_stats['history_tokens']}, "
+            f"user={context_stats['user_tokens']}, "
+            f"reply_headroom={context_stats['reply_headroom']}, "
+            f"recent_messages={context_stats['recent_messages']})"
+        )
+        if context_stats["estimated_remaining"] < max_tokens:
+            logger.warning(
+                f"[{task.value}] requested max_tokens={max_tokens} but only "
+                f"≈{context_stats['estimated_remaining']} tokens remain in context. "
+                "The response may be cut short."
+            )
 
         accumulated = []
 
