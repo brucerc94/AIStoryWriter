@@ -40,6 +40,9 @@ from engine import storage
 
 logger = logging.getLogger("workflow")
 
+MAX_CONTINUATIONS = 3
+MAX_COMPLETION_EVAL_RETRIES = 2
+
 
 class WorkflowWorker(QObject):
     """Runs inside a QThread. Emits signals back to the UI."""
@@ -682,6 +685,82 @@ class WorkflowWorker(QObject):
                 result.append(line)
         return "\n".join(result).strip()
 
+    def _build_chapter_evaluation_prompt(
+        self,
+        chapter_num: int,
+        chapter_text: str,
+        chapter_goal: str,
+    ) -> str:
+        outline_context = self._extract_chapter_outline_section(chapter_num)
+        parts = [
+            f"Decide whether Chapter {chapter_num} is complete.",
+            "Use the synopsis, outline, story memory, characters, and the chapter's narrative goal.",
+            "Respond with exactly one token: true or false.",
+            "No punctuation. No quotes. No markdown. No JSON. No explanation. No extra text.",
+            "true means the chapter is complete and should stop.",
+            "false means the chapter is not complete and must continue.",
+            "",
+            f"Chapter Goal:\n{chapter_goal.strip() or '(none)'}",
+        ]
+        if outline_context:
+            parts.append(f"Outline Context:\n{outline_context}")
+        parts.append(f"Chapter Draft:\n{chapter_text}")
+        return "\n\n".join(parts).strip()
+
+    def _build_chapter_continuation_prompt(
+        self,
+        chapter_num: int,
+        chapter_text: str,
+        chapter_goal: str,
+    ) -> str:
+        tail = chapter_text[-1200:].strip()
+        parts = [
+            f"Continue exactly Chapter {chapter_num}.",
+            "Do not repeat text.",
+            "Continue from the last sentence or scene naturally.",
+            "Write only the missing material.",
+            "",
+            f"Chapter Goal:\n{chapter_goal.strip() or '(none)'}",
+            "",
+            f"Chapter so far ends with:\n...{tail}",
+        ]
+        return "\n\n".join(parts).strip()
+
+    def _parse_completion_evaluation(self, text: str) -> dict:
+        normalized = text.strip().lower()
+        if normalized == "true":
+            return {"valid": True, "completed": True}
+        if normalized == "false":
+            return {"valid": True, "completed": False}
+        return {"valid": False, "completed": False}
+
+    def _evaluate_chapter_completion(
+        self,
+        chapter_num: int,
+        chapter_text: str,
+        chapter_goal: str,
+    ) -> dict:
+        prompt = self._build_chapter_evaluation_prompt(chapter_num, chapter_text, chapter_goal)
+        for attempt in range(1, MAX_COMPLETION_EVAL_RETRIES + 1):
+            evaluation = self._run_inference(
+                TaskType.REVIEW_CHAPTER,
+                prompt,
+                add_to_chat=False,
+                max_tokens=8,
+            )
+            parsed = self._parse_completion_evaluation(evaluation)
+            if parsed["valid"]:
+                logger.info(
+                    f"[write_chapter] evaluation: {evaluation.strip().lower()}"
+                )
+                return parsed
+            logger.warning(
+                f"[write_chapter] invalid completion evaluation output on attempt {attempt}: "
+                f"{evaluation.strip()!r}"
+            )
+        logger.warning("[write_chapter] completion evaluator failed; defaulting to false.")
+        return {"valid": False, "completed": False}
+
     def _run_write_chapter(self) -> None:
         # Never trust project.current_chapter alone — if it's stale (e.g.
         # left over from before a chapter was manually deleted, or set
@@ -729,27 +808,77 @@ class WorkflowWorker(QObject):
         else:
             prompt = "\n\n".join(prompt_parts)
 
-        result = self._run_inference(
-            TaskType.WRITE_CHAPTER, prompt, add_to_chat=True, max_tokens=4000
-        )
-        if result:
-            # Save chapter
+        chapter_goal = self._extract_chapter_outline_section(chapter_num) or prompt
+        chapter_text = ""
+        generation_pass = 0
+        evaluation = {"completed": True, "confidence": 100, "reason": "", "next": ""}
+
+        while generation_pass < MAX_CONTINUATIONS:
+            generation_pass += 1
+            if generation_pass == 1:
+                self.step_started.emit(f"Generation pass {generation_pass}...")
+                logger.info(f"[write_chapter] Generation pass {generation_pass}...")
+                generated = self._run_inference(
+                    TaskType.WRITE_CHAPTER, prompt, add_to_chat=True, max_tokens=4000
+                )
+            else:
+                self.step_started.emit(f"Generating continuation (pass {generation_pass})...")
+                logger.info(f"[write_chapter] Generating continuation (pass {generation_pass})...")
+                continuation_prompt = self._build_chapter_continuation_prompt(
+                    chapter_num,
+                    chapter_text,
+                    chapter_goal,
+                )
+                generated = self._run_inference(
+                    TaskType.WRITE_CHAPTER, continuation_prompt, add_to_chat=True, max_tokens=4000
+                )
+
+            if not generated:
+                logger.warning(f"[write_chapter] generation pass {generation_pass} returned empty text.")
+                break
+
+            chapter_text = (chapter_text.rstrip() + "\n\n" + generated.strip()).strip() if chapter_text else generated.strip()
+
+            evaluation = self._evaluate_chapter_completion(
+                chapter_num,
+                chapter_text,
+                chapter_goal,
+            )
+
+            if evaluation["completed"]:
+                logger.info(
+                    f"[write_chapter] Chapter completed after {generation_pass} generation pass(es)."
+                )
+                break
+
+            if generation_pass >= MAX_CONTINUATIONS:
+                logger.warning(
+                    f"[write_chapter] Reached MAX_CONTINUATIONS={MAX_CONTINUATIONS}. "
+                    "Saving chapter as-is."
+                )
+                break
+
+            logger.info(
+                "[write_chapter] Chapter not complete yet. Generating continuation..."
+            )
+
+        if chapter_text:
             existing = next((c for c in self.project.chapters if c.number == chapter_num), None)
             if existing:
-                existing.content = result
+                existing.content = chapter_text
                 existing.reviewed = False
             else:
                 ch = Chapter(
                     number=chapter_num,
                     title=f"Chapter {chapter_num}",
-                    content=result,
+                    content=chapter_text,
                 )
                 self.project.chapters.append(ch)
 
-            self._extract_and_merge_characters(result)
-            self._extract_and_merge_world_info(result)
+            self._extract_and_merge_characters(chapter_text)
+            self._extract_and_merge_world_info(chapter_text)
             storage.save_project(self.project)
-            self.step_finished.emit(f"Chapter {chapter_num}", result)
+            self.step_finished.emit(f"Chapter {chapter_num}", chapter_text)
 
     def _run_review_chapter(self) -> None:
         chapter_num = self.project.current_chapter
