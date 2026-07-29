@@ -140,6 +140,7 @@ class LLMEngine:
     def __init__(self) -> None:
         self._model: Optional[object] = None  # Llama instance
         self._current_path: str = ""
+        self._current_n_ctx: int = 0
         self._lock = threading.Lock()
         self._last_model_info: Optional[gguf_meta.GGUFModelInfo] = None
 
@@ -154,6 +155,16 @@ class LLMEngine:
     @property
     def current_model_path(self) -> str:
         return self._current_path
+
+    @property
+    def current_context_size(self) -> int:
+        """Effective context window used to load the current model."""
+        return self._current_n_ctx
+
+    @property
+    def context_size(self) -> int:
+        """Alias for the currently loaded model context window."""
+        return self._current_n_ctx
 
     @property
     def last_model_info(self) -> Optional[gguf_meta.GGUFModelInfo]:
@@ -292,6 +303,7 @@ class LLMEngine:
                 **extra_kwargs,
             )
             self._current_path = model_path
+            self._current_n_ctx = n_ctx
 
             if progress_callback:
                 progress_callback(f"Model ready.")
@@ -301,6 +313,7 @@ class LLMEngine:
             del self._model
             self._model = None
             self._current_path = ""
+            self._current_n_ctx = 0
 
     def _model_supports_thinking(self) -> bool:
         """

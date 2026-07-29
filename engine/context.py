@@ -13,9 +13,12 @@ The UI always shows all messages.
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 from engine.models import ChatMessage, MessageRole, Project, TaskType
+
+logger = logging.getLogger("context")
 
 
 # Approximate token estimate: 1 token ≈ 4 chars
@@ -28,6 +31,205 @@ def _messages_token_count(messages: list[dict]) -> int:
     for m in messages:
         total += _estimate_tokens(m.get("content", ""))
     return total
+
+
+def _section_tokens(text: str) -> int:
+    return _estimate_tokens(text) if text.strip() else 0
+
+
+def _truncate_to_budget(text: str, budget: int) -> str:
+    text = text.strip()
+    if not text or budget <= 0:
+        return ""
+    approx_chars = max(64, budget * 4)
+    if len(text) <= approx_chars:
+        return text
+    return text[: max(0, approx_chars - 48)].rstrip() + "\n\n[... truncated to fit context budget ...]"
+
+
+def _extract_outline_section(outline: str, chapter_number: int) -> str:
+    outline = outline.strip()
+    if not outline:
+        return ""
+    lines = outline.split("\n")
+    capture = False
+    result = []
+    target = f"## Chapter {chapter_number}"
+    next_marker = f"## Chapter {chapter_number + 1}"
+    for line in lines:
+        if target in line and (
+            len(line) == len(target)
+            or not line[len(target):len(target) + 1].isdigit()
+        ):
+            capture = True
+        elif next_marker in line and capture:
+            break
+        if capture:
+            result.append(line)
+    return "\n".join(result).strip()
+
+
+def _estimate_task_instruction(task: TaskType) -> str:
+    task_instructions = {
+        TaskType.CHAT: (
+            "Engage naturally with the author. Help them develop their story, answer questions, "
+            "brainstorm ideas, and provide creative suggestions. Be concise and helpful."
+        ),
+        TaskType.WRITE_SYNOPSIS: (
+            "Write a compelling 2-3 paragraph synopsis for this novel. "
+            "Cover the main premise, central conflict, and emotional core. "
+            "Write only the synopsis text."
+        ),
+        TaskType.GENERATE_OUTLINE: (
+            "Generate a detailed chapter-by-chapter outline for this novel. "
+            "For each chapter: provide the chapter number, a title, and a 2-3 sentence summary. "
+            "Format each chapter as:\n"
+            "## Chapter N: Title\n"
+            "Summary text.\n\n"
+            "Write a complete outline with enough chapters to tell the full story."
+        ),
+        TaskType.REVIEW_OUTLINE: (
+            "Review the provided story outline. Analyze it for:\n"
+            "- Plot coherence and pacing\n"
+            "- Character arc consistency\n"
+            "- Story structure (setup, rising action, climax, resolution)\n"
+            "- Missing scenes or transitions\n"
+            "Provide specific, actionable feedback. Then suggest an improved version if needed."
+        ),
+        TaskType.WRITE_CHAPTER: (
+            "Write this chapter of the novel. "
+            "Match the established tone, voice, and style. "
+            "Write vivid prose with dialogue, description, and action. "
+            "Do not summarize â€” write the full scene. "
+            "Write only the chapter content."
+        ),
+        TaskType.REVIEW_CHAPTER: (
+            "Review this chapter. Check for:\n"
+            "- Consistency with established characters and world\n"
+            "- Prose quality and readability\n"
+            "- Pacing and scene structure\n"
+            "- Dialogue authenticity\n"
+            "- Continuity errors\n"
+            "Give specific feedback and suggest improvements."
+        ),
+        TaskType.REWRITE_CHAPTER: (
+            "Rewrite the chapter below to address the review feedback provided. "
+            "Keep what's already working â€” voice, strong scenes, dialogue that "
+            "lands â€” and fix specifically what the feedback flagged (pacing, "
+            "continuity, prose issues, etc.). Write the full revised chapter "
+            "content. Do not summarize the changes or add commentary â€” output "
+            "only the rewritten chapter text."
+        ),
+        TaskType.UPDATE_MEMORY: (
+            "Update the story memory file based on the latest chapter. "
+            "Extract and record:\n"
+            "- New character information revealed\n"
+            "- Plot events that occurred\n"
+            "- World-building details established\n"
+            "- Foreshadowing or setups planted\n"
+            "Write in a structured format. Preserve existing memory and add new entries."
+        ),
+        TaskType.CONVERSATION_SUMMARY: (
+            "Summarize the provided conversation history for future reference. "
+            "Be concise but complete. Capture all story decisions and context."
+        ),
+        TaskType.GENERATE_WORLD: (
+            "Write detailed worldbuilding notes for this novel. Cover whichever "
+            "of these are relevant to the story: geography and key locations, "
+            "time period and technology level, magic or other special systems "
+            "and their rules, political/social structures, culture and customs, "
+            "and history relevant to the plot. Format as Markdown with headings. "
+            "If world notes already exist below, add to and expand them rather "
+            "than contradicting or repeating them."
+        ),
+    }
+    return task_instructions.get(task, "")
+
+
+def _section_payloads(
+    project: Project,
+    task: TaskType,
+    system_prompt: str,
+) -> dict[str, str]:
+    base = (
+        f"You are an AI assistant helping to write a novel titled '{project.title}'. "
+        "You are deeply familiar with the story world, characters, and plot. "
+        "You respond only in the context of this story."
+    )
+    language = ""
+    marker = "IMPORTANT: Always write your response in "
+    if marker in system_prompt:
+        tail = system_prompt.split(marker, 1)[1]
+        language = tail.split(",", 1)[0].strip()
+    if language:
+        language = (
+            f"IMPORTANT: Always write your response in {language}, "
+            "regardless of the language these instructions are written in."
+        )
+
+    synopsis = f"Story Synopsis:\n{project.synopsis.strip()}" if project.synopsis.strip() else ""
+    characters = "\n".join(
+        f"- {c.name} ({c.role}): {c.description}" for c in project.characters
+    ).strip()
+    outline = project.outline.strip() if project.outline.strip() and task != TaskType.GENERATE_OUTLINE else ""
+    world = project.world.strip()
+    memory = project.memory.strip()
+    chat_summary = project.chat_summary.strip()
+    author_instructions = ""
+    if "## Additional Author Instructions" in system_prompt:
+        author_instructions = system_prompt.split("## Additional Author Instructions", 1)[1].strip()
+
+    return {
+        "Base": base,
+        "Language": language,
+        "Task Instructions": _estimate_task_instruction(task),
+        "Synopsis": synopsis,
+        "Characters": characters,
+        "Outline": outline,
+        "World": world,
+        "Memory": memory,
+        "Chat Summary": chat_summary,
+        "Author Instructions": author_instructions,
+    }
+
+
+def _compact_sections(
+    sections: dict[str, str],
+    max_context_tokens: int,
+    task: TaskType,
+    project: Project,
+) -> dict[str, str]:
+    budgets = {
+        "Base": max(40, max_context_tokens // 80),
+        "Language": max(12, max_context_tokens // 400),
+        "Task Instructions": max(80, max_context_tokens // 32),
+        "Synopsis": max(120, max_context_tokens // 20),
+        "Characters": max(180, max_context_tokens // 14),
+        "Outline": max(350, max_context_tokens // 8),
+        "World": max(120, max_context_tokens // 20),
+        "Memory": max(150, max_context_tokens // 16),
+        "Chat Summary": max(100, max_context_tokens // 24),
+        "Author Instructions": max(80, max_context_tokens // 40),
+    }
+    if task == TaskType.WRITE_CHAPTER:
+        budgets["Outline"] = max(budgets["Outline"], max_context_tokens // 5)
+        budgets["Memory"] = max(budgets["Memory"], max_context_tokens // 10)
+        budgets["Chat Summary"] = max(budgets["Chat Summary"], max_context_tokens // 20)
+        chapter_num = project.current_chapter + 1 if project.current_chapter else max(1, len(project.chapters) + 1)
+        specific = _extract_outline_section(project.outline, chapter_num)
+        if specific:
+            sections["Outline"] = specific
+    if task in (TaskType.CHAT, TaskType.REVIEW_CHAPTER):
+        budgets["Chat Summary"] = max(budgets["Chat Summary"], max_context_tokens // 12)
+        budgets["Memory"] = max(budgets["Memory"], max_context_tokens // 12)
+    if len(project.characters) > 12:
+        sections["Characters"] = "\n".join(
+            f"- {c.name} ({c.role}): {c.description}" for c in project.characters[:12]
+        )
+
+    for name, text in list(sections.items()):
+        sections[name] = _truncate_to_budget(text, budgets.get(name, 0))
+    return sections
 
 
 def _repair_alternation(messages: list[dict]) -> list[dict]:
@@ -67,6 +269,8 @@ def build_context_for_model(
     user_message: str,
     system_prompt: str,
     max_context_tokens: int = 3200,
+    task: TaskType = TaskType.CHAT,
+    reply_reserved: Optional[int] = None,
 ) -> list[dict]:
     """
     Build the list of messages to send to the model.
@@ -76,20 +280,32 @@ def build_context_for_model(
       [assistant/user …] ← recent non-summarized messages
       [user]             ← current user message
     """
-    # Build system content
-    system_parts = [system_prompt.strip()]
-
-    if project.memory.strip():
-        system_parts.append(
-            "\n\n## Story Memory\n" + project.memory.strip()
-        )
-
-    if project.chat_summary.strip():
-        system_parts.append(
-            "\n\n## Conversation Summary (older messages)\n" + project.chat_summary.strip()
-        )
-
-    system_content = "\n".join(system_parts)
+    sections = _compact_sections(
+        _section_payloads(project, task, system_prompt),
+        max_context_tokens,
+        task,
+        project,
+    )
+    system_content_parts = [sections["Base"]]
+    if sections["Language"]:
+        system_content_parts.append(sections["Language"])
+    if sections["Task Instructions"]:
+        system_content_parts.append(sections["Task Instructions"])
+    if sections["Synopsis"]:
+        system_content_parts.append(f"\n\n{sections['Synopsis']}")
+    if sections["Characters"]:
+        system_content_parts.append(f"\n\n## Established Characters\n{sections['Characters']}")
+    if sections["Outline"]:
+        system_content_parts.append(f"\n\n## Outline\n{sections['Outline']}")
+    if sections["World"]:
+        system_content_parts.append(f"\n\n## World & Setting\n{sections['World']}")
+    if sections["Memory"]:
+        system_content_parts.append(f"\n\n## Story Memory\n{sections['Memory']}")
+    if sections["Chat Summary"]:
+        system_content_parts.append(f"\n\n## Conversation Summary (older messages)\n{sections['Chat Summary']}")
+    if sections["Author Instructions"]:
+        system_content_parts.append(f"\n\n## Additional Author Instructions\n{sections['Author Instructions']}")
+    system_content = "\n".join(system_content_parts)
 
     # Gather recent non-summarized messages (excluding system/summary roles)
     eligible = [
@@ -111,8 +327,8 @@ def build_context_for_model(
     system_tokens = _estimate_tokens(system_content)
     user_tokens = _estimate_tokens(user_message)
     history_tokens = _messages_token_count(recent_msgs)
-
-    total = system_tokens + user_tokens + history_tokens + 512  # 512 for reply headroom
+    reply_headroom = reply_reserved if reply_reserved is not None else max(256, min(4096, max_context_tokens // 3))
+    total = system_tokens + user_tokens + history_tokens + reply_headroom
 
     # If over budget, trim from the oldest of the window
     while total > max_context_tokens and len(recent_msgs) > 1:
@@ -148,6 +364,9 @@ def estimate_context_usage(
     user_message: str,
     system_prompt: str,
     max_context_tokens: int = 3200,
+    task: TaskType = TaskType.CHAT,
+    reply_reserved: Optional[int] = None,
+    requested_max_tokens: Optional[int] = None,
 ) -> dict:
     """
     Estimate how much of the context window will be consumed before generation.
@@ -155,17 +374,32 @@ def estimate_context_usage(
     The numbers are approximate, but they are good enough for console logging
     and for spotting when a prompt is getting too close to the model limit.
     """
-    system_parts = [system_prompt.strip()]
-
-    if project.memory.strip():
-        system_parts.append("\n\n## Story Memory\n" + project.memory.strip())
-
-    if project.chat_summary.strip():
-        system_parts.append(
-            "\n\n## Conversation Summary (older messages)\n" + project.chat_summary.strip()
-        )
-
-    system_content = "\n".join(system_parts)
+    sections = _compact_sections(
+        _section_payloads(project, task, system_prompt),
+        max_context_tokens,
+        task,
+        project,
+    )
+    system_content_parts = [sections["Base"]]
+    if sections["Language"]:
+        system_content_parts.append(sections["Language"])
+    if sections["Task Instructions"]:
+        system_content_parts.append(sections["Task Instructions"])
+    if sections["Synopsis"]:
+        system_content_parts.append(f"\n\n{sections['Synopsis']}")
+    if sections["Characters"]:
+        system_content_parts.append(f"\n\n## Established Characters\n{sections['Characters']}")
+    if sections["Outline"]:
+        system_content_parts.append(f"\n\n## Outline\n{sections['Outline']}")
+    if sections["World"]:
+        system_content_parts.append(f"\n\n## World & Setting\n{sections['World']}")
+    if sections["Memory"]:
+        system_content_parts.append(f"\n\n## Story Memory\n{sections['Memory']}")
+    if sections["Chat Summary"]:
+        system_content_parts.append(f"\n\n## Conversation Summary (older messages)\n{sections['Chat Summary']}")
+    if sections["Author Instructions"]:
+        system_content_parts.append(f"\n\n## Additional Author Instructions\n{sections['Author Instructions']}")
+    system_content = "\n".join(system_content_parts)
 
     eligible = [
         m for m in project.chat_messages
@@ -178,16 +412,27 @@ def estimate_context_usage(
     system_tokens = _estimate_tokens(system_content)
     user_tokens = _estimate_tokens(user_message)
     history_tokens = _messages_token_count(recent_msgs)
-    reply_headroom = 512
-    estimated_total = system_tokens + user_tokens + history_tokens + reply_headroom
+    prompt_tokens = system_tokens + user_tokens + history_tokens
+    available_reply_tokens = max(0, max_context_tokens - prompt_tokens)
+    reply_headroom = reply_reserved if reply_reserved is not None else max(256, min(4096, max_context_tokens // 3))
+    requested_reply = requested_max_tokens if requested_max_tokens is not None else reply_headroom
+    effective_max_tokens = min(requested_reply, available_reply_tokens)
+    estimated_total = prompt_tokens + effective_max_tokens
+
+    section_report = {name: _section_tokens(text) for name, text in sections.items()}
 
     return {
+        "sections": section_report,
+        "prompt_tokens": prompt_tokens,
         "system_tokens": system_tokens,
         "user_tokens": user_tokens,
         "history_tokens": history_tokens,
+        "available_reply_tokens": available_reply_tokens,
         "reply_headroom": reply_headroom,
+        "requested_max_tokens": requested_reply,
+        "effective_max_tokens": effective_max_tokens,
         "estimated_total": estimated_total,
-        "estimated_remaining": max(0, max_context_tokens - estimated_total),
+        "estimated_remaining": max(0, available_reply_tokens - effective_max_tokens),
         "max_context_tokens": max_context_tokens,
         "recent_messages": len(recent_msgs),
     }

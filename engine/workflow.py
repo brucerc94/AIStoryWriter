@@ -335,39 +335,62 @@ class WorkflowWorker(QObject):
             custom_instructions=self._custom_system_instructions(),
             language=self._response_language(),
         )
+        engine = get_engine()
+        context_limit = engine.current_context_size or self.settings.default_context_size
+        reply_reserved = max(256, min(4096, context_limit // 3))
         messages = build_context_for_model(
             self.project,
             user_message,
             system_prompt,
-            max_context_tokens=3200,
+            max_context_tokens=context_limit,
+            task=task,
+            reply_reserved=reply_reserved,
         )
         context_stats = estimate_context_usage(
             self.project,
             user_message,
             system_prompt,
-            max_context_tokens=3200,
+            max_context_tokens=context_limit,
+            task=task,
+            reply_reserved=reply_reserved,
+            requested_max_tokens=max_tokens,
         )
+        effective_max_tokens = context_stats["effective_max_tokens"]
 
         temperature = self._task_temperature(task)
         logger.info(
             f"[{task.value}] running inference: {len(messages)} messages, "
-            f"temperature={temperature}, max_tokens={max_tokens}"
+            f"temperature={temperature}, max_tokens={effective_max_tokens}"
         )
         logger.info(
             f"[{task.value}] context budget: "
-            f"{context_stats['estimated_total']}/{context_stats['max_context_tokens']} tokens "
-            f"(remaining≈{context_stats['estimated_remaining']}, "
-            f"system={context_stats['system_tokens']}, "
-            f"history={context_stats['history_tokens']}, "
-            f"user={context_stats['user_tokens']}, "
-            f"reply_headroom={context_stats['reply_headroom']}, "
-            f"recent_messages={context_stats['recent_messages']})"
+            f"Context Limit={context_stats['max_context_tokens']} "
+            f"Prompt Tokens={context_stats['prompt_tokens']} "
+            f"Available Reply={context_stats['available_reply_tokens']} "
+            f"Requested Reply={context_stats['requested_max_tokens']} "
+            f"Effective Reply={effective_max_tokens}"
         )
-        if context_stats["estimated_remaining"] < max_tokens:
+        logger.info(
+            f"[{task.value}] prompt detail: "
+            f"system={context_stats['system_tokens']}, "
+            f"user={context_stats['user_tokens']}, "
+            f"history={context_stats['history_tokens']}, "
+            f"reply_headroom={context_stats['reply_headroom']}, "
+            f"used={context_stats['estimated_total']}, "
+            f"remaining≈{context_stats['estimated_remaining']}, "
+            f"recent_messages={context_stats['recent_messages']}"
+        )
+        sections = context_stats.get("sections", {})
+        if sections:
+            logger.info(
+                f"[{task.value}] section breakdown: "
+                + ", ".join(f"{name}={tokens}" for name, tokens in sections.items())
+            )
+        if effective_max_tokens < max_tokens:
             logger.warning(
                 f"[{task.value}] requested max_tokens={max_tokens} but only "
-                f"≈{context_stats['estimated_remaining']} tokens remain in context. "
-                "The response may be cut short."
+                f"{effective_max_tokens} reply tokens fit in context. "
+                "The response will be capped to the effective limit."
             )
 
         accumulated = []
@@ -380,7 +403,7 @@ class WorkflowWorker(QObject):
         try:
             result = engine.generate(
                 messages=messages,
-                max_tokens=max_tokens,
+                max_tokens=effective_max_tokens,
                 temperature=temperature,
                 stream=True,
                 stream_callback=on_token,
