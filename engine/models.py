@@ -317,6 +317,9 @@ class AppSettings:
     # (English) built-in instructions are written in. Empty = no explicit
     # instruction (model picks based on context, usually English).
     response_language: str = "Español"
+    # Only applied automatically to Qwen models that expose the
+    # enable_thinking chat template toggle in the installed llama-cpp-python.
+    enable_thinking: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -330,6 +333,7 @@ class AppSettings:
             "custom_system_prompt": self.custom_system_prompt,
             "temperature": self.temperature,
             "response_language": self.response_language,
+            "enable_thinking": self.enable_thinking,
         }
 
     @classmethod

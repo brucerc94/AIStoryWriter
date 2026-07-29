@@ -225,6 +225,14 @@ class AppSettingsWidget(QWidget):
         self.autosave_check.setChecked(True)
         form.addRow("", self.autosave_check)
 
+        # Qwen thinking mode
+        self.enable_thinking_check = QCheckBox("Enable Thinking")
+        self.enable_thinking_check.setToolTip(
+            "When enabled, Qwen models that support it will receive "
+            "chat_template_kwargs={'enable_thinking': True}."
+        )
+        form.addRow("", self.enable_thinking_check)
+
         layout.addWidget(box)
 
         # ── Generation settings ──
@@ -278,6 +286,7 @@ class AppSettingsWidget(QWidget):
         self.gpu_spin.setValue(settings.default_gpu_layers)
         self.threads_spin.setValue(settings.default_threads)
         self.autosave_check.setChecked(settings.auto_save)
+        self.enable_thinking_check.setChecked(getattr(settings, "enable_thinking", False))
         self.language_input.setText(settings.response_language)
         self.system_prompt_input.setPlainText(settings.custom_system_prompt)
 
@@ -294,6 +303,7 @@ class AppSettingsWidget(QWidget):
         self._settings.default_gpu_layers = self.gpu_spin.value()
         self._settings.default_threads = self.threads_spin.value()
         self._settings.auto_save = self.autosave_check.isChecked()
+        self._settings.enable_thinking = self.enable_thinking_check.isChecked()
         self._settings.response_language = self.language_input.text().strip()
         self._settings.custom_system_prompt = self.system_prompt_input.toPlainText().strip()
         storage.save_settings(self._settings)
