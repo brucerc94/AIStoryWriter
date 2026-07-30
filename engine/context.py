@@ -359,6 +359,70 @@ def build_context_for_model(
     return messages
 
 
+def build_review_context_for_model(
+    project: Project,
+    user_message: str,
+    system_prompt: str,
+    max_context_tokens: int = 3200,
+    reply_reserved: Optional[int] = None,
+) -> list[dict]:
+    """
+    Build a lean context for chapter review.
+
+    Review tasks should not inherit chat history or the full writing context.
+    They only need the system instructions, the chapter text, and any compact
+    project state that helps judge the chapter.
+    """
+    sections = _compact_sections(
+        {
+            "Base": (
+                f"You are an AI assistant helping to write a novel titled '{project.title}'. "
+                "You are deeply familiar with the story world, characters, and plot. "
+                "You respond only in the context of this story."
+            ),
+            "Language": "",
+            "Task Instructions": _estimate_task_instruction(TaskType.REVIEW_CHAPTER),
+            "Synopsis": f"Story Synopsis:\n{project.synopsis.strip()}" if project.synopsis.strip() else "",
+            "Characters": "\n".join(
+                f"- {c.name} ({c.role}): {c.description}" for c in project.characters
+            ).strip(),
+            "Outline": "",
+            "World": "",
+            "Memory": "",
+            "Chat Summary": "",
+            "Author Instructions": "",
+        },
+        max_context_tokens,
+        TaskType.REVIEW_CHAPTER,
+        project,
+    )
+
+    # For review we keep only the specific chapter entry if we can extract it.
+    chapter_num = project.current_chapter if project.current_chapter else max(1, len(project.chapters))
+    specific_outline = _extract_outline_section(project.outline, chapter_num)
+    if specific_outline:
+        sections["Outline"] = specific_outline
+
+    system_content_parts = [sections["Base"]]
+    if sections["Task Instructions"]:
+        system_content_parts.append(sections["Task Instructions"])
+    if sections["Synopsis"]:
+        system_content_parts.append(f"\n\n{sections['Synopsis']}")
+    if sections["Characters"]:
+        system_content_parts.append(f"\n\n## Established Characters\n{sections['Characters']}")
+    if sections["Outline"]:
+        system_content_parts.append(f"\n\n## Outline\n{sections['Outline']}")
+    if sections["Author Instructions"]:
+        system_content_parts.append(f"\n\n## Additional Author Instructions\n{sections['Author Instructions']}")
+    system_content = "\n".join(system_content_parts)
+
+    messages: list[dict] = [
+        {"role": "system", "content": system_content},
+        {"role": "user", "content": user_message},
+    ]
+    return messages
+
+
 def estimate_context_usage(
     project: Project,
     user_message: str,
@@ -436,6 +500,11 @@ def estimate_context_usage(
         "max_context_tokens": max_context_tokens,
         "recent_messages": len(recent_msgs),
     }
+
+
+def estimate_messages_tokens(messages: list[dict]) -> int:
+    """Estimate prompt tokens for a finalized message list."""
+    return _messages_token_count(messages)
 
 
 def should_summarize(project: Project, threshold: int = 30) -> bool:

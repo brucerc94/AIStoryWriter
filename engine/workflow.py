@@ -21,7 +21,9 @@ from PySide6.QtCore import QObject, QThread, Signal
 from engine.chat import get_engine
 from engine.context import (
     build_context_for_model,
+    build_review_context_for_model,
     build_system_prompt,
+    estimate_messages_tokens,
     estimate_context_usage,
     build_summarization_prompt,
     mark_old_messages_summarized,
@@ -139,6 +141,172 @@ class WorkflowWorker(QObject):
     def _task_temperature(self, task: TaskType) -> float:
         """Per-task temperature, set from the Models tab next to that task's model."""
         return self.project.task_temperatures.get(task)
+
+    def _model_context_limit(self) -> int:
+        engine = get_engine()
+        limit = engine.current_context_size
+        if limit <= 0:
+            raise RuntimeError("No active model context size available.")
+        return limit
+
+    def _build_inference_messages(
+        self,
+        task: TaskType,
+        user_message: str,
+        system_prompt: str,
+        context_limit: int,
+        reply_reserved: int,
+    ) -> list[dict]:
+        if task == TaskType.REVIEW_CHAPTER:
+            return build_review_context_for_model(
+                self.project,
+                user_message,
+                system_prompt,
+                max_context_tokens=context_limit,
+                reply_reserved=reply_reserved,
+            )
+        return build_context_for_model(
+            self.project,
+            user_message,
+            system_prompt,
+            max_context_tokens=context_limit,
+            task=task,
+            reply_reserved=reply_reserved,
+        )
+
+    def _run_inference_v2(
+        self,
+        task: TaskType,
+        user_message: str,
+        add_to_chat: bool = True,
+        max_tokens: int = 2048,
+    ) -> str:
+        if self._cancelled:
+            logger.info(f"[{task.value}] cancelled before inference started.")
+            return ""
+
+        if not self._load_model_for_task(task):
+            return ""
+
+        system_prompt = build_system_prompt(
+            self.project,
+            task,
+            custom_instructions=self._custom_system_instructions(),
+            language=self._response_language(),
+        )
+        context_limit = self._model_context_limit()
+        reply_reserved = max(256, min(4096, context_limit // 3))
+
+        candidate_budgets = [context_limit]
+        for factor in (0.85, 0.70, 0.55, 0.40):
+            reduced = int(context_limit * factor)
+            if reduced >= 1024:
+                candidate_budgets.append(reduced)
+        candidate_budgets.append(1024)
+
+        messages: list[dict] = []
+        selected_budget = context_limit
+        prompt_tokens = 0
+        seen_budgets = set()
+
+        for budget in candidate_budgets:
+            if budget in seen_budgets:
+                continue
+            seen_budgets.add(budget)
+            candidate_messages = self._build_inference_messages(
+                task, user_message, system_prompt, budget, reply_reserved
+            )
+            candidate_prompt_tokens = estimate_messages_tokens(candidate_messages)
+            candidate_effective_reply = min(max_tokens, max(0, context_limit - candidate_prompt_tokens))
+            if candidate_prompt_tokens + candidate_effective_reply <= context_limit:
+                messages = candidate_messages
+                selected_budget = budget
+                prompt_tokens = candidate_prompt_tokens
+                break
+            if not messages:
+                messages = candidate_messages
+                selected_budget = budget
+                prompt_tokens = candidate_prompt_tokens
+
+        if not messages:
+            self.error_occurred.emit("Could not build a valid prompt for inference.")
+            return ""
+
+        if task == TaskType.REVIEW_CHAPTER:
+            if any(m.get("role") in ("user", "assistant") for m in messages[1:-1]):
+                error = "[review_chapter] review context unexpectedly contains chat history."
+                logger.error(error)
+                self.error_occurred.emit(error)
+                return ""
+
+        effective_max_tokens = min(max_tokens, max(0, context_limit - prompt_tokens))
+        if prompt_tokens + effective_max_tokens > context_limit:
+            error = (
+                f"[{task.value}] prompt_tokens({prompt_tokens}) + "
+                f"effective_reply({effective_max_tokens}) exceeds model_n_ctx({context_limit})"
+            )
+            logger.error(error)
+            self.error_occurred.emit(error)
+            return ""
+
+        temperature = self._task_temperature(task)
+        logger.info(
+            f"[{task.value}] running inference: {len(messages)} messages, "
+            f"temperature={temperature}, max_tokens={effective_max_tokens}"
+        )
+        logger.info(
+            f"[{task.value}] context budget: "
+            f"Context Limit={context_limit} "
+            f"Prompt Tokens={prompt_tokens} "
+            f"Available Reply={context_limit - prompt_tokens} "
+            f"Requested Reply={max_tokens} "
+            f"Effective Reply={effective_max_tokens}"
+        )
+        logger.info(
+            f"[{task.value}] prompt detail: selected_budget={selected_budget}, "
+            f"used={prompt_tokens + effective_max_tokens}, "
+            f"remainingâ‰ˆ{context_limit - (prompt_tokens + effective_max_tokens)}"
+        )
+        if selected_budget != context_limit:
+            logger.info(f"[{task.value}] context compacted before inference.")
+        if effective_max_tokens < max_tokens:
+            logger.warning(
+                f"[{task.value}] requested max_tokens={max_tokens} but only "
+                f"{effective_max_tokens} reply tokens fit in context. "
+                "The response will be capped to the effective limit."
+            )
+
+        accumulated = []
+
+        def on_token(token: str) -> None:
+            accumulated.append(token)
+            self.token_received.emit(token)
+
+        engine = get_engine()
+        try:
+            result = engine.generate(
+                messages=messages,
+                max_tokens=effective_max_tokens,
+                temperature=temperature,
+                stream=True,
+                stream_callback=on_token,
+                cancel_check=lambda: self._cancelled,
+            )
+        except Exception as e:
+            logger.error(f"[{task.value}] inference error: {e}\n{traceback.format_exc()}")
+            self.error_occurred.emit(f"Inference error: {e}\n{traceback.format_exc()}")
+            return ""
+
+        if self._cancelled:
+            logger.info(f"[{task.value}] generation stopped by user ({len(result)} chars generated before stop).")
+
+        logger.info(f"[{task.value}] inference complete: {len(result)} chars generated.")
+
+        if add_to_chat:
+            self.project.chat_messages.append(ChatMessage(role=MessageRole.USER, content=user_message))
+            self.project.chat_messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=result))
+
+        return result
 
     def _custom_system_instructions(self) -> str:
         """Author-provided instructions from Settings, appended to every prompt."""
@@ -329,7 +497,7 @@ class WorkflowWorker(QObject):
         add_to_chat: bool = True,
         max_tokens: int = 2048,
     ) -> str:
-        """Load model, build context, run inference, optionally store in chat."""
+        return self._run_inference_v2(task, user_message, add_to_chat=add_to_chat, max_tokens=max_tokens)
         if self._cancelled:
             logger.info(f"[{task.value}] cancelled before inference started.")
             return ""
@@ -346,24 +514,104 @@ class WorkflowWorker(QObject):
         engine = get_engine()
         context_limit = engine.current_context_size or self.settings.default_context_size
         reply_reserved = max(256, min(4096, context_limit // 3))
-        messages = build_context_for_model(
-            self.project,
-            user_message,
-            system_prompt,
-            max_context_tokens=context_limit,
-            task=task,
-            reply_reserved=reply_reserved,
-        )
-        context_stats = estimate_context_usage(
-            self.project,
-            user_message,
-            system_prompt,
-            max_context_tokens=context_limit,
-            task=task,
-            reply_reserved=reply_reserved,
-            requested_max_tokens=max_tokens,
-        )
-        effective_max_tokens = context_stats["effective_max_tokens"]
+        budget_steps = [context_limit]
+        for factor in (0.85, 0.70, 0.55, 0.40):
+            reduced = int(context_limit * factor)
+            if reduced >= 1024:
+                budget_steps.append(reduced)
+        budget_steps.append(1024)
+
+        messages = []
+        context_stats = {}
+        effective_max_tokens = max_tokens
+        compacted = False
+        used_budget = context_limit
+        seen_budgets = set()
+
+        for budget in budget_steps:
+            if budget in seen_budgets:
+                continue
+            seen_budgets.add(budget)
+
+            candidate_messages = build_context_for_model(
+                self.project,
+                user_message,
+                system_prompt,
+                max_context_tokens=budget,
+                task=task,
+                reply_reserved=reply_reserved,
+            )
+            candidate_stats = estimate_context_usage(
+                self.project,
+                user_message,
+                system_prompt,
+                max_context_tokens=budget,
+                task=task,
+                reply_reserved=reply_reserved,
+                requested_max_tokens=max_tokens,
+            )
+            messages = candidate_messages
+            context_stats = candidate_stats
+            effective_max_tokens = candidate_stats["effective_max_tokens"]
+            used_budget = budget
+
+            if candidate_stats["estimated_total"] <= budget:
+                compacted = budget != context_limit
+                break
+
+        if not context_stats:
+            messages = build_context_for_model(
+                self.project,
+                user_message,
+                system_prompt,
+                max_context_tokens=context_limit,
+                task=task,
+                reply_reserved=reply_reserved,
+            )
+            context_stats = estimate_context_usage(
+                self.project,
+                user_message,
+                system_prompt,
+                max_context_tokens=context_limit,
+                task=task,
+                reply_reserved=reply_reserved,
+                requested_max_tokens=max_tokens,
+            )
+            effective_max_tokens = context_stats["effective_max_tokens"]
+            used_budget = context_limit
+
+        if context_stats.get("estimated_total", 0) > used_budget:
+            logger.warning(
+                f"[{task.value}] prompt still exceeds budget after compaction attempt: "
+                f"used≈{context_stats['estimated_total']} > budget={used_budget}"
+            )
+            if task == TaskType.WRITE_CHAPTER and self.project.chat_messages:
+                logger.info(
+                    f"[{task.value}] clearing transient chat history and rebuilding context."
+                )
+                self._clear_chat_messages_for_continuation()
+                messages = build_context_for_model(
+                    self.project,
+                    user_message,
+                    system_prompt,
+                    max_context_tokens=used_budget,
+                    task=task,
+                    reply_reserved=reply_reserved,
+                )
+                context_stats = estimate_context_usage(
+                    self.project,
+                    user_message,
+                    system_prompt,
+                    max_context_tokens=used_budget,
+                    task=task,
+                    reply_reserved=reply_reserved,
+                    requested_max_tokens=max_tokens,
+                )
+                effective_max_tokens = context_stats["effective_max_tokens"]
+                compacted = True
+
+        if context_stats.get("estimated_total", 0) > used_budget:
+            compacted = True
 
         temperature = self._task_temperature(task)
         logger.info(
@@ -394,6 +642,8 @@ class WorkflowWorker(QObject):
                 f"[{task.value}] section breakdown: "
                 + ", ".join(f"{name}={tokens}" for name, tokens in sections.items())
             )
+        if compacted:
+            logger.info(f"[{task.value}] context compacted before inference.")
         if effective_max_tokens < max_tokens:
             logger.warning(
                 f"[{task.value}] requested max_tokens={max_tokens} but only "
@@ -702,6 +952,13 @@ class WorkflowWorker(QObject):
                 continue
         return sorted(numbers)
 
+    def _outline_max_chapter_number(self) -> int:
+        numbers = self._outline_chapter_numbers()
+        return max(numbers, default=0)
+
+    def _outline_has_chapter(self, chapter_number: int) -> bool:
+        return chapter_number in set(self._outline_chapter_numbers())
+
     def _next_chapter_number(self) -> int:
         """
         Single source of truth for the next chapter to write.
@@ -716,6 +973,18 @@ class WorkflowWorker(QObject):
     def _clear_temporary_chat_history(self) -> None:
         self.project.chat_messages = []
         storage.save_project(self.project)
+
+    def _clear_chat_messages_for_continuation(self) -> None:
+        """
+        Clear transient chat history between continuation passes.
+
+        This keeps the next pass anchored on the persistent project state
+        plus the partial chapter text, instead of allowing prior continuation
+        turns to accumulate in chat_messages.
+        """
+        if self.project.chat_messages:
+            self.project.chat_messages = []
+            storage.save_project(self.project)
 
     def _reload_project_from_storage(self) -> bool:
         refreshed = storage.load_project(self.project.id)
@@ -899,6 +1168,7 @@ class WorkflowWorker(QObject):
             logger.info(
                 "[write_chapter] Chapter not complete yet. Generating continuation..."
             )
+            self._clear_chat_messages_for_continuation()
 
         if chapter_text:
             existing = next((c for c in self.project.chapters if c.number == chapter_num), None)
@@ -921,6 +1191,7 @@ class WorkflowWorker(QObject):
     def _run_write_book(self) -> None:
         outline_numbers = self._outline_chapter_numbers()
         total = len(outline_numbers) if outline_numbers else max(1, len(self.project.chapters) + 1)
+        max_outline_chapter = max(outline_numbers, default=0)
         self.step_started.emit(f"Writing Book (0/{total})...")
         written = 0
         while not self._cancelled:
@@ -931,8 +1202,7 @@ class WorkflowWorker(QObject):
             if pending <= 0:
                 break
             if self.project.outline:
-                target_outline = self._extract_chapter_outline_section(pending)
-                if not target_outline and pending > max((c.number for c in self.project.chapters), default=0) + 1:
+                if max_outline_chapter and pending > max_outline_chapter:
                     break
             self.project.current_chapter = pending - 1
             logger.info(f"[write_book] Writing Chapter {pending}/{total}.")
@@ -951,8 +1221,7 @@ class WorkflowWorker(QObject):
             if next_pending <= pending:
                 break
             if self.project.outline:
-                target_outline = self._extract_chapter_outline_section(next_pending)
-                if not target_outline and next_pending > max((c.number for c in self.project.chapters), default=0) + 1:
+                if max_outline_chapter and next_pending > max_outline_chapter:
                     break
             if next_pending is not None:
                 logger.info(f"[write_book] Clearing chat before Chapter {pending}.")
