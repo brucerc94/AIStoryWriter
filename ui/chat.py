@@ -340,6 +340,7 @@ class ChatPanel(QWidget):
         super().__init__(parent)
         self._project: Optional[Project] = None
         self._thread: Optional[WorkflowThread] = None
+        self._current_task: Optional[TaskType] = None
         self._settings = None
         self._build_ui()
 
@@ -536,6 +537,7 @@ class ChatPanel(QWidget):
             extra_input=text,
             settings=self._settings,
         )
+        self._current_task = TaskType.CHAT
         self._thread.token_received.connect(self._on_token)
         self._thread.step_finished.connect(self._on_step_finished)
         self._thread.error_occurred.connect(self._on_error)
@@ -560,11 +562,13 @@ class ChatPanel(QWidget):
             extra_input=extra_input,
             settings=self._settings,
         )
+        self._current_task = task
         self._thread.token_received.connect(self._on_token)
         self._thread.step_finished.connect(self._on_step_finished)
         self._thread.error_occurred.connect(self._on_error)
         self._thread.model_loading.connect(self._on_model_loading)
         self._thread.step_started.connect(self._on_step_started)
+        self._thread.clear_chat_requested.connect(lambda: self.clear_chat(prompt=False))
         self._thread.finished.connect(self._on_finished)
         self._thread.start()
 
@@ -596,15 +600,25 @@ class ChatPanel(QWidget):
         self._set_busy(False)
         self._hide_status()
         self._scroll_to_bottom()
+        self._current_task = None
 
     def _stop_generation(self) -> None:
         if self._thread:
-            self._thread.cancel()
-            self.stop_btn.setEnabled(False)
-            self.stop_btn.setText("Stopping…")
-            self._show_status("Stopping — finishing the current token…")
+            if self._current_task == TaskType.WRITE_BOOK:
+                self._thread.request_stop_after_current_chapter()
+                self.stop_btn.setEnabled(False)
+                self.stop_btn.setText("Stopping…")
+                self._show_status("Stopping — will finish the current chapter...")
+            else:
+                self._thread.cancel()
+                self.stop_btn.setEnabled(False)
+                self.stop_btn.setText("Stopping…")
+                self._show_status("Stopping — finishing the current token…")
 
     def _clear_chat(self) -> None:
+        self.clear_chat()
+
+    def clear_chat(self, prompt: bool = True) -> None:
         """
         Clears the conversation history only. Synopsis, outline, chapters,
         world notes, and story memory all live on the Project separately
@@ -614,26 +628,26 @@ class ChatPanel(QWidget):
         """
         if not self._project:
             return
-        if self._thread and self._thread.isRunning():
+        if prompt and self._thread and self._thread.isRunning():
             QMessageBox.information(
                 self, "Busy", "Wait for the current task to finish before clearing the chat."
             )
             return
 
-        reply = QMessageBox.question(
-            self,
-            "Clear Chat",
-            "Clear the conversation history?\n\n"
-            "This only resets the chat — your synopsis, outline, chapters, "
-            "world notes, and story memory are kept exactly as they are.\n\n"
-            "This cannot be undone.",
-            QMessageBox.Yes | QMessageBox.Cancel,
-        )
-        if reply != QMessageBox.Yes:
-            return
+        if prompt:
+            reply = QMessageBox.question(
+                self,
+                "Clear Chat",
+                "Clear the conversation history?\n\n"
+                "This only resets the chat — your synopsis, outline, chapters, "
+                "world notes, and story memory are kept exactly as they are.\n\n"
+                "This cannot be undone.",
+                QMessageBox.Yes | QMessageBox.Cancel,
+            )
+            if reply != QMessageBox.Yes:
+                return
 
         self._project.chat_messages = []
-        self._project.chat_summary = ""
         storage.save_project(self._project)
 
         self.messages_widget.load_messages(self._project.chat_messages)

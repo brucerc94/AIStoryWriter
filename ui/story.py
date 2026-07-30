@@ -546,6 +546,10 @@ class ChaptersTab(QWidget):
         self.write_btn.clicked.connect(self._write_chapter)
         action_row.addWidget(self.write_btn)
 
+        self.write_book_btn = QPushButton("📚 Write Book")
+        self.write_book_btn.clicked.connect(self._write_book)
+        action_row.addWidget(self.write_book_btn)
+
         self.review_btn = QPushButton("Review")
         self.review_btn.clicked.connect(self._review_chapter)
         action_row.addWidget(self.review_btn)
@@ -647,6 +651,11 @@ class ChaptersTab(QWidget):
 
         self._project.current_chapter = next_num - 1  # worker adds 1
         self.task_requested.emit(TaskType.WRITE_CHAPTER, "")
+
+    def _write_book(self) -> None:
+        if not self._project:
+            return
+        self.task_requested.emit(TaskType.WRITE_BOOK, "")
 
     def _review_chapter(self) -> None:
         if not self._current_chapter or not self._project:

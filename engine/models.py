@@ -18,6 +18,7 @@ class TaskType(str, Enum):
     REVIEW_OUTLINE = "review_outline"
     GENERATE_WORLD = "generate_world"
     WRITE_CHAPTER = "write_chapter"
+    WRITE_BOOK = "write_book"
     REVIEW_CHAPTER = "review_chapter"
     REWRITE_CHAPTER = "rewrite_chapter"
     UPDATE_MEMORY = "update_memory"
@@ -166,6 +167,8 @@ class ModelAssignment:
     chat: str = ""
 
     def get(self, task: TaskType) -> str:
+        if task == TaskType.WRITE_BOOK:
+            return self.write_chapter
         return getattr(self, task.value, "")
 
     def set(self, task: TaskType, model_path: str) -> None:
@@ -211,6 +214,8 @@ class TaskTemperatures:
     chat: float = 0.7
 
     def get(self, task: TaskType) -> float:
+        if task == TaskType.WRITE_BOOK:
+            return self.write_chapter
         return getattr(self, task.value, 0.7)
 
     def set(self, task: TaskType, temperature: float) -> None:

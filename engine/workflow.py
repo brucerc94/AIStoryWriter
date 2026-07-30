@@ -54,6 +54,7 @@ class WorkflowWorker(QObject):
     finished = Signal()                   # all done
     model_loading = Signal(str)           # model load status
     approval_needed = Signal(str, str)    # step_name, content — UI must approve
+    clear_chat_requested = Signal()       # UI should clear temporary chat history
 
     def __init__(
         self,
@@ -68,11 +69,15 @@ class WorkflowWorker(QObject):
         self.extra_input = extra_input
         self.settings = settings
         self._cancelled = False
+        self._stop_after_current_chapter = False
         self._approval_result: Optional[bool] = None
         self._approval_event = __import__("threading").Event()
 
     def cancel(self) -> None:
         self._cancelled = True
+
+    def request_stop_after_current_chapter(self) -> None:
+        self._stop_after_current_chapter = True
 
     def approve(self, approved: bool) -> None:
         self._approval_result = approved
@@ -457,6 +462,8 @@ class WorkflowWorker(QObject):
             self._run_generate_world()
         elif task == TaskType.WRITE_CHAPTER:
             self._run_write_chapter()
+        elif task == TaskType.WRITE_BOOK:
+            self._run_write_book()
         elif task == TaskType.REVIEW_CHAPTER:
             self._run_review_chapter()
         elif task == TaskType.REWRITE_CHAPTER:
@@ -685,6 +692,40 @@ class WorkflowWorker(QObject):
                 result.append(line)
         return "\n".join(result).strip()
 
+    def _outline_chapter_numbers(self) -> list[int]:
+        outline = self.project.outline or ""
+        numbers = set()
+        for match in re.finditer(r"^\s*##\s*Chapter\s+(\d+)\b", outline, re.IGNORECASE | re.MULTILINE):
+            try:
+                numbers.add(int(match.group(1)))
+            except ValueError:
+                continue
+        return sorted(numbers)
+
+    def _next_chapter_number(self) -> int:
+        """
+        Single source of truth for the next chapter to write.
+
+        This matches the logic used by _run_write_chapter(): always advance
+        from whichever chapter number is actually highest on disk, and never
+        invent a separate outline-driven notion of "next".
+        """
+        highest_existing = max((c.number for c in self.project.chapters), default=0)
+        return max(self.project.current_chapter, highest_existing) + 1
+
+    def _clear_temporary_chat_history(self) -> None:
+        self.project.chat_messages = []
+        storage.save_project(self.project)
+
+    def _reload_project_from_storage(self) -> bool:
+        refreshed = storage.load_project(self.project.id)
+        if refreshed is None:
+            logger.error(f"[write_book] Could not reload project '{self.project.id}' from storage.")
+            self.error_occurred.emit("Could not reload project from storage.")
+            return False
+        self.project = refreshed
+        return True
+
     def _build_chapter_evaluation_prompt(
         self,
         chapter_num: int,
@@ -766,10 +807,7 @@ class WorkflowWorker(QObject):
         # left over from before a chapter was manually deleted, or set
         # incorrectly by some other UI action) always continue forward
         # from whichever chapter number is actually highest on disk.
-        highest_existing = max(
-            (c.number for c in self.project.chapters), default=0
-        )
-        chapter_num = max(self.project.current_chapter, highest_existing) + 1
+        chapter_num = self._next_chapter_number()
         self.step_started.emit(f"Writing Chapter {chapter_num}...")
 
         prompt_parts = [f"Write Chapter {chapter_num} of '{self.project.title}'."]
@@ -879,6 +917,53 @@ class WorkflowWorker(QObject):
             self._extract_and_merge_world_info(chapter_text)
             storage.save_project(self.project)
             self.step_finished.emit(f"Chapter {chapter_num}", chapter_text)
+
+    def _run_write_book(self) -> None:
+        outline_numbers = self._outline_chapter_numbers()
+        total = len(outline_numbers) if outline_numbers else max(1, len(self.project.chapters) + 1)
+        self.step_started.emit(f"Writing Book (0/{total})...")
+        written = 0
+        while not self._cancelled:
+            if not self._reload_project_from_storage():
+                break
+            total = len(self._outline_chapter_numbers()) or total
+            pending = self._next_chapter_number()
+            if pending <= 0:
+                break
+            if self.project.outline:
+                target_outline = self._extract_chapter_outline_section(pending)
+                if not target_outline and pending > max((c.number for c in self.project.chapters), default=0) + 1:
+                    break
+            self.project.current_chapter = pending - 1
+            logger.info(f"[write_book] Writing Chapter {pending}/{total}.")
+            self.step_started.emit(f"Writing Chapter {pending}/{total}...")
+            self._run_write_chapter()
+            written += 1
+
+            if self._cancelled:
+                break
+            if self._stop_after_current_chapter:
+                logger.info("[write_book] Stop requested after current chapter.")
+                break
+            if not self._reload_project_from_storage():
+                break
+            next_pending = self._next_chapter_number()
+            if next_pending <= pending:
+                break
+            if self.project.outline:
+                target_outline = self._extract_chapter_outline_section(next_pending)
+                if not target_outline and next_pending > max((c.number for c in self.project.chapters), default=0) + 1:
+                    break
+            if next_pending is not None:
+                logger.info(f"[write_book] Clearing chat before Chapter {pending}.")
+                self._clear_temporary_chat_history()
+                self.clear_chat_requested.emit()
+                self.step_started.emit("Clearing chat...")
+
+        if written == 0:
+            logger.info("[write_book] No pending outline chapters found.")
+        else:
+            logger.info(f"[write_book] Finished writing {written} chapter(s).")
 
     def _run_review_chapter(self) -> None:
         chapter_num = self.project.current_chapter
@@ -1037,6 +1122,7 @@ class WorkflowThread(QThread):
     error_occurred = Signal(str)
     model_loading = Signal(str)
     approval_needed = Signal(str, str)
+    clear_chat_requested = Signal()
 
     def __init__(
         self,
@@ -1057,9 +1143,13 @@ class WorkflowThread(QThread):
         self.worker.error_occurred.connect(self.error_occurred)
         self.worker.model_loading.connect(self.model_loading)
         self.worker.approval_needed.connect(self.approval_needed)
+        self.worker.clear_chat_requested.connect(self.clear_chat_requested)
 
     def run(self) -> None:
         self.worker.run()
 
     def cancel(self) -> None:
         self.worker.cancel()
+
+    def request_stop_after_current_chapter(self) -> None:
+        self.worker.request_stop_after_current_chapter()
