@@ -28,9 +28,15 @@ class WriterAgent:
             # Extract just the relevant chapter section if possible
             relevant = self._extract_chapter_from_outline(project.outline, chapter_number)
             if relevant:
-                parts.append(f"\nChapter outline:\n{relevant}")
+                parts.append(
+                    "\nChapter outline (binding source of truth for this chapter):\n"
+                    f"{relevant}"
+                )
             else:
-                parts.append(f"\nFull outline:\n{project.outline}")
+                parts.append(
+                    "\nFull outline (binding source of truth for this chapter):\n"
+                    f"{project.outline}"
+                )
 
         if project.memory:
             parts.append(f"\nStory Memory (what has happened so far):\n{project.memory}")
@@ -54,8 +60,12 @@ class WriterAgent:
             parts.append(f"\nSpecial instructions:\n{instructions}")
 
         parts.append(
-            "\nWrite the full chapter with vivid prose, dialogue, and action. "
-            "Do not summarize. Write only the chapter content."
+            "\nWrite the chapter strictly from the outline. "
+            "Do not invent major events, resolutions, or later developments not present in the outline. "
+            "Do not introduce major characters before they appear in the outline. "
+            "If the outline leaves a situation open, keep it open. "
+            "Develop the outlined scenes in vivid prose, but do not create a different story. "
+            "Write only the chapter content."
         )
 
         return "\n\n".join(parts)

@@ -190,7 +190,7 @@ class OutlineTab(QWidget):
                 "Your chapter-by-chapter outline will appear here.\n\n"
                 "Click 'Generate' to create one from your synopsis, "
                 "or write it manually.\n\n"
-                "Format:\n## Chapter 1: Title\nSummary of chapter..."
+                "Format:\n## Chapter 1: Title\nObjective:\n...\n\nScenes required:\n- ...\n\nScenes prohibited:\n- ..."
             )
         )
         self.editor.content_saved.connect(self.content_changed.emit)

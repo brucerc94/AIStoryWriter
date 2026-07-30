@@ -82,11 +82,17 @@ def _estimate_task_instruction(task: TaskType) -> str:
         ),
         TaskType.GENERATE_OUTLINE: (
             "Generate a detailed chapter-by-chapter outline for this novel. "
-            "For each chapter: provide the chapter number, a title, and a 2-3 sentence summary. "
-            "Format each chapter as:\n"
+            "For each chapter, use a structured format with these sections:\n"
             "## Chapter N: Title\n"
-            "Summary text.\n\n"
-            "Write a complete outline with enough chapters to tell the full story."
+            "Objective:\n"
+            "1-2 sentences describing the chapter's purpose.\n"
+            "Scenes required:\n"
+            "- Bullet the beats that must happen in this chapter.\n"
+            "Scenes prohibited:\n"
+            "- Bullet anything that must not happen yet.\n\n"
+            "Keep the outline concrete and binding. "
+            "Do not turn it into a free-form summary. "
+            "Write enough chapters to tell the full story."
         ),
         TaskType.REVIEW_OUTLINE: (
             "Review the provided story outline. Analyze it for:\n"
@@ -619,10 +625,15 @@ def build_system_prompt(
             "Provide specific, actionable feedback. Then suggest an improved version if needed."
         ),
         TaskType.WRITE_CHAPTER: (
-            "Write this chapter of the novel. "
-            "Match the established tone, voice, and style. "
-            "Write vivid prose with dialogue, description, and action. "
-            "Do not summarize — write the full scene. "
+            "Write this chapter strictly from the outline. "
+            "The outline is binding and is the source of truth. "
+            "Develop only the scenes, beats, and outcomes that the outline specifies. "
+            "Do not invent major events, resolutions, villains, revelations, or new plot turns that are not explicitly present in the outline. "
+            "Do not advance events from later chapters. "
+            "Do not resolve conflicts unless the outline resolves them here. "
+            "Do not introduce major characters before the outline introduces them. "
+            "If the outline leaves a situation open, leave the chapter open as well. "
+            "Match the established tone, voice, and style while staying faithful to the outline. "
             "Write only the chapter content."
         ),
         TaskType.REVIEW_CHAPTER: (

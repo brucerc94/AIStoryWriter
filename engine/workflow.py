@@ -865,6 +865,7 @@ class WorkflowWorker(QObject):
             if self.extra_input
             else (
                 f"Generate a complete chapter-by-chapter outline for '{self.project.title}'.\n"
+                "Use the structured format with Objective, Scenes required, and Scenes prohibited for each chapter.\n"
                 + (f"Synopsis: {self.project.synopsis}" if self.project.synopsis else "")
             )
         )
@@ -1085,16 +1086,16 @@ class WorkflowWorker(QObject):
             specific = self._extract_chapter_outline_section(chapter_num)
             if specific:
                 prompt_parts.append(
-                    "This chapter's planned outline entry — follow this "
-                    f"specifically, don't just restate the general premise:\n{specific}"
+                    "This chapter's planned outline entry is binding. "
+                    "Follow it exactly and do not expand beyond what it states.\n"
+                    f"{specific}"
                 )
             else:
                 # Couldn't find a "## Chapter N" heading for this number
                 # (outline format may differ) — fall back to the full
-                # outline so the model has SOME guidance rather than none.
+                # outline so the model still treats it as authoritative.
                 prompt_parts.append(
-                    f"Full outline (no specific Chapter {chapter_num} heading "
-                    f"found in it — use it to judge what should happen next):"
+                    f"Full outline (authoritative source of truth for Chapter {chapter_num}):"
                     f"\n{self.project.outline}"
                 )
 
@@ -1105,10 +1106,19 @@ class WorkflowWorker(QObject):
             if prev and prev.content:
                 tail = prev.content[-800:].strip()
                 prompt_parts.append(
-                    f"End of the previous chapter — continue seamlessly from "
-                    f"here, don't repeat it or re-summarize what already "
-                    f"happened:\n...{tail}"
+                    f"End of the previous chapter for continuity only:\n...{tail}"
                 )
+
+        prompt_parts.append(
+            "Rules:\n"
+            "- The outline is binding and must be followed exactly.\n"
+            "- Do not introduce important events that are not in the outline.\n"
+            "- Do not bring in later-chapter events early.\n"
+            "- Do not resolve any conflict unless the outline resolves it here.\n"
+            "- Do not introduce major characters before they appear in the outline.\n"
+            "- If the outline leaves something open, end the chapter open.\n"
+            "- Your job is to develop the outlined scenes, not invent a different story."
+        )
 
         if self.extra_input:
             prompt = self.extra_input
@@ -1212,6 +1222,31 @@ class WorkflowWorker(QObject):
 
             if self._cancelled:
                 break
+
+            # Update Story Memory for the chapter we JUST wrote, before moving
+            # on to the next one. Without this, project.memory (which every
+            # generation's system prompt includes) stays one chapter behind —
+            # the next chapter would be written without knowing what just
+            # happened in this one.
+            wrote_chapter = any(c.number == pending for c in self.project.chapters)
+            if wrote_chapter:
+                # _run_write_chapter() never touches current_chapter itself,
+                # so it's still (pending - 1) from the line above. Point it at
+                # the chapter we actually just finished before calling
+                # _run_update_memory(), which reads current_chapter to decide
+                # which chapter to summarize.
+                self.project.current_chapter = pending
+                logger.info(f"[write_book] Updating Story Memory for Chapter {pending}.")
+                self.step_started.emit(f"Updating Story Memory for Chapter {pending}...")
+                self._run_update_memory()
+            else:
+                logger.warning(
+                    f"[write_book] Chapter {pending} was not produced "
+                    "(empty generation?) — skipping memory update for it."
+                )
+
+            if self._cancelled:
+                break
             if self._stop_after_current_chapter:
                 logger.info("[write_book] Stop requested after current chapter.")
                 break
@@ -1302,23 +1337,118 @@ class WorkflowWorker(QObject):
         if chapter_num == 0:
             chapter_num = len(self.project.chapters)
 
-        chapter = next((c for c in self.project.chapters if c.number == chapter_num), None)
+        chapter = next(
+            (c for c in self.project.chapters if c.number == chapter_num),
+            None,
+        )
+
         if not chapter:
             self.error_occurred.emit("No chapter found to extract memory from.")
             return
 
-        existing = f"\n\nExisting memory:\n{self.project.memory}" if self.project.memory else ""
-        prompt = (
-            f"Update the story memory after Chapter {chapter_num}: '{chapter.title}'.\n\n"
-            f"Chapter content:\n{chapter.content}"
-            f"{existing}"
-        )
+        existing_memory = self.project.memory.strip() or "(empty)"
+
+        world = self.project.world.strip() or "(none)"
+
+        characters = "\n".join(
+            f"- {c.name}: {c.description}"
+            for c in self.project.characters
+        ) or "(none)"
+
+        prompt = f"""
+    You are updating the STORY MEMORY of a novel.
+
+    IMPORTANT:
+
+    Story Memory is NOT a wiki.
+
+    Story Memory is NOT a character database.
+
+    Story Memory is NOT worldbuilding.
+
+    Those are stored separately.
+
+    ==================================================
+    WORLD INFORMATION
+    ==================================================
+
+    {world}
+
+    ==================================================
+    CHARACTERS
+    ==================================================
+
+    {characters}
+
+    ==================================================
+    CURRENT STORY MEMORY
+    ==================================================
+
+    {existing_memory}
+
+    ==================================================
+    NEW CHAPTER
+    ==================================================
+
+    Chapter {chapter_num}: {chapter.title}
+
+    {chapter.content}
+
+    ==================================================
+    YOUR JOB
+    ==================================================
+
+    Update ONLY the Story Memory.
+
+    DO NOT repeat information already contained in:
+    - World
+    - Characters
+
+    Do NOT describe:
+    - physical appearance
+    - locations already documented
+    - permanent abilities
+    - lore
+    - history
+    - personality unless it has changed
+
+    Instead keep only information needed to continue writing the next chapter.
+
+    The Story Memory should contain ONLY:
+
+    # Current Location
+
+    # Current Situation
+
+    # Active Goals
+
+    # Important Relationship Changes
+
+    # Inventory / Status Changes
+
+    # Unresolved Plot Threads
+
+    Remove information that is no longer relevant.
+
+    Keep unresolved information from previous chapters.
+
+    Never delete ongoing plot threads.
+
+    Output ONLY the updated Story Memory.
+
+    Do NOT explain your reasoning.
+    Do NOT use markdown code blocks.
+    """
 
         result = self._run_inference(
-            TaskType.UPDATE_MEMORY, prompt, add_to_chat=False, max_tokens=2048
+            TaskType.UPDATE_MEMORY,
+            prompt,
+            add_to_chat=False,
+            max_tokens=1500,
         )
+
         if result:
-            self.project.memory = result
+            self.project.memory = result.strip()
             self.project.current_chapter = chapter_num
             storage.save_project(self.project)
             self.step_finished.emit("Story Memory", result)
