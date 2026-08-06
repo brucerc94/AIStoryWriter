@@ -197,6 +197,7 @@ class WorkflowWorker(QObject):
             task,
             custom_instructions=self._custom_system_instructions(),
             language=self._response_language(),
+            allow_nsfw=self._allow_nsfw(),
         )
         context_limit = self._model_context_limit()
         reply_reserved = max(256, min(4096, context_limit // 3))
@@ -269,7 +270,7 @@ class WorkflowWorker(QObject):
         logger.info(
             f"[{task.value}] prompt detail: selected_budget={selected_budget}, "
             f"used={prompt_tokens + effective_max_tokens}, "
-            f"remainingâ‰ˆ{context_limit - (prompt_tokens + effective_max_tokens)}"
+            f"remaining≈{context_limit - (prompt_tokens + effective_max_tokens)}"
         )
         if selected_budget != context_limit:
             logger.info(f"[{task.value}] context compacted before inference.")
@@ -279,6 +280,32 @@ class WorkflowWorker(QObject):
                 f"{effective_max_tokens} reply tokens fit in context. "
                 "The response will be capped to the effective limit."
             )
+
+        # ── Full prompt dump ──────────────────────────────────────────────────
+        # Printed to stdout so it's always visible in the terminal regardless
+        # of the logging level configured elsewhere. Each message role is
+        # clearly separated so the structure is easy to scan at a glance.
+        _ROLE_COLORS = {
+            "system":    "\033[36m",   # cyan
+            "user":      "\033[32m",   # green
+            "assistant": "\033[33m",   # yellow
+        }
+        _RESET = "\033[0m"
+        _DIVIDER = "─" * 72
+
+        print(f"\n{'═' * 72}")
+        print(f"  PROMPT DUMP  [{task.value.upper()}]  "
+              f"{len(messages)} msg(s)  ~{prompt_tokens} tokens")
+        print(f"{'═' * 72}")
+        for idx, msg in enumerate(messages):
+            role = msg.get("role", "?")
+            content = msg.get("content", "")
+            color = _ROLE_COLORS.get(role, "")
+            print(f"{color}[{idx}] {role.upper()}{_RESET}")
+            print(_DIVIDER)
+            print(content)
+            print()
+        print(f"{'═' * 72}\n")
 
         accumulated = []
 
@@ -340,6 +367,12 @@ class WorkflowWorker(QObject):
         if self.settings is not None:
             return getattr(self.settings, "response_language", "") or ""
         return ""
+
+    def _allow_nsfw(self) -> bool:
+        """Whether NSFW content is permitted, from Settings."""
+        if self.settings is not None:
+            return bool(getattr(self.settings, "allow_nsfw", False))
+        return False
 
     def _extract_and_merge_characters(self, source_text: str) -> None:
         """
@@ -550,194 +583,6 @@ class WorkflowWorker(QObject):
         max_tokens: int = 2048,
     ) -> str:
         return self._run_inference_v2(task, user_message, add_to_chat=add_to_chat, max_tokens=max_tokens)
-        if self._cancelled:
-            logger.info(f"[{task.value}] cancelled before inference started.")
-            return ""
-
-        if not self._load_model_for_task(task):
-            return ""
-
-        system_prompt = build_system_prompt(
-            self.project,
-            task,
-            custom_instructions=self._custom_system_instructions(),
-            language=self._response_language(),
-        )
-        engine = get_engine()
-        context_limit = engine.current_context_size or self.settings.default_context_size
-        reply_reserved = max(256, min(4096, context_limit // 3))
-        budget_steps = [context_limit]
-        for factor in (0.85, 0.70, 0.55, 0.40):
-            reduced = int(context_limit * factor)
-            if reduced >= 1024:
-                budget_steps.append(reduced)
-        budget_steps.append(1024)
-
-        messages = []
-        context_stats = {}
-        effective_max_tokens = max_tokens
-        compacted = False
-        used_budget = context_limit
-        seen_budgets = set()
-
-        for budget in budget_steps:
-            if budget in seen_budgets:
-                continue
-            seen_budgets.add(budget)
-
-            candidate_messages = build_context_for_model(
-                self.project,
-                user_message,
-                system_prompt,
-                max_context_tokens=budget,
-                task=task,
-                reply_reserved=reply_reserved,
-            )
-            candidate_stats = estimate_context_usage(
-                self.project,
-                user_message,
-                system_prompt,
-                max_context_tokens=budget,
-                task=task,
-                reply_reserved=reply_reserved,
-                requested_max_tokens=max_tokens,
-            )
-            messages = candidate_messages
-            context_stats = candidate_stats
-            effective_max_tokens = candidate_stats["effective_max_tokens"]
-            used_budget = budget
-
-            if candidate_stats["estimated_total"] <= budget:
-                compacted = budget != context_limit
-                break
-
-        if not context_stats:
-            messages = build_context_for_model(
-                self.project,
-                user_message,
-                system_prompt,
-                max_context_tokens=context_limit,
-                task=task,
-                reply_reserved=reply_reserved,
-            )
-            context_stats = estimate_context_usage(
-                self.project,
-                user_message,
-                system_prompt,
-                max_context_tokens=context_limit,
-                task=task,
-                reply_reserved=reply_reserved,
-                requested_max_tokens=max_tokens,
-            )
-            effective_max_tokens = context_stats["effective_max_tokens"]
-            used_budget = context_limit
-
-        if context_stats.get("estimated_total", 0) > used_budget:
-            logger.warning(
-                f"[{task.value}] prompt still exceeds budget after compaction attempt: "
-                f"used≈{context_stats['estimated_total']} > budget={used_budget}"
-            )
-            if task == TaskType.WRITE_CHAPTER and self.project.chat_messages:
-                logger.info(
-                    f"[{task.value}] clearing transient chat history and rebuilding context."
-                )
-                self._clear_chat_messages_for_continuation()
-                messages = build_context_for_model(
-                    self.project,
-                    user_message,
-                    system_prompt,
-                    max_context_tokens=used_budget,
-                    task=task,
-                    reply_reserved=reply_reserved,
-                )
-                context_stats = estimate_context_usage(
-                    self.project,
-                    user_message,
-                    system_prompt,
-                    max_context_tokens=used_budget,
-                    task=task,
-                    reply_reserved=reply_reserved,
-                    requested_max_tokens=max_tokens,
-                )
-                effective_max_tokens = context_stats["effective_max_tokens"]
-                compacted = True
-
-        if context_stats.get("estimated_total", 0) > used_budget:
-            compacted = True
-
-        temperature = self._task_temperature(task)
-        logger.info(
-            f"[{task.value}] running inference: {len(messages)} messages, "
-            f"temperature={temperature}, max_tokens={effective_max_tokens}"
-        )
-        logger.info(
-            f"[{task.value}] context budget: "
-            f"Context Limit={context_stats['max_context_tokens']} "
-            f"Prompt Tokens={context_stats['prompt_tokens']} "
-            f"Available Reply={context_stats['available_reply_tokens']} "
-            f"Requested Reply={context_stats['requested_max_tokens']} "
-            f"Effective Reply={effective_max_tokens}"
-        )
-        logger.info(
-            f"[{task.value}] prompt detail: "
-            f"system={context_stats['system_tokens']}, "
-            f"user={context_stats['user_tokens']}, "
-            f"history={context_stats['history_tokens']}, "
-            f"reply_headroom={context_stats['reply_headroom']}, "
-            f"used={context_stats['estimated_total']}, "
-            f"remaining≈{context_stats['estimated_remaining']}, "
-            f"recent_messages={context_stats['recent_messages']}"
-        )
-        sections = context_stats.get("sections", {})
-        if sections:
-            logger.info(
-                f"[{task.value}] section breakdown: "
-                + ", ".join(f"{name}={tokens}" for name, tokens in sections.items())
-            )
-        if compacted:
-            logger.info(f"[{task.value}] context compacted before inference.")
-        if effective_max_tokens < max_tokens:
-            logger.warning(
-                f"[{task.value}] requested max_tokens={max_tokens} but only "
-                f"{effective_max_tokens} reply tokens fit in context. "
-                "The response will be capped to the effective limit."
-            )
-
-        accumulated = []
-
-        def on_token(token: str) -> None:
-            accumulated.append(token)
-            self.token_received.emit(token)
-
-        engine = get_engine()
-        try:
-            result = engine.generate(
-                messages=messages,
-                max_tokens=effective_max_tokens,
-                temperature=temperature,
-                stream=True,
-                stream_callback=on_token,
-                cancel_check=lambda: self._cancelled,
-            )
-        except Exception as e:
-            logger.error(f"[{task.value}] inference error: {e}\n{traceback.format_exc()}")
-            self.error_occurred.emit(f"Inference error: {e}\n{traceback.format_exc()}")
-            return ""
-
-        if self._cancelled:
-            logger.info(f"[{task.value}] generation stopped by user "
-                        f"({len(result)} chars generated before stop).")
-
-        logger.info(f"[{task.value}] inference complete: {len(result)} chars generated.")
-
-        if add_to_chat:
-            # Record user message and assistant response in chat history
-            user_msg = ChatMessage(role=MessageRole.USER, content=user_message)
-            assistant_msg = ChatMessage(role=MessageRole.ASSISTANT, content=result)
-            self.project.chat_messages.append(user_msg)
-            self.project.chat_messages.append(assistant_msg)
-
-        return result
 
     def run(self) -> None:
         logger.info(f"[workflow] Task started: {self.task.value} (project='{self.project.title}')")
@@ -960,10 +805,31 @@ class WorkflowWorker(QObject):
                 logger.warning(f"[generate_outline] generation pass {generation_pass} returned empty text.")
                 break
 
+            # On continuation passes (pass 2+) the model sometimes ignores the
+            # "do not repeat" instruction and restarts from Chapter 1. Strip any
+            # repeated chapters so only genuinely new content gets appended.
+            if generation_pass > 1 and outline_text:
+                highest_so_far = max(self._chapter_numbers_in_text(outline_text), default=0)
+                generated = self._extract_new_outline_chapters(generated, highest_so_far)
+                if not generated:
+                    logger.warning(
+                        f"[generate_outline] pass {generation_pass} produced only repeated "
+                        "chapters — skipping this response."
+                    )
+                    break
+
             outline_text = (
                 (outline_text.rstrip() + "\n\n" + generated.strip()).strip()
                 if outline_text else generated.strip()
             )
+
+            # Keep project.outline in sync with the accumulated text so that
+            # build_context_for_model picks up what already exists when it
+            # builds the system prompt for the next continuation pass.
+            # Without this, the system prompt for pass 2+ still shows the OLD
+            # (or empty) outline, giving the model authority to restart from
+            # Chapter 1 instead of continuing from where it stopped.
+            self.project.outline = outline_text
 
             if not requested_n:
                 # No explicit chapter count to check against (e.g. outline
@@ -1029,26 +895,71 @@ class WorkflowWorker(QObject):
                 return None
         return None
 
+    @staticmethod
+    def _extract_new_outline_chapters(generated: str, highest_already: int) -> str:
+        """
+        Strip repeated chapters from a continuation response.
+
+        When the model is asked to continue from Chapter N+1 it sometimes
+        ignores the "do not repeat" instruction and restarts from Chapter 1.
+        This filters the response to only keep headings with a chapter number
+        strictly greater than highest_already, discarding everything before the
+        first genuinely new heading (including preamble text and repeated
+        chapter entries).
+
+        If the model responded correctly and started at Chapter N+1, the text
+        passes through unchanged. If it only repeated old chapters (no new
+        content at all) an empty string is returned, which the caller treats as
+        an empty generation and breaks the continuation loop.
+        """
+        if not generated.strip():
+            return ""
+        lines = generated.split("\n")
+        new_lines = []
+        skip_until_new = True
+        for line in lines:
+            if skip_until_new:
+                m = re.match(r"^\s*##\s*Chapter\s+(\d+)\b", line, re.IGNORECASE)
+                if m:
+                    chapter_num = int(m.group(1))
+                    if chapter_num > highest_already:
+                        skip_until_new = False
+                        new_lines.append(line)
+                # else: repeated chapter heading or pre-chapter preamble — skip
+            else:
+                new_lines.append(line)
+        return "\n".join(new_lines).strip()
+
     def _build_outline_continuation_prompt(self, outline_so_far: str, requested_n: Optional[int]) -> str:
         """
-        Mirrors _build_chapter_continuation_prompt: asks the model to pick
-        up exactly where the outline left off, instead of restarting from
-        Chapter 1 (which is what would happen if we just re-sent the
-        original prompt after running out of tokens).
+        Continuation prompt for generate-outline passes 2+.
+
+        The system prompt deliberately omits project.outline for
+        GENERATE_OUTLINE tasks (to avoid contaminating a fresh generation
+        with a stale prior outline). For continuation passes this works
+        against us: the model has no authoritative view of what already
+        exists and may restart from Chapter 1.
+
+        We solve this by embedding the full accumulated outline text
+        directly in the user message, so the model sees exactly what it
+        has written so far regardless of what the system prompt includes.
         """
         numbers = self._chapter_numbers_in_text(outline_so_far)
         highest_so_far = max(numbers) if numbers else 0
         next_num = highest_so_far + 1
-        tail = outline_so_far[-1200:].strip()
         target = f" through Chapter {requested_n}" if requested_n else ""
+
         parts = [
             f"Continue the chapter-by-chapter outline for '{self.project.title}'.",
-            f"It currently covers chapters up to Chapter {highest_so_far}.",
-            f'Continue writing starting exactly at "## Chapter {next_num}"{target}.',
-            "Do not repeat or rewrite any earlier chapter.",
-            "Use the same structured format for each chapter: Objective, Scenes required, Scenes prohibited.",
+            f"The outline already covers Chapters 1–{highest_so_far}. "
+            f"Do NOT rewrite or repeat any of them.",
+            f'Pick up exactly at "## Chapter {next_num}"{target} and continue '
+            f"until Chapter {requested_n} is complete." if requested_n else
+            f'Pick up exactly at "## Chapter {next_num}" and continue.',
+            "Use the same structured format for each chapter: "
+            "Objective, Scenes required, Scenes prohibited.",
             "",
-            f"Outline so far ends with:\n...{tail}",
+            f"Outline written so far (do not repeat this):\n{outline_so_far.strip()}",
         ]
         return "\n\n".join(parts).strip()
 
@@ -1186,18 +1097,19 @@ class WorkflowWorker(QObject):
     ) -> str:
         outline_context = self._extract_chapter_outline_section(chapter_num)
         parts = [
-            f"Decide whether Chapter {chapter_num} is complete.",
-            "Use the synopsis, outline, story memory, characters, and the chapter's narrative goal.",
+            f"Decide whether Chapter {chapter_num} of '{self.project.title}' is complete.",
+            f"You are evaluating ONLY Chapter {chapter_num} — not the whole book, "
+            f"not Chapter 1, not any other chapter.",
             "Respond with exactly one token: true or false.",
             "No punctuation. No quotes. No markdown. No JSON. No explanation. No extra text.",
-            "true means the chapter is complete and should stop.",
-            "false means the chapter is not complete and must continue.",
+            "true  → Chapter is complete and should stop.",
+            "false → Chapter is not complete and must continue.",
             "",
-            f"Chapter Goal:\n{chapter_goal.strip() or '(none)'}",
+            f"Chapter {chapter_num} Goal:\n{chapter_goal.strip() or '(none)'}",
         ]
         if outline_context:
-            parts.append(f"Outline Context:\n{outline_context}")
-        parts.append(f"Chapter Draft:\n{chapter_text}")
+            parts.append(f"Chapter {chapter_num} Outline Entry:\n{outline_context}")
+        parts.append(f"Chapter {chapter_num} Draft:\n{chapter_text}")
         return "\n\n".join(parts).strip()
 
     def _build_chapter_continuation_prompt(
@@ -1207,15 +1119,35 @@ class WorkflowWorker(QObject):
         chapter_goal: str,
     ) -> str:
         tail = chapter_text[-1200:].strip()
+
+        # List already-completed chapters so the model cannot confuse which
+        # chapter is currently in progress or restart from Chapter 1.
+        completed = sorted(c.number for c in self.project.chapters if c.number != chapter_num and c.content)
+        if completed:
+            completed_note = (
+                f"Chapters already fully written and saved: {', '.join(str(n) for n in completed)}. "
+                f"Do NOT rewrite any of them."
+            )
+        else:
+            completed_note = ""
+
         parts = [
-            f"Continue exactly Chapter {chapter_num}.",
-            "Do not repeat text.",
-            "Continue from the last sentence or scene naturally.",
-            "Write only the missing material.",
+            f"You are in the middle of writing Chapter {chapter_num} of '{self.project.title}'.",
+            f"Chapter {chapter_num} is NOT finished yet. Continue it — do not restart it, "
+            f"do not start a new chapter, do not write Chapter 1 or any other chapter.",
+        ]
+
+        if completed_note:
+            parts.append(completed_note)
+
+        parts += [
+            "Do not repeat any text already written.",
+            "Write only the missing material that completes Chapter "
+            f"{chapter_num} according to its goal.",
             "",
-            f"Chapter Goal:\n{chapter_goal.strip() or '(none)'}",
+            f"Chapter {chapter_num} Goal:\n{chapter_goal.strip() or '(none)'}",
             "",
-            f"Chapter so far ends with:\n...{tail}",
+            f"Chapter {chapter_num} so far ends with:\n...{tail}",
         ]
         return "\n\n".join(parts).strip()
 
@@ -1301,6 +1233,23 @@ class WorkflowWorker(QObject):
             "- If the outline leaves something open, end the chapter open.\n"
             "- Your job is to develop the outlined scenes, not invent a different story."
         )
+
+        # Author profile: style preferences + intent signals relevant to prose.
+        # The system prompt already carries the full Creative Direction section;
+        # repeating the concise fragments here reinforces them at the exact
+        # point of generation without significant token cost.
+        style_frag = self.project.writing_style.to_prompt_fragment()
+        if style_frag:
+            prompt_parts.append(f"Style to apply:\n{style_frag}")
+
+        intent = self.project.author_intent
+        intent_lines = []
+        if intent.emotional_journey:
+            intent_lines.append(f"Emotional tone to sustain in this chapter: {intent.emotional_journey}")
+        if intent.avoid:
+            intent_lines.append(f"Avoid entirely: {intent.avoid}")
+        if intent_lines:
+            prompt_parts.append("\n".join(intent_lines))
 
         if self.extra_input:
             prompt = self.extra_input
@@ -1487,7 +1436,28 @@ class WorkflowWorker(QObject):
             self.error_occurred.emit(f"Chapter {chapter_num} not found.")
             return
 
-        prompt = f"Review Chapter {chapter_num}: '{chapter.title}'\n\n{chapter.content}"
+        review_parts = [f"Review Chapter {chapter_num}: '{chapter.title}'\n\n{chapter.content}"]
+
+        # Give the reviewer the author's intent and style so it evaluates the
+        # chapter against the book's actual goals, not just generic writing quality.
+        style_frag = self.project.writing_style.to_prompt_fragment()
+        if style_frag:
+            review_parts.append(f"Style preferences to check against:\n{style_frag}")
+
+        intent = self.project.author_intent
+        intent_lines = []
+        if intent.emotional_journey:
+            intent_lines.append(f"Intended emotional experience: {intent.emotional_journey}")
+        if intent.lasting_impression:
+            intent_lines.append(f"What the reader should take away: {intent.lasting_impression}")
+        if intent.themes:
+            intent_lines.append(f"Themes to serve: {intent.themes}")
+        if intent.avoid:
+            intent_lines.append(f"Elements to flag if present: {intent.avoid}")
+        if intent_lines:
+            review_parts.append("Author's creative intent for context:\n" + "\n".join(intent_lines))
+
+        prompt = "\n\n".join(review_parts)
         result = self._run_inference(
             TaskType.REVIEW_CHAPTER, prompt, add_to_chat=True, max_tokens=2048
         )
@@ -1516,15 +1486,29 @@ class WorkflowWorker(QObject):
 
         self.step_started.emit(f"Rewriting Chapter {chapter_num} with review feedback...")
 
-        prompt = (
-            self.extra_input
-            if self.extra_input
-            else (
+        if self.extra_input:
+            prompt = self.extra_input
+        else:
+            rewrite_parts = [
                 f"Chapter {chapter_num}: '{chapter.title}'\n\n"
                 f"Current content:\n{chapter.content}\n\n"
                 f"Review feedback to address:\n{chapter.last_review}"
-            )
-        )
+            ]
+            style_frag = self.project.writing_style.to_prompt_fragment()
+            if style_frag:
+                rewrite_parts.append(f"Style to preserve:\n{style_frag}")
+
+            intent = self.project.author_intent
+            intent_lines = []
+            if intent.emotional_journey:
+                intent_lines.append(f"Emotional tone to sustain: {intent.emotional_journey}")
+            if intent.avoid:
+                intent_lines.append(f"Avoid entirely: {intent.avoid}")
+            if intent_lines:
+                rewrite_parts.append("\n".join(intent_lines))
+
+            prompt = "\n\n".join(rewrite_parts)
+
         result = self._run_inference(
             TaskType.REWRITE_CHAPTER, prompt, add_to_chat=True, max_tokens=self._content_max_tokens()
         )

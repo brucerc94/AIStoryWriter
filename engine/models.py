@@ -241,6 +241,163 @@ class TaskTemperatures:
 
 
 @dataclass
+class AuthorIntent:
+    """
+    The author's high-level creative goals for this book.
+
+    Answers "why" and "what for", not "what happens" — that is the
+    synopsis's job. These fields complement the synopsis; they do not
+    duplicate it. All fields are optional: leave empty and the model
+    infers from the synopsis and genre.
+
+    Persisted in project.json. Available to every task that builds a
+    prompt (outline, chapters, review, rewrite) via project.author_intent.
+    """
+    # What emotional arc should the reader experience while reading?
+    emotional_journey: str = ""
+    # What should the reader feel or remember long after the last page?
+    lasting_impression: str = ""
+    # What themes or ideas does this book want to explore?
+    themes: str = ""
+    # What makes this book distinct — voice, structure, perspective?
+    unique_elements: str = ""
+    # Works that inspired this book, and what aspect of them (optional).
+    inspirations: str = ""
+    # Subjects, tropes, or tones to avoid entirely.
+    avoid: str = ""
+
+    # ── Prompt rendering ──────────────────────────────────────────────
+
+    def is_empty(self) -> bool:
+        return not any([
+            self.emotional_journey, self.lasting_impression,
+            self.themes, self.unique_elements,
+            self.inspirations, self.avoid,
+        ])
+
+    def to_prompt_fragment(self) -> str:
+        """
+        Renders only the fields the author filled in, as concise model
+        instructions. Returns "" when the profile is empty so callers
+        can skip the whole section without adding an empty header.
+        """
+        if self.is_empty():
+            return ""
+        lines = []
+        if self.emotional_journey:
+            lines.append(f"Emotional journey for the reader: {self.emotional_journey}")
+        if self.lasting_impression:
+            lines.append(f"What the reader should remember after finishing: {self.lasting_impression}")
+        if self.themes:
+            lines.append(f"Core themes to explore: {self.themes}")
+        if self.unique_elements:
+            lines.append(f"What makes this book unique: {self.unique_elements}")
+        if self.inspirations:
+            lines.append(f"Inspirations (and what aspect): {self.inspirations}")
+        if self.avoid:
+            lines.append(f"Avoid entirely: {self.avoid}")
+        return "\n".join(lines)
+
+    # ── Serialization ─────────────────────────────────────────────────
+
+    def to_dict(self) -> dict:
+        return {
+            "emotional_journey": self.emotional_journey,
+            "lasting_impression": self.lasting_impression,
+            "themes": self.themes,
+            "unique_elements": self.unique_elements,
+            "inspirations": self.inspirations,
+            "avoid": self.avoid,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "AuthorIntent":
+        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
+
+
+@dataclass
+class WritingStyle:
+    """
+    Technical and stylistic preferences for how the book is written.
+
+    Answers "how it reads", not "what it says". All fields use a small
+    controlled vocabulary so the prompt fragment stays concise. Empty
+    field = let the model infer from the synopsis and genre context.
+
+    Persisted in project.json alongside AuthorIntent.
+    """
+    # Narrative point of view
+    narrator_pov: str = ""        # "first person" | "third limited" | "third omniscient" | "second person"
+    # Chapter-level rhythm
+    pacing: str = ""              # "fast" | "moderate" | "slow" | "variable"
+    # Amount of descriptive prose vs. action/dialogue
+    description_density: str = "" # "sparse" | "balanced" | "rich"
+    # Dialogue presence
+    dialogue_style: str = ""      # "frequent" | "moderate" | "minimal"
+    # How graphic violence is handled
+    violence_level: str = ""      # "none" | "implied" | "moderate" | "explicit"
+    # Centrality of romance to the story
+    romance_level: str = ""       # "none" | "background" | "subplot" | "central"
+    # Approximate prose length per chapter
+    target_chapter_length: str = "" # "short (~1k words)" | "medium (~2k words)" | "long (~3k+ words)"
+    # Only fill if the genre is genuinely ambiguous from the synopsis
+    genre_tags: str = ""          # e.g. "psychological thriller, neo-noir"
+
+    # ── Prompt rendering ──────────────────────────────────────────────
+
+    def is_empty(self) -> bool:
+        return not any([
+            self.narrator_pov, self.pacing, self.description_density,
+            self.dialogue_style, self.violence_level, self.romance_level,
+            self.target_chapter_length, self.genre_tags,
+        ])
+
+    def to_prompt_fragment(self) -> str:
+        """
+        Renders only specified preferences as concise model instructions.
+        Returns "" when nothing has been set.
+        """
+        if self.is_empty():
+            return ""
+        lines = []
+        if self.genre_tags:
+            lines.append(f"Genre: {self.genre_tags}.")
+        if self.narrator_pov:
+            lines.append(f"Narrative point of view: {self.narrator_pov}.")
+        if self.pacing:
+            lines.append(f"Overall pacing: {self.pacing}.")
+        if self.description_density:
+            lines.append(f"Description density: {self.description_density}.")
+        if self.dialogue_style:
+            lines.append(f"Dialogue style: {self.dialogue_style}.")
+        if self.violence_level:
+            lines.append(f"Violence: {self.violence_level}.")
+        if self.romance_level:
+            lines.append(f"Romance: {self.romance_level}.")
+        if self.target_chapter_length:
+            lines.append(f"Target chapter length: {self.target_chapter_length}.")
+        return "\n".join(lines)
+
+    # ── Serialization ─────────────────────────────────────────────────
+
+    def to_dict(self) -> dict:
+        return {
+            "narrator_pov": self.narrator_pov,
+            "pacing": self.pacing,
+            "description_density": self.description_density,
+            "dialogue_style": self.dialogue_style,
+            "violence_level": self.violence_level,
+            "romance_level": self.romance_level,
+            "target_chapter_length": self.target_chapter_length,
+            "genre_tags": self.genre_tags,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "WritingStyle":
+        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
+
+
+@dataclass
 class Project:
     title: str
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -254,6 +411,9 @@ class Project:
     chat_summary: str = ""
     model_assignments: ModelAssignment = field(default_factory=ModelAssignment)
     task_temperatures: TaskTemperatures = field(default_factory=TaskTemperatures)
+    # Creative intent and style — persist with the project, used by all tasks.
+    author_intent: AuthorIntent = field(default_factory=AuthorIntent)
+    writing_style: WritingStyle = field(default_factory=WritingStyle)
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
     workflow_status: WorkflowStatus = WorkflowStatus.IDLE
@@ -272,6 +432,8 @@ class Project:
             "chat_summary": self.chat_summary,
             "model_assignments": self.model_assignments.to_dict(),
             "task_temperatures": self.task_temperatures.to_dict(),
+            "author_intent": self.author_intent.to_dict(),
+            "writing_style": self.writing_style.to_dict(),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "workflow_status": self.workflow_status.value,
@@ -283,6 +445,8 @@ class Project:
     def from_dict(cls, d: dict) -> "Project":
         ma = ModelAssignment.from_dict(d.get("model_assignments", {}))
         tt = TaskTemperatures.from_dict(d.get("task_temperatures", {}))
+        ai = AuthorIntent.from_dict(d.get("author_intent", {}))
+        ws = WritingStyle.from_dict(d.get("writing_style", {}))
         return cls(
             id=d.get("id", str(uuid.uuid4())),
             title=d["title"],
@@ -293,6 +457,8 @@ class Project:
             chat_summary=d.get("chat_summary", ""),
             model_assignments=ma,
             task_temperatures=tt,
+            author_intent=ai,
+            writing_style=ws,
             created_at=d.get("created_at", datetime.now().isoformat()),
             updated_at=d.get("updated_at", datetime.now().isoformat()),
             workflow_status=WorkflowStatus(d.get("workflow_status", "idle")),
@@ -335,6 +501,12 @@ class AppSettings:
     # passes per chapter/outline, but each pass needs that much reply room
     # left over within Context Size, so it's capped there automatically.
     content_max_tokens: int = 4000
+    # When enabled, the model is explicitly told it may write adult/mature
+    # content without restrictions — violence, sexuality, profanity, dark
+    # themes — and that no content filtering is applied. Only affects the
+    # creative-writing tasks (synopsis, outline, chapters, world, memory,
+    # characters); review/chat/summary tasks are unaffected.
+    allow_nsfw: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -350,6 +522,7 @@ class AppSettings:
             "response_language": self.response_language,
             "enable_thinking": self.enable_thinking,
             "content_max_tokens": self.content_max_tokens,
+            "allow_nsfw": self.allow_nsfw,
         }
 
     @classmethod

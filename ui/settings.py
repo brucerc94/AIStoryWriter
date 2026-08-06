@@ -240,6 +240,19 @@ class AppSettingsWidget(QWidget):
         )
         form.addRow("", self.enable_thinking_check)
 
+        # NSFW / unrestricted content
+        self.allow_nsfw_check = QCheckBox("Allow mature / unrestricted content (NSFW)")
+        self.allow_nsfw_check.setToolTip(
+            "When enabled, the model receives an explicit instruction that it may write "
+            "adult content without restrictions — graphic violence, explicit sexuality, "
+            "strong language, and dark themes — for the creative writing tasks: synopsis, "
+            "outline, chapters, rewrite, world-building, and story memory.\n\n"
+            "Has no effect on review, chat, or summary tasks.\n\n"
+            "Use this when your model has been uncensored/fine-tuned for adult fiction "
+            "and you want it to follow your story without softening scenes."
+        )
+        form.addRow("", self.allow_nsfw_check)
+
         layout.addWidget(box)
 
         # ── Generation settings ──
@@ -319,6 +332,7 @@ class AppSettingsWidget(QWidget):
         self.threads_spin.setValue(settings.default_threads)
         self.autosave_check.setChecked(settings.auto_save)
         self.enable_thinking_check.setChecked(getattr(settings, "enable_thinking", False))
+        self.allow_nsfw_check.setChecked(getattr(settings, "allow_nsfw", False))
         self.language_input.setText(settings.response_language)
         self.max_tokens_spin.setValue(getattr(settings, "content_max_tokens", 4000))
         self.system_prompt_input.setPlainText(settings.custom_system_prompt)
@@ -337,6 +351,7 @@ class AppSettingsWidget(QWidget):
         self._settings.default_threads = self.threads_spin.value()
         self._settings.auto_save = self.autosave_check.isChecked()
         self._settings.enable_thinking = self.enable_thinking_check.isChecked()
+        self._settings.allow_nsfw = self.allow_nsfw_check.isChecked()
         self._settings.response_language = self.language_input.text().strip()
         self._settings.content_max_tokens = self.max_tokens_spin.value()
         self._settings.custom_system_prompt = self.system_prompt_input.toPlainText().strip()

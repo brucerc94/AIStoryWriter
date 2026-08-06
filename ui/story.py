@@ -19,10 +19,12 @@ from typing import Callable, Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
     QFrame,
+    QGroupBox,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -41,7 +43,7 @@ from PySide6.QtWidgets import (
 )
 
 from engine import storage
-from engine.models import Chapter, Character, Project, TaskType
+from engine.models import AuthorIntent, Chapter, Character, Project, TaskType, WritingStyle
 from ui.styles import (
     COLOR_ACCENT,
     COLOR_BORDER,
@@ -176,73 +178,375 @@ class SynopsisTab(QWidget):
         project.synopsis = self.editor.get_text()
 
 
+
+# ── Style option tables ───────────────────────────────────────────────────────
+# Each table is a list of (internal_key, labels_by_language_prefix) tuples.
+# internal_key: the value stored in WritingStyle and sent to the model (English).
+# labels_by_language_prefix: maps a lowercased language prefix to a display label.
+# The first entry in each table is always the "auto" sentinel (key = "").
+
+def _localize(key: str, lang: str, table: list[tuple[str, dict[str, str]]]) -> str:
+    """Return the display label for key in lang, falling back to English."""
+    lang_lc = lang.lower()[:2] if lang else "en"
+    for k, labels in table:
+        if k == key:
+            return labels.get(lang_lc) or labels.get("en", key)
+    return key
+
+
+_AUTO_LABELS: dict[str, str] = {
+    "en": "— auto (infer from synopsis) —",
+    "es": "— auto (inferir de la sinopsis) —",
+    "fr": "— auto (inférer du synopsis) —",
+    "de": "— auto (aus dem Synopsis ableiten) —",
+    "pt": "— auto (inferir da sinopse) —",
+    "it": "— auto (inferire dalla sinossi) —",
+}
+
+_POV_TABLE: list[tuple[str, dict[str, str]]] = [
+    ("", _AUTO_LABELS),
+    ("First person", {"en": "First person", "es": "Primera persona", "fr": "Première personne", "de": "Erste Person", "pt": "Primeira pessoa", "it": "Prima persona"}),
+    ("Third person limited", {"en": "Third person limited", "es": "Tercera persona limitada", "fr": "Troisième personne limitée", "de": "Dritte Person (beschränkt)", "pt": "Terceira pessoa limitada", "it": "Terza persona limitata"}),
+    ("Third person omniscient", {"en": "Third person omniscient", "es": "Tercera persona omnisciente", "fr": "Troisième personne omnisciente", "de": "Dritte Person (allwissend)", "pt": "Terceira pessoa onisciente", "it": "Terza persona onnisciente"}),
+    ("Second person", {"en": "Second person", "es": "Segunda persona", "fr": "Deuxième personne", "de": "Zweite Person", "pt": "Segunda pessoa", "it": "Seconda persona"}),
+    ("Multiple POVs", {"en": "Multiple POVs", "es": "Múltiples puntos de vista", "fr": "Points de vue multiples", "de": "Mehrere Perspektiven", "pt": "Múltiplos pontos de vista", "it": "Più punti di vista"}),
+]
+
+_PACING_TABLE: list[tuple[str, dict[str, str]]] = [
+    ("", {k: v.replace("(infer from synopsis) ", "") for k, v in _AUTO_LABELS.items()}),
+    ("Fast", {"en": "Fast", "es": "Rápido", "fr": "Rapide", "de": "Schnell", "pt": "Rápido", "it": "Veloce"}),
+    ("Moderate", {"en": "Moderate", "es": "Moderado", "fr": "Modéré", "de": "Moderat", "pt": "Moderado", "it": "Moderato"}),
+    ("Slow", {"en": "Slow", "es": "Lento", "fr": "Lent", "de": "Langsam", "pt": "Lento", "it": "Lento"}),
+    ("Variable (fast action / slow reflection)", {"en": "Variable (action/reflection)", "es": "Variable (acción/reflexión)", "fr": "Variable (action/réflexion)", "de": "Variabel (Aktion/Reflexion)", "pt": "Variável (ação/reflexão)", "it": "Variabile (azione/riflessione)"}),
+]
+
+_DENSITY_TABLE: list[tuple[str, dict[str, str]]] = [
+    ("", {k: v.replace("(infer from synopsis) ", "") for k, v in _AUTO_LABELS.items()}),
+    ("Sparse (lean prose, minimal description)", {"en": "Sparse (lean prose)", "es": "Escasa (prosa concisa)", "fr": "Sobre (prose concise)", "de": "Sparsam (knappe Prosa)", "pt": "Esparsa (prosa concisa)", "it": "Scarsa (prosa concisa)"}),
+    ("Balanced", {"en": "Balanced", "es": "Equilibrada", "fr": "Équilibrée", "de": "Ausgewogen", "pt": "Equilibrada", "it": "Equilibrata"}),
+    ("Rich (detailed description, immersive)", {"en": "Rich (detailed, immersive)", "es": "Rica (detallada, inmersiva)", "fr": "Riche (détaillée, immersive)", "de": "Reich (detailliert, immersiv)", "pt": "Rica (detalhada, imersiva)", "it": "Ricca (dettagliata, immersiva)"}),
+]
+
+_DIALOGUE_TABLE: list[tuple[str, dict[str, str]]] = [
+    ("", {k: v.replace("(infer from synopsis) ", "") for k, v in _AUTO_LABELS.items()}),
+    ("Frequent", {"en": "Frequent", "es": "Frecuente", "fr": "Fréquent", "de": "Häufig", "pt": "Frequente", "it": "Frequente"}),
+    ("Moderate", {"en": "Moderate", "es": "Moderado", "fr": "Modéré", "de": "Moderat", "pt": "Moderado", "it": "Moderato"}),
+    ("Minimal", {"en": "Minimal", "es": "Mínimo", "fr": "Minimal", "de": "Minimal", "pt": "Mínimo", "it": "Minimale"}),
+]
+
+_VIOLENCE_TABLE: list[tuple[str, dict[str, str]]] = [
+    ("", {k: v.replace("(infer from synopsis) ", "") for k, v in _AUTO_LABELS.items()}),
+    ("None", {"en": "None", "es": "Ninguna", "fr": "Aucune", "de": "Keine", "pt": "Nenhuma", "it": "Nessuna"}),
+    ("Implied (off-screen)", {"en": "Implied (off-screen)", "es": "Implícita (fuera de escena)", "fr": "Implicite (hors-écran)", "de": "Angedeutet (außerhalb)", "pt": "Implícita (fora de cena)", "it": "Implicita (fuori scena)"}),
+    ("Moderate (present but not graphic)", {"en": "Moderate (not graphic)", "es": "Moderada (no explícita)", "fr": "Modérée (non graphique)", "de": "Moderat (nicht grafisch)", "pt": "Moderada (não gráfica)", "it": "Moderata (non grafica)"}),
+    ("Explicit", {"en": "Explicit", "es": "Explícita", "fr": "Explicite", "de": "Explizit", "pt": "Explícita", "it": "Esplicita"}),
+]
+
+_ROMANCE_TABLE: list[tuple[str, dict[str, str]]] = [
+    ("", {k: v.replace("(infer from synopsis) ", "") for k, v in _AUTO_LABELS.items()}),
+    ("None", {"en": "None", "es": "Ninguno", "fr": "Aucun", "de": "Kein", "pt": "Nenhum", "it": "Nessuno"}),
+    ("Background (minor thread)", {"en": "Background (minor thread)", "es": "Secundario (hilo menor)", "fr": "Secondaire (fil mineur)", "de": "Hintergrund (kleiner Strang)", "pt": "Secundário (fio menor)", "it": "Sfondo (filo minore)"}),
+    ("Subplot", {"en": "Subplot", "es": "Subtrama", "fr": "Intrigue secondaire", "de": "Nebenhandlung", "pt": "Subtrama", "it": "Sottotrama"}),
+    ("Central (primary storyline)", {"en": "Central (primary)", "es": "Central (trama principal)", "fr": "Central (intrigue principale)", "de": "Zentral (Haupthandlung)", "pt": "Central (trama principal)", "it": "Centrale (trama principale)"}),
+]
+
+_LENGTH_TABLE: list[tuple[str, dict[str, str]]] = [
+    ("", {k: v.replace("(infer from synopsis) ", "") for k, v in _AUTO_LABELS.items()}),
+    ("Short (~1k words)", {"en": "Short (~1 000 words)", "es": "Corto (~1 000 palabras)", "fr": "Court (~1 000 mots)", "de": "Kurz (~1 000 Wörter)", "pt": "Curto (~1 000 palavras)", "it": "Corto (~1 000 parole)"}),
+    ("Medium (~2k words)", {"en": "Medium (~2 000 words)", "es": "Medio (~2 000 palabras)", "fr": "Moyen (~2 000 mots)", "de": "Mittel (~2 000 Wörter)", "pt": "Médio (~2 000 palavras)", "it": "Medio (~2 000 parole)"}),
+    ("Long (~3k+ words)", {"en": "Long (~3 000+ words)", "es": "Largo (~3 000+ palabras)", "fr": "Long (~3 000+ mots)", "de": "Lang (~3 000+ Wörter)", "pt": "Longo (~3 000+ palavras)", "it": "Lungo (~3 000+ parole)"}),
+]
+
+# Also: localized labels for UI form rows and group boxes (used by both dialog and panel)
+_UI_STRINGS: dict[str, dict[str, str]] = {
+    "structure_group":    {"en": "Structure", "es": "Estructura", "fr": "Structure", "de": "Struktur", "pt": "Estrutura", "it": "Struttura"},
+    "num_chapters":       {"en": "Number of chapters", "es": "Número de capítulos", "fr": "Nombre de chapitres", "de": "Kapitelanzahl", "pt": "Número de capítulos", "it": "Numero di capitoli"},
+    "intent_group":       {"en": "Author's Creative Intent  (optional — leave blank to infer from synopsis)", "es": "Intención creativa del autor  (opcional — dejar en blanco para inferir de la sinopsis)", "fr": "Intention créative de l'auteur  (optionnel)", "de": "Kreative Absicht des Autors  (optional)", "pt": "Intenção criativa do autor  (opcional)", "it": "Intenzione creativa dell'autore  (opzionale)"},
+    "style_group":        {"en": "Writing Style Preferences  (optional — leave at '— auto —' to infer)", "es": "Preferencias de estilo de escritura  (opcional — dejar en '— auto —')", "fr": "Préférences de style  (optionnel)", "de": "Schreibstil-Einstellungen  (optional)", "pt": "Preferências de estilo  (opcional)", "it": "Preferenze di stile  (opzionale)"},
+    "emotional_journey":  {"en": "Emotional journey\nfor the reader", "es": "Arco emocional\npara el lector", "fr": "Voyage émotionnel\ndu lecteur", "de": "Emotionale Reise\ndes Lesers", "pt": "Jornada emocional\ndo leitor", "it": "Viaggio emotivo\ndel lettore"},
+    "lasting_impression": {"en": "What readers remember\nafter finishing", "es": "Lo que el lector recordará\nal terminar", "fr": "Ce que le lecteur retient\naprès lecture", "de": "Was der Leser behält\nnach dem Lesen", "pt": "O que o leitor lembrará\nao terminar", "it": "Cosa ricorderà il lettore\ndopo la lettura"},
+    "themes":             {"en": "Core themes to explore", "es": "Temas centrales a explorar", "fr": "Thèmes centraux à explorer", "de": "Kernthemen", "pt": "Temas centrais a explorar", "it": "Temi centrali da esplorare"},
+    "unique_elements":    {"en": "What makes it unique", "es": "Qué lo hace único", "fr": "Ce qui le rend unique", "de": "Was es einzigartig macht", "pt": "O que o torna único", "it": "Cosa lo rende unico"},
+    "inspirations":       {"en": "Inspirations (and what\naspect)", "es": "Inspiraciones (y en qué\naspecto)", "fr": "Inspirations (et quel\naspect)", "de": "Inspirationen (und welcher\nAspekt)", "pt": "Inspirações (e em qual\naspecto)", "it": "Ispirazioni (e quale\naspetto)"},
+    "avoid":              {"en": "Avoid entirely", "es": "Evitar completamente", "fr": "Éviter entièrement", "de": "Vollständig vermeiden", "pt": "Evitar completamente", "it": "Evitare completamente"},
+    "genre_tags":         {"en": "Genre (if ambiguous)", "es": "Género (si es ambiguo)", "fr": "Genre (si ambigu)", "de": "Genre (falls mehrdeutig)", "pt": "Gênero (se ambíguo)", "it": "Genere (se ambiguo)"},
+    "narrator_pov":       {"en": "Narrative POV", "es": "Punto de vista narrativo", "fr": "Point de vue narratif", "de": "Erzählperspektive", "pt": "Ponto de vista narrativo", "it": "Punto di vista narrativo"},
+    "pacing":             {"en": "Pacing", "es": "Ritmo", "fr": "Rythme", "de": "Erzähltempo", "pt": "Ritmo", "it": "Ritmo"},
+    "description_density":{"en": "Description density", "es": "Densidad descriptiva", "fr": "Densité descriptive", "de": "Beschreibungsdichte", "pt": "Densidade descritiva", "it": "Densità descrittiva"},
+    "dialogue_style":     {"en": "Dialogue", "es": "Diálogo", "fr": "Dialogue", "de": "Dialog", "pt": "Diálogo", "it": "Dialogo"},
+    "violence_level":     {"en": "Violence", "es": "Violencia", "fr": "Violence", "de": "Gewalt", "pt": "Violência", "it": "Violenza"},
+    "romance_level":      {"en": "Romance", "es": "Romance", "fr": "Romance", "de": "Romantik", "pt": "Romance", "it": "Romanticismo"},
+    "chapter_length":     {"en": "Chapter length", "es": "Longitud de capítulo", "fr": "Longueur des chapitres", "de": "Kapitellänge", "pt": "Comprimento do capítulo", "it": "Lunghezza del capitolo"},
+    "genre_placeholder":  {"en": "Only if ambiguous from synopsis — e.g. psychological thriller, neo-noir", "es": "Solo si es ambiguo en la sinopsis — p. ej. thriller psicológico, neo-noir", "fr": "Seulement si ambigu dans le synopsis", "de": "Nur wenn im Synopsis unklar", "pt": "Somente se ambíguo na sinopse", "it": "Solo se ambiguo nella sinossi"},
+    "generate_btn":       {"en": "Generate Outline", "es": "Generar estructura", "fr": "Générer le plan", "de": "Gliederung generieren", "pt": "Gerar estrutura", "it": "Genera struttura"},
+    "save_profile_btn":   {"en": "Save Profile", "es": "Guardar perfil", "fr": "Enregistrer le profil", "de": "Profil speichern", "pt": "Salvar perfil", "it": "Salva profilo"},
+    "profile_tab_hint":   {"en": "Used by Outline · Write Chapter · Rewrite · Review", "es": "Usado por Estructura · Escribir capítulo · Reescribir · Revisión", "fr": "Utilisé par : Plan · Écrire · Réécrire · Relire", "de": "Genutzt von: Gliederung · Kapitel · Neufassung · Review", "pt": "Usado por: Estrutura · Capítulo · Reescrever · Revisão", "it": "Usato da: Schema · Capitolo · Riscrittura · Revisione"},
+    "intent_group_short": {"en": "Creative Intent", "es": "Intención creativa", "fr": "Intention créative", "de": "Kreative Absicht", "pt": "Intenção criativa", "it": "Intenzione creativa"},
+    "style_group_short":  {"en": "Writing Style  (leave at '— auto —' to let the model infer)", "es": "Estilo de escritura  (dejar en '— auto —' para que el modelo infiera)", "fr": "Style d'écriture  (laisser '— auto —' pour inférer)", "de": "Schreibstil  ('— auto —' lassen zum Ableiten)", "pt": "Estilo de escrita  (deixar '— auto —' para o modelo inferir)", "it": "Stile di scrittura  (lasciare '— auto —' per inferire)"},
+}
+
+
+def _ui(key: str, lang: str) -> str:
+    """Resolve a UI string key to the user's language, fallback to English."""
+    lang_lc = lang.lower()[:2] if lang else "en"
+    row = _UI_STRINGS.get(key, {})
+    return row.get(lang_lc) or row.get("en", key)
+
+
+def _make_combo(table: list[tuple[str, dict[str, str]]], lang: str, parent=None) -> QComboBox:
+    """Build a QComboBox from a key/label table.
+    itemData(i) holds the internal English key; itemText(i) is the localized label.
+    """
+    cb = QComboBox(parent)
+    lang_lc = lang.lower()[:2] if lang else "en"
+    for key, labels in table:
+        label = labels.get(lang_lc) or labels.get("en", key) or "— auto —"
+        cb.addItem(label, key)
+    return cb
+
+
+def _combo_value(combo: QComboBox) -> str:
+    """Return the internal key stored as itemData, or '' for the auto sentinel."""
+    return combo.currentData() or ""
+
+
+def _set_combo(combo: QComboBox, value: str) -> None:
+    """Select the item whose itemData matches value; stay on index 0 if not found."""
+    if not value:
+        return
+    for i in range(combo.count()):
+        if combo.itemData(i) == value:
+            combo.setCurrentIndex(i)
+            return
+
+
+
 class GenerateOutlineDialog(QDialog):
     """
-    Asks how many chapters the book should have before generating the
-    outline. "Write Book" later writes exactly one chapter per outline
-    heading, so fixing the count here is what actually determines how
-    long the finished novel will be — this is not just a cosmetic prompt.
+    Outline generation wizard.
+
+    Collects:
+      • Chapter count  (structural — required)
+      • Author intent  (creative goals — all optional, pre-filled from project)
+      • Writing style  (technical preferences — all optional, pre-filled)
+
+    Combo boxes display labels in the configured response language; their
+    itemData() always holds the internal English key that gets stored in
+    WritingStyle and sent to the model.  Fields left at '— auto —' are
+    omitted from the prompt; the model infers them from the synopsis.
+
+    "Write Book" later writes exactly one chapter per outline heading, so
+    the chapter count set here determines the length of the finished novel.
     """
 
-    def __init__(self, default_chapters: int = 12, parent=None) -> None:
+    # Keep these as class-level references so AuthorProfilePanel can reuse them.
+    _POV_TABLE    = _POV_TABLE
+    _PACING_TABLE = _PACING_TABLE
+    _DENSITY_TABLE = _DENSITY_TABLE
+    _DIALOGUE_TABLE = _DIALOGUE_TABLE
+    _VIOLENCE_TABLE = _VIOLENCE_TABLE
+    _ROMANCE_TABLE  = _ROMANCE_TABLE
+    _LENGTH_TABLE   = _LENGTH_TABLE
+
+    def __init__(
+        self,
+        default_chapters: int = 12,
+        author_intent: Optional[AuthorIntent] = None,
+        writing_style: Optional[WritingStyle] = None,
+        lang: str = "",
+        parent=None,
+    ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Generate Outline")
-        self.setMinimumWidth(440)
+        self.setWindowTitle(_ui("generate_btn", lang))
+        self.setMinimumWidth(560)
+        self.setMinimumHeight(640)
         self.setModal(True)
+        self._lang = lang
 
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-        layout.setContentsMargins(20, 20, 20, 20)
+        intent = author_intent or AuthorIntent()
+        style = writing_style or WritingStyle()
 
-        intro = QLabel(
-            "How many chapters should this book have? The outline — and "
-            "later \"Write Book\" — will follow this number, one chapter "
-            "at a time."
-        )
-        intro.setWordWrap(True)
-        intro.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 12px;")
-        layout.addWidget(intro)
+        root = QVBoxLayout(self)
+        root.setSpacing(12)
+        root.setContentsMargins(20, 20, 20, 20)
 
-        form = QFormLayout()
-        form.setSpacing(8)
+        # ── Scrollable body ───────────────────────────────────────────
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; }")
+        body_widget = QWidget()
+        body = QVBoxLayout(body_widget)
+        body.setSpacing(14)
+        body.setContentsMargins(0, 0, 8, 0)
+        scroll.setWidget(body_widget)
+        root.addWidget(scroll, 1)
+
+        # ── Section 1: Structure ──────────────────────────────────────
+        struct_box = QGroupBox(_ui("structure_group", lang))
+        struct_form = QFormLayout(struct_box)
+        struct_form.setSpacing(8)
+        struct_form.setContentsMargins(14, 18, 14, 14)
 
         self.chapters_spin = QSpinBox()
         self.chapters_spin.setRange(1, 300)
         self.chapters_spin.setValue(max(1, default_chapters))
-        form.addRow("Number of chapters", self.chapters_spin)
-        layout.addLayout(form)
-
-        notes_lbl = QLabel("Additional instructions (optional)")
-        notes_lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 12px;")
-        layout.addWidget(notes_lbl)
-
-        self.notes_input = QTextEdit()
-        self.notes_input.setPlaceholderText(
-            "Genre, tone, pacing, POV, chapter length, twists to plan for…"
+        self.chapters_spin.setToolTip(
+            "The outline — and later \"Write Book\" — will follow this number, "
+            "one chapter per heading."
         )
-        self.notes_input.setFixedHeight(80)
-        layout.addWidget(self.notes_input)
+        struct_form.addRow(_ui("num_chapters", lang), self.chapters_spin)
+        body.addWidget(struct_box)
 
+        # ── Section 2: Author's Creative Intent ───────────────────────
+        intent_box = QGroupBox(_ui("intent_group", lang))
+        intent_form = QFormLayout(intent_box)
+        intent_form.setSpacing(10)
+        intent_form.setContentsMargins(14, 18, 14, 14)
+
+        def _intent_edit(placeholder: str, value: str) -> QTextEdit:
+            w = QTextEdit()
+            w.setPlaceholderText(placeholder)
+            w.setPlainText(value)
+            w.setFixedHeight(56)
+            w.setStyleSheet(
+                f"QTextEdit {{ font-size: 12px; padding: 4px 8px; "
+                f"background: {COLOR_SURFACE}; border: 1px solid {COLOR_BORDER}; "
+                f"border-radius: 4px; color: {COLOR_TEXT}; }}"
+                f"QTextEdit:focus {{ border-color: {COLOR_ACCENT}; }}"
+            )
+            return w
+
+        self.emotional_journey = _intent_edit(
+            "e.g. Growing unease that never fully resolves into catharsis",
+            intent.emotional_journey,
+        )
+        intent_form.addRow(_ui("emotional_journey", lang), self.emotional_journey)
+
+        self.lasting_impression = _intent_edit(
+            "e.g. The normalcy of cruelty when systems protect it",
+            intent.lasting_impression,
+        )
+        intent_form.addRow(_ui("lasting_impression", lang), self.lasting_impression)
+
+        self.themes = _intent_edit(
+            "e.g. Institutional complicity, the cost of silence, identity under pressure",
+            intent.themes,
+        )
+        intent_form.addRow(_ui("themes", lang), self.themes)
+
+        self.unique_elements = _intent_edit(
+            "e.g. Unreliable narrator revealed gradually; non-linear structure mirrors memory",
+            intent.unique_elements,
+        )
+        intent_form.addRow(_ui("unique_elements", lang), self.unique_elements)
+
+        self.inspirations = _intent_edit(
+            "e.g. Kazuo Ishiguro's restraint; Flynn's narrative misdirection",
+            intent.inspirations,
+        )
+        intent_form.addRow(_ui("inspirations", lang), self.inspirations)
+
+        self.avoid = _intent_edit(
+            "e.g. Redemption arcs, graphic gore, comic relief, romantic subplots",
+            intent.avoid,
+        )
+        intent_form.addRow(_ui("avoid", lang), self.avoid)
+
+        body.addWidget(intent_box)
+
+        # ── Section 3: Writing Style ──────────────────────────────────
+        style_box = QGroupBox(_ui("style_group", lang))
+        style_form = QFormLayout(style_box)
+        style_form.setSpacing(8)
+        style_form.setContentsMargins(14, 18, 14, 14)
+
+        self.genre_tags = QLineEdit()
+        self.genre_tags.setPlaceholderText(_ui("genre_placeholder", lang))
+        self.genre_tags.setText(style.genre_tags)
+        self.genre_tags.setMaxLength(120)
+        style_form.addRow(_ui("genre_tags", lang), self.genre_tags)
+
+        self.narrator_pov = _make_combo(_POV_TABLE, lang)
+        _set_combo(self.narrator_pov, style.narrator_pov)
+        style_form.addRow(_ui("narrator_pov", lang), self.narrator_pov)
+
+        self.pacing = _make_combo(_PACING_TABLE, lang)
+        _set_combo(self.pacing, style.pacing)
+        style_form.addRow(_ui("pacing", lang), self.pacing)
+
+        self.description_density = _make_combo(_DENSITY_TABLE, lang)
+        _set_combo(self.description_density, style.description_density)
+        style_form.addRow(_ui("description_density", lang), self.description_density)
+
+        self.dialogue_style = _make_combo(_DIALOGUE_TABLE, lang)
+        _set_combo(self.dialogue_style, style.dialogue_style)
+        style_form.addRow(_ui("dialogue_style", lang), self.dialogue_style)
+
+        self.violence_level = _make_combo(_VIOLENCE_TABLE, lang)
+        _set_combo(self.violence_level, style.violence_level)
+        style_form.addRow(_ui("violence_level", lang), self.violence_level)
+
+        self.romance_level = _make_combo(_ROMANCE_TABLE, lang)
+        _set_combo(self.romance_level, style.romance_level)
+        style_form.addRow(_ui("romance_level", lang), self.romance_level)
+
+        self.target_chapter_length = _make_combo(_LENGTH_TABLE, lang)
+        _set_combo(self.target_chapter_length, style.target_chapter_length)
+        style_form.addRow(_ui("chapter_length", lang), self.target_chapter_length)
+
+        body.addWidget(style_box)
+
+        # ── Buttons ───────────────────────────────────────────────────
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.button(QDialogButtonBox.Ok).setText("Generate")
+        buttons.button(QDialogButtonBox.Ok).setText(_ui("generate_btn", lang))
         buttons.button(QDialogButtonBox.Ok).setObjectName("accent")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        root.addWidget(buttons)
+
+    # ── Public accessors ──────────────────────────────────────────────
 
     def chapter_count(self) -> int:
         return self.chapters_spin.value()
 
-    def notes(self) -> str:
-        return self.notes_input.toPlainText().strip()
+    def get_author_intent(self) -> AuthorIntent:
+        """Return an AuthorIntent populated from the dialog's intent fields."""
+        return AuthorIntent(
+            emotional_journey=self.emotional_journey.toPlainText().strip(),
+            lasting_impression=self.lasting_impression.toPlainText().strip(),
+            themes=self.themes.toPlainText().strip(),
+            unique_elements=self.unique_elements.toPlainText().strip(),
+            inspirations=self.inspirations.toPlainText().strip(),
+            avoid=self.avoid.toPlainText().strip(),
+        )
+
+    def get_writing_style(self) -> WritingStyle:
+        """Return a WritingStyle from the dialog's combo selections.
+        itemData() holds the internal English key; empty string = auto.
+        """
+        return WritingStyle(
+            genre_tags=self.genre_tags.text().strip(),
+            narrator_pov=_combo_value(self.narrator_pov),
+            pacing=_combo_value(self.pacing),
+            description_density=_combo_value(self.description_density),
+            dialogue_style=_combo_value(self.dialogue_style),
+            violence_level=_combo_value(self.violence_level),
+            romance_level=_combo_value(self.romance_level),
+            target_chapter_length=_combo_value(self.target_chapter_length),
+        )
 
 
 class OutlineTab(QWidget):
     task_requested = Signal(TaskType, str)
     content_changed = Signal(str)
+    # Emitted after the user confirms the dialog so MainWindow can persist
+    # the updated AuthorIntent and WritingStyle before the task starts.
+    profile_updated = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self._project: Optional[Project] = None
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
@@ -259,7 +563,7 @@ class OutlineTab(QWidget):
 
         gen_btn = QPushButton("Generate")
         gen_btn.setObjectName("accent")
-        gen_btn.setToolTip("Asks how many chapters to plan, then generates the full outline.")
+        gen_btn.setToolTip("Opens the outline wizard, then generates the full outline.")
         gen_btn.clicked.connect(self._on_generate_clicked)
         header_row.addWidget(gen_btn)
 
@@ -284,14 +588,40 @@ class OutlineTab(QWidget):
     def _on_generate_clicked(self) -> None:
         existing = outline_chapter_numbers(self.editor.get_text())
         default_n = max(existing) if existing else 12
-        dialog = GenerateOutlineDialog(default_chapters=default_n, parent=self)
+
+        # Read the configured response language so the dialog can localize
+        # its labels and combo options for the author.
+        lang = storage.load_settings().response_language
+
+        # Pre-fill the wizard with whatever the project already has saved.
+        current_intent = self._project.author_intent if self._project else None
+        current_style = self._project.writing_style if self._project else None
+
+        dialog = GenerateOutlineDialog(
+            default_chapters=default_n,
+            author_intent=current_intent,
+            writing_style=current_style,
+            lang=lang,
+            parent=self,
+        )
         if dialog.exec() != QDialog.Accepted:
             return
+
+        # Persist the new intent/style back into the project object so the
+        # worker can read them from project.author_intent / project.writing_style.
+        if self._project is not None:
+            self._project.author_intent = dialog.get_author_intent()
+            self._project.writing_style = dialog.get_writing_style()
+            self.profile_updated.emit()
+
         n = dialog.chapter_count()
-        notes = dialog.notes()
-        requirement = f"The outline must contain EXACTLY {n} chapters, numbered sequentially from 1 to {n}."
-        if notes:
-            requirement += f"\n\nAdditional instructions: {notes}"
+        # Build the requirement string the worker appends to its base_prompt.
+        # The intent/style now travel via project fields — only the chapter
+        # count (a structural constraint) goes in the requirement string.
+        requirement = (
+            f"The outline must contain EXACTLY {n} chapters, "
+            f"numbered sequentially from 1 to {n}."
+        )
         self.task_requested.emit(TaskType.GENERATE_OUTLINE, requirement)
 
     def _update_count_label(self) -> None:
@@ -307,6 +637,7 @@ class OutlineTab(QWidget):
         self.count_lbl.setText(label)
 
     def load(self, project: Project) -> None:
+        self._project = project
         self.editor.set_text(project.outline)
         self._update_count_label()
 
@@ -937,6 +1268,216 @@ class MemoryTab(QWidget):
         project.memory = self.editor.get_text()
 
 
+class AuthorProfilePanel(QWidget):
+    """
+    Permanent tab for editing the AuthorIntent and WritingStyle that live in
+    the project. Changes are saved immediately when the user clicks Save.
+
+    This is the persistent counterpart to the wizard fields in
+    GenerateOutlineDialog: the wizard pre-fills from here and writes back
+    here on accept. The author can also edit the profile directly at any
+    time without going through Generate Outline.
+
+    Labels and combo options are shown in the configured response language.
+    """
+
+    profile_changed = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._project: Optional[Project] = None
+        self._lang: str = ""
+        self._built = False  # deferred until first load() call
+
+    def load(self, project: Project) -> None:
+        self._project = project
+        lang = storage.load_settings().response_language
+
+        # Rebuild UI if language changed or first load
+        if not self._built or lang != self._lang:
+            self._lang = lang
+            self._rebuild_ui(lang)
+
+        # Populate fields
+        intent = project.author_intent
+        style = project.writing_style
+
+        self.emotional_journey.setPlainText(intent.emotional_journey)
+        self.lasting_impression.setPlainText(intent.lasting_impression)
+        self.themes.setPlainText(intent.themes)
+        self.unique_elements.setPlainText(intent.unique_elements)
+        self.inspirations.setPlainText(intent.inspirations)
+        self.avoid.setPlainText(intent.avoid)
+
+        self.genre_tags.setText(style.genre_tags)
+        _set_combo(self.narrator_pov, style.narrator_pov)
+        _set_combo(self.pacing, style.pacing)
+        _set_combo(self.description_density, style.description_density)
+        _set_combo(self.dialogue_style, style.dialogue_style)
+        _set_combo(self.violence_level, style.violence_level)
+        _set_combo(self.romance_level, style.romance_level)
+        _set_combo(self.target_chapter_length, style.target_chapter_length)
+
+    def _rebuild_ui(self, lang: str) -> None:
+        """Build (or rebuild) the full UI for the given language."""
+        # Clear any existing layout
+        old_layout = self.layout()
+        if old_layout:
+            while old_layout.count():
+                item = old_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+            import sip  # type: ignore
+            try:
+                sip.delete(old_layout)
+            except Exception:
+                pass
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(12)
+
+        # Header
+        hdr = QHBoxLayout()
+        title_lbl = QLabel("Author Profile")
+        title_lbl.setStyleSheet(f"font-size: 15px; font-weight: 700; color: {COLOR_TEXT};")
+        hdr.addWidget(title_lbl)
+        hdr.addStretch()
+        hint = QLabel(_ui("profile_tab_hint", lang))
+        hint.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px;")
+        hdr.addWidget(hint)
+        root.addLayout(hdr)
+
+        # Scrollable form
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; }")
+        body_widget = QWidget()
+        body = QVBoxLayout(body_widget)
+        body.setSpacing(14)
+        body.setContentsMargins(0, 0, 8, 0)
+        scroll.setWidget(body_widget)
+        root.addWidget(scroll, 1)
+
+        field_style = (
+            f"QTextEdit {{ font-size: 12px; padding: 4px 8px; "
+            f"background: {COLOR_SURFACE}; border: 1px solid {COLOR_BORDER}; "
+            f"border-radius: 4px; color: {COLOR_TEXT}; }}"
+            f"QTextEdit:focus {{ border-color: {COLOR_ACCENT}; }}"
+        )
+        line_style = (
+            f"QLineEdit {{ font-size: 12px; padding: 4px 8px; "
+            f"background: {COLOR_SURFACE}; border: 1px solid {COLOR_BORDER}; "
+            f"border-radius: 4px; color: {COLOR_TEXT}; }}"
+            f"QLineEdit:focus {{ border-color: {COLOR_ACCENT}; }}"
+        )
+
+        def _ta(placeholder: str) -> QTextEdit:
+            w = QTextEdit()
+            w.setPlaceholderText(placeholder)
+            w.setFixedHeight(56)
+            w.setStyleSheet(field_style)
+            return w
+
+        def _le(placeholder: str) -> QLineEdit:
+            w = QLineEdit()
+            w.setPlaceholderText(placeholder)
+            w.setStyleSheet(line_style)
+            return w
+
+        # ── Intent section ────────────────────────────────────────────
+        intent_box = QGroupBox(_ui("intent_group_short", lang))
+        intent_form = QFormLayout(intent_box)
+        intent_form.setSpacing(10)
+        intent_form.setContentsMargins(14, 18, 14, 14)
+
+        self.emotional_journey = _ta("e.g. Growing unease that never fully resolves into catharsis")
+        intent_form.addRow(_ui("emotional_journey", lang), self.emotional_journey)
+
+        self.lasting_impression = _ta("e.g. The normalcy of cruelty when systems protect it")
+        intent_form.addRow(_ui("lasting_impression", lang), self.lasting_impression)
+
+        self.themes = _ta("e.g. Institutional complicity, the cost of silence, identity under pressure")
+        intent_form.addRow(_ui("themes", lang), self.themes)
+
+        self.unique_elements = _ta("e.g. Unreliable narrator revealed gradually; non-linear structure")
+        intent_form.addRow(_ui("unique_elements", lang), self.unique_elements)
+
+        self.inspirations = _ta("e.g. Kazuo Ishiguro's restraint; Flynn's narrative misdirection")
+        intent_form.addRow(_ui("inspirations", lang), self.inspirations)
+
+        self.avoid = _ta("e.g. Redemption arcs, graphic gore, comic relief, romantic subplots")
+        intent_form.addRow(_ui("avoid", lang), self.avoid)
+
+        body.addWidget(intent_box)
+
+        # ── Style section ─────────────────────────────────────────────
+        style_box = QGroupBox(_ui("style_group_short", lang))
+        style_form = QFormLayout(style_box)
+        style_form.setSpacing(8)
+        style_form.setContentsMargins(14, 18, 14, 14)
+
+        self.genre_tags = _le(_ui("genre_placeholder", lang))
+        self.genre_tags.setMaxLength(120)
+        style_form.addRow(_ui("genre_tags", lang), self.genre_tags)
+
+        self.narrator_pov = _make_combo(_POV_TABLE, lang)
+        style_form.addRow(_ui("narrator_pov", lang), self.narrator_pov)
+
+        self.pacing = _make_combo(_PACING_TABLE, lang)
+        style_form.addRow(_ui("pacing", lang), self.pacing)
+
+        self.description_density = _make_combo(_DENSITY_TABLE, lang)
+        style_form.addRow(_ui("description_density", lang), self.description_density)
+
+        self.dialogue_style = _make_combo(_DIALOGUE_TABLE, lang)
+        style_form.addRow(_ui("dialogue_style", lang), self.dialogue_style)
+
+        self.violence_level = _make_combo(_VIOLENCE_TABLE, lang)
+        style_form.addRow(_ui("violence_level", lang), self.violence_level)
+
+        self.romance_level = _make_combo(_ROMANCE_TABLE, lang)
+        style_form.addRow(_ui("romance_level", lang), self.romance_level)
+
+        self.target_chapter_length = _make_combo(_LENGTH_TABLE, lang)
+        style_form.addRow(_ui("chapter_length", lang), self.target_chapter_length)
+
+        body.addWidget(style_box)
+
+        # ── Save button ───────────────────────────────────────────────
+        save_btn = QPushButton(_ui("save_profile_btn", lang))
+        save_btn.setObjectName("accent")
+        save_btn.clicked.connect(self._on_save)
+        root.addWidget(save_btn)
+
+        self._built = True
+
+    # ── Save ──────────────────────────────────────────────────────────
+
+    def _on_save(self) -> None:
+        if not self._project:
+            return
+        self._project.author_intent = AuthorIntent(
+            emotional_journey=self.emotional_journey.toPlainText().strip(),
+            lasting_impression=self.lasting_impression.toPlainText().strip(),
+            themes=self.themes.toPlainText().strip(),
+            unique_elements=self.unique_elements.toPlainText().strip(),
+            inspirations=self.inspirations.toPlainText().strip(),
+            avoid=self.avoid.toPlainText().strip(),
+        )
+        self._project.writing_style = WritingStyle(
+            genre_tags=self.genre_tags.text().strip(),
+            narrator_pov=_combo_value(self.narrator_pov),
+            pacing=_combo_value(self.pacing),
+            description_density=_combo_value(self.description_density),
+            dialogue_style=_combo_value(self.dialogue_style),
+            violence_level=_combo_value(self.violence_level),
+            romance_level=_combo_value(self.romance_level),
+            target_chapter_length=_combo_value(self.target_chapter_length),
+        )
+        self.profile_changed.emit()
+
+
 class StoryPanel(QWidget):
     """
     Main story panel containing all story-related tabs.
@@ -967,6 +1508,7 @@ class StoryPanel(QWidget):
         self.outline_tab = OutlineTab()
         self.outline_tab.task_requested.connect(self.task_requested)
         self.outline_tab.content_changed.connect(self._on_outline_changed)
+        self.outline_tab.profile_updated.connect(self._on_profile_updated)
         self.tabs.addTab(self.outline_tab, "Outline")
 
         self.chars_tab = CharactersTab()
@@ -987,6 +1529,10 @@ class StoryPanel(QWidget):
         self.memory_tab.content_changed.connect(self._on_memory_changed)
         self.tabs.addTab(self.memory_tab, "Memory")
 
+        self.author_profile_tab = AuthorProfilePanel()
+        self.author_profile_tab.profile_changed.connect(self._on_profile_updated)
+        self.tabs.addTab(self.author_profile_tab, "Author")
+
         layout.addWidget(self.tabs)
 
     def load_project(self, project: Project) -> None:
@@ -997,6 +1543,7 @@ class StoryPanel(QWidget):
         self.world_tab.load(project)
         self.chapters_tab.load(project)
         self.memory_tab.load(project)
+        self.author_profile_tab.load(project)
 
     def refresh_after_task(self, project: Project) -> None:
         """Called after an AI task finishes to refresh content."""
@@ -1007,6 +1554,7 @@ class StoryPanel(QWidget):
         self.world_tab.load(project)
         self.memory_tab.load(project)
         self.chapters_tab.refresh_after_generation(project)
+        self.author_profile_tab.load(project)
 
     def _save_project(self) -> None:
         if self._project:
@@ -1032,3 +1580,7 @@ class StoryPanel(QWidget):
         if self._project:
             self._project.memory = text
             self._save_project()
+
+    def _on_profile_updated(self) -> None:
+        """AuthorIntent/WritingStyle changed — persist immediately."""
+        self._save_project()

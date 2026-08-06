@@ -109,7 +109,7 @@ def _estimate_task_instruction(task: TaskType) -> str:
             "Write this chapter of the novel. "
             "Match the established tone, voice, and style. "
             "Write vivid prose with dialogue, description, and action. "
-            "Do not summarize â€” write the full scene. "
+            "Do not summarize — write the full scene. "
             "Write only the chapter content."
         ),
         TaskType.REVIEW_CHAPTER: (
@@ -123,10 +123,10 @@ def _estimate_task_instruction(task: TaskType) -> str:
         ),
         TaskType.REWRITE_CHAPTER: (
             "Rewrite the chapter below to address the review feedback provided. "
-            "Keep what's already working â€” voice, strong scenes, dialogue that "
-            "lands â€” and fix specifically what the feedback flagged (pacing, "
+            "Keep what's already working — voice, strong scenes, dialogue that "
+            "lands — and fix specifically what the feedback flagged (pacing, "
             "continuity, prose issues, etc.). Write the full revised chapter "
-            "content. Do not summarize the changes or add commentary â€” output "
+            "content. Do not summarize the changes or add commentary — output "
             "only the rewritten chapter text."
         ),
         TaskType.UPDATE_MEMORY: (
@@ -188,6 +188,53 @@ def _section_payloads(
     if "## Additional Author Instructions" in system_prompt:
         author_instructions = system_prompt.split("## Additional Author Instructions", 1)[1].strip()
 
+    # Build the Author's Creative Direction section from the two profile objects.
+    # Which fragments to include depends on the task:
+    #   - GENERATE_OUTLINE  : full intent + full style (shapes the whole structure)
+    #   - WRITE_CHAPTER     : style only + emotional/avoid from intent (per-scene)
+    #   - REWRITE_CHAPTER   : same as write — reviewer needs to know what to aim for
+    #   - REVIEW_CHAPTER    : full intent so the reviewer can judge against the goal
+    #   - everything else   : omit (chat, memory, summary don't benefit from it)
+    creative_direction = ""
+    intent = project.author_intent
+    style = project.writing_style
+    if task == TaskType.GENERATE_OUTLINE:
+        parts = []
+        intent_frag = intent.to_prompt_fragment()
+        style_frag = style.to_prompt_fragment()
+        if intent_frag:
+            parts.append(intent_frag)
+        if style_frag:
+            parts.append(style_frag)
+        creative_direction = "\n".join(parts)
+    elif task in (TaskType.WRITE_CHAPTER, TaskType.REWRITE_CHAPTER):
+        # For chapter writing: style always useful; from intent only the
+        # emotional target and "avoid" list (themes/inspirations are outline-time).
+        parts = []
+        style_frag = style.to_prompt_fragment()
+        if style_frag:
+            parts.append(style_frag)
+        intent_chapter_lines = []
+        if intent.emotional_journey:
+            intent_chapter_lines.append(
+                f"Reader's emotional experience to sustain: {intent.emotional_journey}"
+            )
+        if intent.avoid:
+            intent_chapter_lines.append(f"Avoid entirely: {intent.avoid}")
+        if intent_chapter_lines:
+            parts.append("\n".join(intent_chapter_lines))
+        creative_direction = "\n".join(parts)
+    elif task == TaskType.REVIEW_CHAPTER:
+        # Reviewer needs the full intent to judge against the book's purpose.
+        intent_frag = intent.to_prompt_fragment()
+        style_frag = style.to_prompt_fragment()
+        parts = []
+        if intent_frag:
+            parts.append(intent_frag)
+        if style_frag:
+            parts.append(style_frag)
+        creative_direction = "\n".join(parts)
+
     return {
         "Base": base,
         "Language": language,
@@ -198,6 +245,7 @@ def _section_payloads(
         "World": world,
         "Memory": memory,
         "Chat Summary": chat_summary,
+        "Creative Direction": creative_direction,
         "Author Instructions": author_instructions,
     }
 
@@ -218,6 +266,10 @@ def _compact_sections(
         "World": max(120, max_context_tokens // 20),
         "Memory": max(150, max_context_tokens // 16),
         "Chat Summary": max(100, max_context_tokens // 24),
+        # Creative Direction is deliberately capped low: it should be a
+        # handful of concise directives, never a prose essay. ~200 tokens
+        # covers all 8 fields filled in with one-sentence answers.
+        "Creative Direction": max(60, max_context_tokens // 20),
         "Author Instructions": max(80, max_context_tokens // 40),
     }
     if task == TaskType.WRITE_CHAPTER:
@@ -312,6 +364,8 @@ def build_context_for_model(
         system_content_parts.append(f"\n\n## Story Memory\n{sections['Memory']}")
     if sections["Chat Summary"]:
         system_content_parts.append(f"\n\n## Conversation Summary (older messages)\n{sections['Chat Summary']}")
+    if sections.get("Creative Direction"):
+        system_content_parts.append(f"\n\n## Author's Creative Direction\n{sections['Creative Direction']}")
     if sections["Author Instructions"]:
         system_content_parts.append(f"\n\n## Additional Author Instructions\n{sections['Author Instructions']}")
     system_content = "\n".join(system_content_parts)
@@ -382,6 +436,14 @@ def build_review_context_for_model(
     They only need the system instructions, the chapter text, and any compact
     project state that helps judge the chapter.
     """
+    # Build creative direction for review: full intent + style so the
+    # reviewer can judge the chapter against the author's stated goals.
+    _review_intent_frag = project.author_intent.to_prompt_fragment()
+    _review_style_frag = project.writing_style.to_prompt_fragment()
+    _review_creative = "\n".join(
+        p for p in [_review_intent_frag, _review_style_frag] if p
+    )
+
     sections = _compact_sections(
         {
             "Base": (
@@ -399,6 +461,7 @@ def build_review_context_for_model(
             "World": "",
             "Memory": "",
             "Chat Summary": "",
+            "Creative Direction": _review_creative,
             "Author Instructions": "",
         },
         max_context_tokens,
@@ -421,6 +484,8 @@ def build_review_context_for_model(
         system_content_parts.append(f"\n\n## Established Characters\n{sections['Characters']}")
     if sections["Outline"]:
         system_content_parts.append(f"\n\n## Outline\n{sections['Outline']}")
+    if sections.get("Creative Direction"):
+        system_content_parts.append(f"\n\n## Author's Creative Direction\n{sections['Creative Direction']}")
     if sections["Author Instructions"]:
         system_content_parts.append(f"\n\n## Additional Author Instructions\n{sections['Author Instructions']}")
     system_content = "\n".join(system_content_parts)
@@ -470,6 +535,8 @@ def estimate_context_usage(
         system_content_parts.append(f"\n\n## Story Memory\n{sections['Memory']}")
     if sections["Chat Summary"]:
         system_content_parts.append(f"\n\n## Conversation Summary (older messages)\n{sections['Chat Summary']}")
+    if sections.get("Creative Direction"):
+        system_content_parts.append(f"\n\n## Author's Creative Direction\n{sections['Creative Direction']}")
     if sections["Author Instructions"]:
         system_content_parts.append(f"\n\n## Additional Author Instructions\n{sections['Author Instructions']}")
     system_content = "\n".join(system_content_parts)
@@ -573,6 +640,7 @@ def build_system_prompt(
     task: TaskType,
     custom_instructions: str = "",
     language: str = "",
+    allow_nsfw: bool = False,
 ) -> str:
     """
     Return an appropriate system prompt for the given task.
@@ -588,7 +656,23 @@ def build_system_prompt(
     English even when the story/characters/everything else is in another
     language — an explicit instruction is the reliable fix, not hoping a
     translated scaffold alone will carry the model's output language.
+
+    allow_nsfw: when True, the model receives an explicit content-freedom
+    instruction for creative-writing tasks (synopsis, outline, chapters,
+    rewrite, world, memory, characters). Has no effect on review, chat,
+    or summary tasks — those do not produce creative content.
     """
+    # Tasks that generate creative prose — the only ones where NSFW freedom
+    # meaningfully changes what the model writes.
+    _CREATIVE_TASKS = {
+        TaskType.WRITE_SYNOPSIS,
+        TaskType.GENERATE_OUTLINE,
+        TaskType.WRITE_CHAPTER,
+        TaskType.REWRITE_CHAPTER,
+        TaskType.GENERATE_WORLD,
+        TaskType.UPDATE_MEMORY,
+    }
+
     base = (
         f"You are an AI assistant helping to write a novel titled '{project.title}'. "
         "You are deeply familiar with the story world, characters, and plot. "
@@ -599,6 +683,22 @@ def build_system_prompt(
         base += (
             f" IMPORTANT: Always write your response in {language.strip()}, "
             "regardless of the language these instructions are written in."
+        )
+
+    # NSFW instruction — placed immediately after base identity so it has
+    # maximum authority over the generation. Phrased as an explicit permission
+    # grant rather than a style note, because local models respond better to
+    # "you are allowed" than "the author prefers". Only injected for tasks
+    # that produce creative content.
+    if allow_nsfw and task in _CREATIVE_TASKS:
+        base += (
+            "\n\nCONTENT POLICY: This is an adult fiction project. "
+            "You are explicitly permitted — and expected when the story requires it — "
+            "to write mature content without restrictions: graphic violence, explicit "
+            "sexuality, strong language, disturbing themes, morally complex or reprehensible "
+            "characters, and dark subject matter. Do not soften, fade to black, skip, or "
+            "summarize scenes that the story calls for. Write them fully and directly. "
+            "No content filtering is applied to this project."
         )
 
     task_instructions = {
