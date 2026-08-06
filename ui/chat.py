@@ -280,7 +280,21 @@ class ChatMessagesArea(QWidget):
         self._layout.insertWidget(self._layout.count() - 1, bubble)
 
     def begin_streaming(self) -> None:
-        """Show a streaming bubble for the incoming assistant response."""
+        """Show a streaming bubble for the incoming assistant response.
+
+        Safe to call even if a previous streaming bubble was never
+        finalized (e.g. a step like "Clearing chat..." that has no
+        matching step_finished) — any leftover bubble is discarded first
+        so we never leave an empty orphaned bubble sitting in the log.
+        """
+        if self._streaming_bubble is not None:
+            stale = self._streaming_bubble
+            self._streaming_bubble = None
+            try:
+                stale.setParent(None)
+                stale.deleteLater()
+            except RuntimeError:
+                pass
         self._streaming_bubble = StreamingBubble()
         self._layout.insertWidget(self._layout.count() - 1, self._streaming_bubble)
 
@@ -578,6 +592,16 @@ class ChatPanel(QWidget):
 
     def _on_step_started(self, desc: str) -> None:
         self._show_status(desc)
+        # "Write Book" (and similar multi-step tasks) fire step_started once
+        # per chapter/sub-step, but the streaming bubble from the PREVIOUS
+        # step was already removed by finalize_streaming() in
+        # _on_step_finished(). Without opening a fresh bubble here, tokens
+        # for every step after the first one have nowhere to go — the
+        # status label keeps updating, but the chat looks frozen even
+        # though the model is actively generating. Re-open a bubble for
+        # each new step so streaming stays visible the whole way through.
+        self.messages_widget.begin_streaming()
+        self._scroll_to_bottom()
 
     def _on_model_loading(self, msg: str) -> None:
         self._show_status(msg)

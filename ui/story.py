@@ -1168,6 +1168,17 @@ class ChaptersTab(QWidget):
             self._project.chapters = [
                 c for c in self._project.chapters if c.number != self._current_chapter.number
             ]
+            # current_chapter is a separate persisted "how far did we get"
+            # pointer — it does NOT shrink automatically just because a
+            # chapter was removed from the list. If we leave it pointing at
+            # the old (now possibly nonexistent) chapter number, the engine's
+            # _next_chapter_number() will trust that stale value over the
+            # real chapter list and silently skip past the gap we just
+            # created next time "Write Chapter"/"Write Book" runs — even
+            # after restarting the app, since it's saved to disk below.
+            self._project.current_chapter = max(
+                (c.number for c in self._project.chapters), default=0
+            )
             storage.save_project(self._project)
             self._current_chapter = None
             self.chapter_title_edit.clear()
