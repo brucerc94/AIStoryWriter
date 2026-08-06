@@ -39,7 +39,16 @@ from ui.chat import ChatPanel
 from ui.projects import ProjectsPanel
 from ui.settings import ModelsPanel, SettingsPanel
 from ui.story import StoryPanel
-from ui.styles import COLOR_ACCENT, COLOR_BORDER, COLOR_SURFACE, COLOR_TEXT_DIM, COLOR_TEXT_MUTED
+from ui.styles import (
+    COLOR_ACCENT,
+    COLOR_ACCENT_DIM,
+    COLOR_ACCENT_HOVER,
+    COLOR_BORDER,
+    COLOR_SURFACE,
+    COLOR_TEXT,
+    COLOR_TEXT_DIM,
+    COLOR_TEXT_MUTED,
+)
 from ui.widgets import SizeAdjustingTabWidget
 
 logger = logging.getLogger("ui.main")
@@ -53,12 +62,12 @@ class EmptyStateWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignCenter)
         lbl = QLabel(
-            "Select a project on the left, or click + to create a new one to start writing."
+            "Selecciona un proyecto a la izquierda\no haz clic en \"+ New\" para crear uno nuevo."
         )
         lbl.setAlignment(Qt.AlignCenter)
         lbl.setWordWrap(True)
-        lbl.setMaximumWidth(420)
-        lbl.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 14px; padding: 40px;")
+        lbl.setMaximumWidth(460)
+        lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 16px; line-height: 1.6; padding: 40px;")
         layout.addWidget(lbl)
 
 
@@ -68,8 +77,8 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("AI Story Studio")
-        self.resize(1400, 900)
-        self.setMinimumSize(900, 600)
+        self.resize(1500, 950)
+        self.setMinimumSize(1000, 650)
 
         self._settings: AppSettings = storage.load_settings()
         self._current_project: Optional[Project] = None
@@ -110,16 +119,16 @@ class MainWindow(QMainWindow):
         right_layout.setSpacing(0)
 
         title_bar = QFrame()
-        title_bar.setFixedHeight(40)
+        title_bar.setFixedHeight(52)
         title_bar.setStyleSheet(
             f"background: {COLOR_SURFACE}; border-bottom: 1px solid {COLOR_BORDER};"
         )
         title_bar_layout = QHBoxLayout(title_bar)
-        title_bar_layout.setContentsMargins(16, 0, 12, 0)
+        title_bar_layout.setContentsMargins(20, 0, 16, 0)
 
         self.project_title_bar = QLabel("")
         self.project_title_bar.setStyleSheet(
-            f"color: {COLOR_TEXT_DIM}; font-size: 14px; font-weight: 600; "
+            f"color: {COLOR_TEXT}; font-size: 16px; font-weight: 700; "
             "background: transparent;"
         )
         title_bar_layout.addWidget(self.project_title_bar)
@@ -127,8 +136,10 @@ class MainWindow(QMainWindow):
 
         self.next_step_btn = QPushButton("")
         self.next_step_btn.setObjectName("subtle")
+        self.next_step_btn.setMinimumHeight(34)
         self.next_step_btn.setStyleSheet(
-            f"QPushButton#subtle {{ color: {COLOR_ACCENT}; }}"
+            f"QPushButton#subtle {{ color: {COLOR_ACCENT}; font-size: 14px; font-weight: 600; padding: 0 14px; }}"
+            f"QPushButton#subtle:hover {{ color: {COLOR_ACCENT_HOVER}; background: {COLOR_ACCENT_DIM}; border-radius: 6px; }}"
         )
         self.next_step_btn.setToolTip(
             "Suggested next step in the synopsis → outline → characters/world → "
@@ -138,9 +149,14 @@ class MainWindow(QMainWindow):
         self.next_step_btn.hide()
         title_bar_layout.addWidget(self.next_step_btn)
 
-        self.export_btn = QPushButton("⇩ Export Book")
+        self.export_btn = QPushButton("⇩  Export")
         self.export_btn.setObjectName("subtle")
-        self.export_btn.setToolTip("Export the whole novel (synopsis + all chapters) to Word or PDF.")
+        self.export_btn.setMinimumHeight(34)
+        self.export_btn.setStyleSheet(
+            f"QPushButton#subtle {{ font-size: 14px; padding: 0 14px; color: {COLOR_TEXT_DIM}; }}"
+            f"QPushButton#subtle:hover {{ color: {COLOR_TEXT}; }}"
+        )
+        self.export_btn.setToolTip("Exportar la novela completa a Word o PDF")
         self.export_btn.clicked.connect(self._show_export_menu)
         title_bar_layout.addWidget(self.export_btn)
 
@@ -170,7 +186,7 @@ class MainWindow(QMainWindow):
         self.splitter.addWidget(right_container)
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
-        self.splitter.setSizes([300, 1100])
+        self.splitter.setSizes([340, 1160])
 
         root_layout.addWidget(self.splitter)
         self.setCentralWidget(central)

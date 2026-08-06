@@ -33,7 +33,7 @@ QWidget {{
     background-color: {COLOR_BG};
     color: {COLOR_TEXT};
     font-family: {FONT_SANS};
-    font-size: 13px;
+    font-size: 14px;
     border: none;
     outline: none;
 }}
@@ -81,10 +81,10 @@ QSplitter::handle:vertical {{ height: 1px; }}
 QTabBar::tab {{
     background: {COLOR_SURFACE};
     color: {COLOR_TEXT_DIM};
-    padding: 8px 18px;
+    padding: 10px 22px;
     border: none;
     border-bottom: 2px solid transparent;
-    font-size: 13px;
+    font-size: 14px;
 }}
 QTabBar::tab:selected {{
     color: {COLOR_TEXT};
@@ -105,8 +105,8 @@ QPushButton {{
     color: {COLOR_TEXT};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
-    padding: 6px 14px;
-    font-size: 13px;
+    padding: 8px 16px;
+    font-size: 14px;
 }}
 QPushButton:hover {{
     background-color: {COLOR_BORDER};
@@ -162,7 +162,8 @@ QLineEdit, QTextEdit, QPlainTextEdit {{
     color: {COLOR_TEXT};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
-    padding: 6px 10px;
+    padding: 8px 12px;
+    font-size: 14px;
     selection-background-color: {COLOR_ACCENT_DIM};
 }}
 QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {{
@@ -204,13 +205,14 @@ QListWidget {{
     background-color: {COLOR_SURFACE};
     border: 1px solid {COLOR_BORDER};
     border-radius: 6px;
-    padding: 4px;
+    padding: 6px;
     outline: none;
 }}
 QListWidget::item {{
-    padding: 8px 10px;
-    border-radius: 4px;
+    padding: 10px 12px;
+    border-radius: 6px;
     color: {COLOR_TEXT};
+    min-height: 20px;
 }}
 QListWidget::item:selected {{
     background-color: {COLOR_ACCENT_DIM};
@@ -254,21 +256,21 @@ QLabel {{
     background: transparent;
 }}
 QLabel#heading {{
-    font-size: 18px;
+    font-size: 20px;
     font-weight: 700;
     color: {COLOR_TEXT};
 }}
 QLabel#subheading {{
-    font-size: 13px;
+    font-size: 14px;
     color: {COLOR_TEXT_DIM};
 }}
 QLabel#muted {{
     color: {COLOR_TEXT_MUTED};
-    font-size: 12px;
+    font-size: 13px;
 }}
 QLabel#status {{
     color: {COLOR_ACCENT};
-    font-size: 12px;
+    font-size: 13px;
 }}
 
 /* ── Group Box ── */

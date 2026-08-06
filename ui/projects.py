@@ -33,6 +33,8 @@ from engine import storage
 from engine.models import Project
 from ui.styles import (
     COLOR_ACCENT,
+    COLOR_ACCENT_DIM,
+    COLOR_ACCENT_HOVER,
     COLOR_BORDER,
     COLOR_SURFACE,
     COLOR_SURFACE_RAISED,
@@ -59,17 +61,18 @@ class ProjectListRow(QWidget):
 
     def _build(self, project: Project) -> None:
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 8, 6, 8)
-        layout.setSpacing(6)
+        layout.setContentsMargins(12, 10, 8, 10)
+        layout.setSpacing(8)
 
         text_col = QVBoxLayout()
-        text_col.setSpacing(2)
+        text_col.setSpacing(3)
         text_col.setContentsMargins(0, 0, 0, 0)
 
         title_lbl = QLabel(project.title)
         title_lbl.setStyleSheet(
-            f"color: {COLOR_TEXT}; font-size: 13px; font-weight: 600; background: transparent;"
+            f"color: {COLOR_TEXT}; font-size: 14px; font-weight: 600; background: transparent;"
         )
+        title_lbl.setWordWrap(False)
         text_col.addWidget(title_lbl)
 
         try:
@@ -78,19 +81,22 @@ class ProjectListRow(QWidget):
         except Exception:
             date_str = ""
         chapters = len(project.chapters)
-        ch_str = f"{chapters} chapter{'s' if chapters != 1 else ''}"
-        subtitle_lbl = QLabel(f"{ch_str} · {date_str}" if date_str else ch_str)
-        subtitle_lbl.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px; background: transparent;")
+        ch_str = f"{chapters} cap." if chapters else "Sin capítulos"
+        subtitle_lbl = QLabel(f"{ch_str}  ·  {date_str}" if date_str else ch_str)
+        subtitle_lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 12px; background: transparent;")
         text_col.addWidget(subtitle_lbl)
 
         layout.addLayout(text_col, 1)
 
         self.delete_btn = QPushButton("🗑")
         self.delete_btn.setObjectName("subtle")
-        self.delete_btn.setFixedSize(26, 26)
-        self.delete_btn.setToolTip("Delete project")
+        self.delete_btn.setFixedSize(30, 30)
+        self.delete_btn.setToolTip("Eliminar proyecto")
         self.delete_btn.setCursor(Qt.PointingHandCursor)
-        self.delete_btn.setStyleSheet("QPushButton#subtle { font-size: 13px; padding: 0; }")
+        self.delete_btn.setStyleSheet(
+            f"QPushButton#subtle {{ font-size: 15px; padding: 0; color: {COLOR_TEXT_DIM}; }}"
+            f"QPushButton#subtle:hover {{ color: #c0392b; background: transparent; }}"
+        )
         self.delete_btn.clicked.connect(lambda: self.delete_requested.emit(self.project_id))
         layout.addWidget(self.delete_btn)
 
@@ -113,8 +119,8 @@ class ProjectsPanel(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setMinimumWidth(260)
-        self.setMaximumWidth(420)
+        self.setMinimumWidth(300)
+        self.setMaximumWidth(500)
         self._projects: dict[str, Project] = {}
         self._build_ui()
         self.refresh()
@@ -127,25 +133,21 @@ class ProjectsPanel(QWidget):
         # Header
         header = QFrame()
         header.setStyleSheet(f"background: {COLOR_SURFACE}; border-bottom: 1px solid {COLOR_BORDER};")
-        header.setFixedHeight(54)
+        header.setFixedHeight(60)
         h_layout = QHBoxLayout(header)
         h_layout.setContentsMargins(16, 0, 12, 0)
 
         title_lbl = QLabel("Projects")
-        title_lbl.setStyleSheet(f"color: {COLOR_TEXT}; font-weight: 700; font-size: 14px; background: transparent;")
+        title_lbl.setStyleSheet(f"color: {COLOR_TEXT}; font-weight: 700; font-size: 16px; background: transparent;")
         h_layout.addWidget(title_lbl)
         h_layout.addStretch()
 
-        self.new_btn = QPushButton("+")
+        self.new_btn = QPushButton("+ New")
         self.new_btn.setObjectName("accent")
-        self.new_btn.setFixedSize(30, 30)
+        self.new_btn.setFixedHeight(34)
         self.new_btn.setToolTip("New project")
-        # The base QPushButton rule sets padding: 6px 14px, which alone
-        # eats the entire 30px fixed width and leaves no room to actually
-        # draw the "+" glyph. Override it explicitly so the button is
-        # visible instead of an empty purple square.
         self.new_btn.setStyleSheet(
-            "QPushButton#accent { padding: 0; font-size: 18px; font-weight: 700; }"
+            "QPushButton#accent { padding: 0 14px; font-size: 14px; font-weight: 600; }"
         )
         self.new_btn.clicked.connect(self._create_project)
         h_layout.addWidget(self.new_btn)
@@ -156,9 +158,10 @@ class ProjectsPanel(QWidget):
         search_frame = QFrame()
         search_frame.setStyleSheet(f"background: {COLOR_SURFACE}; border-bottom: 1px solid {COLOR_BORDER};")
         s_layout = QHBoxLayout(search_frame)
-        s_layout.setContentsMargins(10, 8, 10, 8)
+        s_layout.setContentsMargins(12, 10, 12, 10)
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search projects…")
+        self.search_input.setPlaceholderText("🔍  Search projects…")
+        self.search_input.setMinimumHeight(34)
         self.search_input.textChanged.connect(self._filter)
         s_layout.addWidget(self.search_input)
         layout.addWidget(search_frame)
@@ -170,12 +173,19 @@ class ProjectsPanel(QWidget):
                 background: {COLOR_SURFACE};
                 border: none;
                 border-radius: 0;
-                padding: 4px;
+                padding: 8px 6px;
             }}
             QListWidget::item {{
-                padding: 10px 12px;
-                border-radius: 6px;
-                font-size: 13px;
+                padding: 2px 4px;
+                border-radius: 8px;
+                font-size: 14px;
+                margin-bottom: 2px;
+            }}
+            QListWidget::item:selected {{
+                background-color: {COLOR_ACCENT_DIM};
+            }}
+            QListWidget::item:hover:!selected {{
+                background-color: {COLOR_SURFACE_RAISED};
             }}
         """)
         self.list_widget.setContextMenuPolicy(Qt.CustomContextMenu)
