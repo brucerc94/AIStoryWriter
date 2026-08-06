@@ -13,6 +13,7 @@ Also provides action buttons that trigger workflow tasks via the Chat panel.
 
 from __future__ import annotations
 
+import re
 from typing import Callable, Optional
 
 from PySide6.QtCore import Qt, Signal
@@ -32,6 +33,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSpinBox,
     QSplitter,
     QTextEdit,
     QVBoxLayout,
@@ -53,6 +55,22 @@ from ui.styles import (
     FONT_SERIF,
 )
 from ui.widgets import SizeAdjustingTabWidget
+
+
+def outline_chapter_numbers(outline_text: str) -> list[int]:
+    """
+    Chapter numbers found in an outline's "## Chapter N" headings.
+    Mirrors engine.workflow's own parser so the UI (chapter-count badge,
+    Write Book confirmation) always agrees with what the workflow will
+    actually do with the same text.
+    """
+    numbers = set()
+    for match in re.finditer(r"^\s*##\s*Chapter\s+(\d+)\b", outline_text or "", re.IGNORECASE | re.MULTILINE):
+        try:
+            numbers.add(int(match.group(1)))
+        except ValueError:
+            continue
+    return sorted(numbers)
 
 
 class SectionHeader(QWidget):
@@ -158,6 +176,67 @@ class SynopsisTab(QWidget):
         project.synopsis = self.editor.get_text()
 
 
+class GenerateOutlineDialog(QDialog):
+    """
+    Asks how many chapters the book should have before generating the
+    outline. "Write Book" later writes exactly one chapter per outline
+    heading, so fixing the count here is what actually determines how
+    long the finished novel will be — this is not just a cosmetic prompt.
+    """
+
+    def __init__(self, default_chapters: int = 12, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Generate Outline")
+        self.setMinimumWidth(440)
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        intro = QLabel(
+            "How many chapters should this book have? The outline — and "
+            "later \"Write Book\" — will follow this number, one chapter "
+            "at a time."
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 12px;")
+        layout.addWidget(intro)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+
+        self.chapters_spin = QSpinBox()
+        self.chapters_spin.setRange(1, 300)
+        self.chapters_spin.setValue(max(1, default_chapters))
+        form.addRow("Number of chapters", self.chapters_spin)
+        layout.addLayout(form)
+
+        notes_lbl = QLabel("Additional instructions (optional)")
+        notes_lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 12px;")
+        layout.addWidget(notes_lbl)
+
+        self.notes_input = QTextEdit()
+        self.notes_input.setPlaceholderText(
+            "Genre, tone, pacing, POV, chapter length, twists to plan for…"
+        )
+        self.notes_input.setFixedHeight(80)
+        layout.addWidget(self.notes_input)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("Generate")
+        buttons.button(QDialogButtonBox.Ok).setObjectName("accent")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def chapter_count(self) -> int:
+        return self.chapters_spin.value()
+
+    def notes(self) -> str:
+        return self.notes_input.toPlainText().strip()
+
+
 class OutlineTab(QWidget):
     task_requested = Signal(TaskType, str)
     content_changed = Signal(str)
@@ -172,11 +251,16 @@ class OutlineTab(QWidget):
         title_lbl = QLabel("Outline")
         title_lbl.setStyleSheet(f"font-size: 15px; font-weight: 700; color: {COLOR_TEXT};")
         header_row.addWidget(title_lbl)
+
+        self.count_lbl = QLabel("")
+        self.count_lbl.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px; padding-left: 8px;")
+        header_row.addWidget(self.count_lbl)
         header_row.addStretch()
 
         gen_btn = QPushButton("Generate")
         gen_btn.setObjectName("accent")
-        gen_btn.clicked.connect(lambda: self.task_requested.emit(TaskType.GENERATE_OUTLINE, ""))
+        gen_btn.setToolTip("Asks how many chapters to plan, then generates the full outline.")
+        gen_btn.clicked.connect(self._on_generate_clicked)
         header_row.addWidget(gen_btn)
 
         review_btn = QPushButton("Review")
@@ -193,11 +277,38 @@ class OutlineTab(QWidget):
                 "Format:\n## Chapter 1: Title\nObjective:\n...\n\nScenes required:\n- ...\n\nScenes prohibited:\n- ..."
             )
         )
+        self.editor.editor.textChanged.connect(self._update_count_label)
         self.editor.content_saved.connect(self.content_changed.emit)
         layout.addWidget(self.editor, 1)
 
+    def _on_generate_clicked(self) -> None:
+        existing = outline_chapter_numbers(self.editor.get_text())
+        default_n = max(existing) if existing else 12
+        dialog = GenerateOutlineDialog(default_chapters=default_n, parent=self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        n = dialog.chapter_count()
+        notes = dialog.notes()
+        requirement = f"The outline must contain EXACTLY {n} chapters, numbered sequentially from 1 to {n}."
+        if notes:
+            requirement += f"\n\nAdditional instructions: {notes}"
+        self.task_requested.emit(TaskType.GENERATE_OUTLINE, requirement)
+
+    def _update_count_label(self) -> None:
+        numbers = outline_chapter_numbers(self.editor.get_text())
+        if not numbers:
+            self.count_lbl.setText("")
+            return
+        n = len(numbers)
+        max_n = max(numbers)
+        label = f"· {n} chapter{'s' if n != 1 else ''} planned"
+        if max_n != n:
+            label += f" (numbered up to {max_n})"
+        self.count_lbl.setText(label)
+
     def load(self, project: Project) -> None:
         self.editor.set_text(project.outline)
+        self._update_count_label()
 
     def save_to(self, project: Project) -> None:
         project.outline = self.editor.get_text()
@@ -654,6 +765,37 @@ class ChaptersTab(QWidget):
 
     def _write_book(self) -> None:
         if not self._project:
+            return
+        if not self._project.outline.strip():
+            QMessageBox.information(
+                self, "No Outline Yet",
+                "Generate an outline first (Outline tab) — \"Write Book\" writes "
+                "one chapter per heading in the outline, so it needs one to follow.",
+            )
+            return
+        outline_numbers = outline_chapter_numbers(self._project.outline)
+        total = len(outline_numbers)
+        written = len([
+            c for c in self._project.chapters
+            if c.number in outline_numbers and c.content.strip()
+        ])
+        remaining = max(total - written, 0)
+        if remaining == 0:
+            QMessageBox.information(
+                self, "Book Complete",
+                f"All {total} chapter(s) in the outline already have content. "
+                "Add more chapters to the outline to continue, or edit chapters "
+                "individually from this tab.",
+            )
+            return
+        reply = QMessageBox.question(
+            self, "Write Book",
+            f"This will write {remaining} remaining chapter(s) (of {total} in the "
+            "outline) one after another, updating Story Memory in between. This "
+            "can take a while, especially for longer books.\n\nContinue?",
+            QMessageBox.Yes | QMessageBox.Cancel,
+        )
+        if reply != QMessageBox.Yes:
             return
         self.task_requested.emit(TaskType.WRITE_BOOK, "")
 

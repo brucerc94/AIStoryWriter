@@ -206,6 +206,12 @@ class AppSettingsWidget(QWidget):
         self.ctx_spin.setSingleStep(512)
         self.ctx_spin.setValue(4096)
         self.ctx_spin.setSuffix(" tokens")
+        self.ctx_spin.setToolTip(
+            "The model's total window: prompt + reply combined. This is a "
+            "hard ceiling set by the model itself — it does not control how "
+            "much the app asks the model to write in one go (see \"Max "
+            "Tokens per Pass\" below)."
+        )
         form.addRow("Context Size", self.ctx_spin)
 
         # GPU layers
@@ -260,6 +266,31 @@ class AppSettingsWidget(QWidget):
         )
         gen_form.addRow("Response Language", self.language_input)
 
+        # Max tokens per generation pass — shared by Outline, Write Chapter
+        # (and therefore Write Book, which calls it per chapter), and
+        # Rewrite Chapter. NOT the same as Context Size above: this is how
+        # much reply the app requests in one pass before its continuation
+        # loop kicks in if the model stops early (out of tokens) or the
+        # content isn't finished yet — Context Size is the model's total
+        # window and still caps this from the other side.
+        self.max_tokens_spin = QSpinBox()
+        self.max_tokens_spin.setRange(256, 32000)
+        self.max_tokens_spin.setSingleStep(256)
+        self.max_tokens_spin.setValue(4000)
+        self.max_tokens_spin.setSuffix(" tokens")
+        self.max_tokens_spin.setToolTip(
+            "Reply length requested per generation pass for Outline, Write "
+            "Chapter, Write Book, and Rewrite Chapter — one shared value, "
+            "so they never drift apart. If the model stops before finishing "
+            "(runs out of tokens or the outline/chapter isn't complete "
+            "yet), the app automatically continues in another pass rather "
+            "than saving a partial result.\n\n"
+            "This is separate from Context Size: Context Size is the "
+            "model's total window (prompt + reply); this is what the app "
+            "asks for in a single pass within that window."
+        )
+        gen_form.addRow("Max Tokens per Pass", self.max_tokens_spin)
+
         # Custom system prompt — appended to every auto-generated prompt
         self.system_prompt_input = QPlainTextEdit()
         self.system_prompt_input.setPlaceholderText(
@@ -289,6 +320,7 @@ class AppSettingsWidget(QWidget):
         self.autosave_check.setChecked(settings.auto_save)
         self.enable_thinking_check.setChecked(getattr(settings, "enable_thinking", False))
         self.language_input.setText(settings.response_language)
+        self.max_tokens_spin.setValue(getattr(settings, "content_max_tokens", 4000))
         self.system_prompt_input.setPlainText(settings.custom_system_prompt)
 
     def _browse_models_dir(self) -> None:
@@ -306,6 +338,7 @@ class AppSettingsWidget(QWidget):
         self._settings.auto_save = self.autosave_check.isChecked()
         self._settings.enable_thinking = self.enable_thinking_check.isChecked()
         self._settings.response_language = self.language_input.text().strip()
+        self._settings.content_max_tokens = self.max_tokens_spin.value()
         self._settings.custom_system_prompt = self.system_prompt_input.toPlainText().strip()
         storage.save_settings(self._settings)
         self.settings_changed.emit(self._settings)

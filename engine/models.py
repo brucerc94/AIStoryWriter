@@ -325,6 +325,16 @@ class AppSettings:
     # Only applied automatically to Qwen models that expose the
     # enable_thinking chat template toggle in the installed llama-cpp-python.
     enable_thinking: bool = False
+    # Max output tokens requested per generation PASS for the long-form
+    # content-writing tasks: outline generation, chapter writing, and
+    # chapter rewriting (WRITE_BOOK just calls chapter writing per chapter,
+    # so it follows this too). This is NOT the same as Context Size above —
+    # Context Size is the model's total window (prompt + reply combined);
+    # this is how much reply we ask for in one go before the continuation
+    # loop kicks in to keep going. Raising it means fewer continuation
+    # passes per chapter/outline, but each pass needs that much reply room
+    # left over within Context Size, so it's capped there automatically.
+    content_max_tokens: int = 4000
 
     def to_dict(self) -> dict:
         return {
@@ -339,6 +349,7 @@ class AppSettings:
             "temperature": self.temperature,
             "response_language": self.response_language,
             "enable_thinking": self.enable_thinking,
+            "content_max_tokens": self.content_max_tokens,
         }
 
     @classmethod

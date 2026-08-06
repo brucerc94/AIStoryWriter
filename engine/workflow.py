@@ -44,6 +44,10 @@ logger = logging.getLogger("workflow")
 
 MAX_CONTINUATIONS = 3
 MAX_COMPLETION_EVAL_RETRIES = 2
+# Outline generation can need more passes than a single chapter: a 40-chapter
+# request won't fit in one 3000-token pass, so allow more continuation rounds
+# than MAX_CONTINUATIONS (which is sized for one chapter's prose).
+MAX_OUTLINE_CONTINUATIONS = 8
 
 
 class WorkflowWorker(QObject):
@@ -308,6 +312,23 @@ class WorkflowWorker(QObject):
 
         return result
 
+    def _content_max_tokens(self) -> int:
+        """
+        Shared reply-length budget for the long-form content-writing tasks:
+        GENERATE_OUTLINE, WRITE_CHAPTER (and therefore WRITE_BOOK, which
+        just calls it per chapter), and REWRITE_CHAPTER. One setting
+        (Settings > Generation > Max Tokens per Pass) instead of separate
+        hardcoded numbers per task, so raising it for longer chapters also
+        raises it for the outline instead of the two silently drifting
+        apart. Falls back to 4000 for settings saved before this option
+        existed.
+        """
+        if self.settings is not None:
+            value = getattr(self.settings, "content_max_tokens", 4000)
+            if isinstance(value, int) and value > 0:
+                return value
+        return 4000
+
     def _custom_system_instructions(self) -> str:
         """Author-provided instructions from Settings, appended to every prompt."""
         if self.settings is not None:
@@ -345,47 +366,66 @@ class WorkflowWorker(QObject):
             f' The "description" value should be written in {language}.'
             if language else ""
         )
-        prompt = (
-            "Extract every named character mentioned in the text below. "
-            "Respond with ONLY a JSON array — no markdown fences, no commentary, "
-            "nothing before or after it. If there are no named characters, "
-            "respond with exactly: []\n\n"
-            "Each array element must be an object with exactly these keys "
-            "(keep these key names and the role value in English — only the "
-            f"description text should be translated):\n"
-            '  "name": the character\'s name\n'
-            '  "role": one of "protagonist", "antagonist", "supporting", "minor"\n'
-            f'  "description": one concise sentence.{language_note}\n\n'
-            f"Characters already tracked (skip these unless the text reveals "
-            f"something significant enough to be worth its own new entry): {existing_names}\n\n"
-            f"Text:\n{source_text[:6000]}\n\n"
-            "JSON array:"
-        )
-        messages = [
-            {
-                "role": "system",
-                "content": "You extract structured character data as strict JSON. Output JSON only.",
-            },
-            {"role": "user", "content": prompt},
+        # Process text in 6000-char chunks so long outlines (12+ chapters)
+        # are fully scanned instead of being silently truncated at 6000 chars.
+        CHUNK_SIZE = 6000
+        text_chunks = [
+            source_text[i:i + CHUNK_SIZE]
+            for i in range(0, max(1, len(source_text)), CHUNK_SIZE)
         ]
-
-        engine = get_engine()
-        try:
-            raw = engine.generate(
-                messages=messages,
-                max_tokens=800,
-                temperature=0.2,
-                stream=True,
-                stream_callback=lambda _t: None,  # silent — no chat UI noise
-                cancel_check=lambda: self._cancelled,
+        total_added = 0
+        for chunk_idx, chunk in enumerate(text_chunks):
+            if self._cancelled:
+                break
+            if chunk_idx > 0:
+                # Update existing_names so later chunks don't re-add chars
+                # already picked up in earlier chunks.
+                existing_names = ", ".join(c.name for c in self.project.characters) or "(none yet)"
+            prompt = (
+                "Extract every named character mentioned in the text below. "
+                "Respond with ONLY a JSON array — no markdown fences, no commentary, "
+                "nothing before or after it. If there are no named characters, "
+                "respond with exactly: []\n\n"
+                "Each array element must be an object with exactly these keys "
+                "(keep these key names and the role value in English — only the "
+                f"description text should be translated):\n"
+                '  "name": the character\'s name\n'
+                '  "role": one of "protagonist", "antagonist", "supporting", "minor"\n'
+                f'  "description": one concise sentence.{language_note}\n\n'
+                f"Characters already tracked (skip these unless the text reveals "
+                f"something significant enough to be worth its own new entry): {existing_names}\n\n"
+                f"Text:\n{chunk}\n\n"
+                "JSON array:"
             )
-        except Exception as e:
-            logger.warning(f"Character extraction failed (non-fatal): {e}")
-            return
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You extract structured character data as strict JSON. Output JSON only.",
+                },
+                {"role": "user", "content": prompt},
+            ]
 
-        added = self._merge_extracted_characters(raw)
-        if added:
-            logger.info(f"Auto-added {added} new character(s) from generated text.")
+            engine = get_engine()
+            try:
+                raw = engine.generate(
+                    messages=messages,
+                    max_tokens=800,
+                    temperature=0.2,
+                    stream=True,
+                    stream_callback=lambda _t: None,  # silent — no chat UI noise
+                    cancel_check=lambda: self._cancelled,
+                )
+            except Exception as e:
+                logger.warning(f"Character extraction failed (non-fatal) on chunk {chunk_idx + 1}: {e}")
+                continue
+
+            added = self._merge_extracted_characters(raw)
+            total_added += added
+            if added:
+                logger.info(f"Auto-added {added} new character(s) from chunk {chunk_idx + 1}/{len(text_chunks)}.")
+
+        if total_added:
+            logger.info(f"Character extraction complete: {total_added} total new character(s) added.")
 
     def _merge_extracted_characters(self, raw_json: str) -> int:
         text = raw_json.strip()
@@ -445,50 +485,62 @@ class WorkflowWorker(QObject):
             return
 
         self.step_started.emit("Checking for new world details...")
-        existing_world = self.project.world.strip() or "(nothing recorded yet)"
         language = self._response_language()
         language_note = f" Write it in {language}." if language else ""
-        prompt = (
-            "Below are the story's existing world-building notes, followed by "
-            "newly written story text. Extract ONLY genuinely NEW world-building "
-            "details from the new text — locations, rules/systems, history, "
-            "culture, technology — that are NOT already covered in the existing "
-            "notes. Do not repeat anything already listed. Format as a short "
-            f"Markdown bullet list.{language_note} If there is nothing new, "
-            "respond with exactly: NO_NEW_WORLD_DETAILS\n\n"
-            f"## Existing World Notes\n{existing_world}\n\n"
-            f"## New Text\n{source_text[:6000]}\n\n"
-            "New details (bullet list, or NO_NEW_WORLD_DETAILS):"
-        )
-        messages = [
-            {
-                "role": "system",
-                "content": "You extract new worldbuilding details as a concise Markdown bullet list.",
-            },
-            {"role": "user", "content": prompt},
+        # Process text in 6000-char chunks so long outlines/chapters don't
+        # get silently truncated and miss world details from later sections.
+        CHUNK_SIZE = 6000
+        text_chunks = [
+            source_text[i:i + CHUNK_SIZE]
+            for i in range(0, max(1, len(source_text)), CHUNK_SIZE)
         ]
-
-        engine = get_engine()
-        try:
-            raw = engine.generate(
-                messages=messages,
-                max_tokens=600,
-                temperature=0.3,
-                stream=True,
-                stream_callback=lambda _t: None,  # silent — no chat UI noise
-                cancel_check=lambda: self._cancelled,
+        for chunk_idx, chunk in enumerate(text_chunks):
+            if self._cancelled:
+                break
+            # Always use the latest accumulated world notes as the baseline
+            # so each chunk can see what previous chunks already added.
+            existing_world = self.project.world.strip() or "(nothing recorded yet)"
+            prompt = (
+                "Below are the story's existing world-building notes, followed by "
+                "newly written story text. Extract ONLY genuinely NEW world-building "
+                "details from the new text — locations, rules/systems, history, "
+                "culture, technology — that are NOT already covered in the existing "
+                "notes. Do not repeat anything already listed. Format as a short "
+                f"Markdown bullet list.{language_note} If there is nothing new, "
+                "respond with exactly: NO_NEW_WORLD_DETAILS\n\n"
+                f"## Existing World Notes\n{existing_world}\n\n"
+                f"## New Text\n{chunk}\n\n"
+                "New details (bullet list, or NO_NEW_WORLD_DETAILS):"
             )
-        except Exception as e:
-            logger.warning(f"World-info extraction failed (non-fatal): {e}")
-            return
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You extract new worldbuilding details as a concise Markdown bullet list.",
+                },
+                {"role": "user", "content": prompt},
+            ]
 
-        cleaned = raw.strip()
-        if not cleaned or "NO_NEW_WORLD_DETAILS" in cleaned.upper():
-            return
+            engine = get_engine()
+            try:
+                raw = engine.generate(
+                    messages=messages,
+                    max_tokens=600,
+                    temperature=0.3,
+                    stream=True,
+                    stream_callback=lambda _t: None,  # silent — no chat UI noise
+                    cancel_check=lambda: self._cancelled,
+                )
+            except Exception as e:
+                logger.warning(f"World-info extraction failed (non-fatal) on chunk {chunk_idx + 1}: {e}")
+                continue
 
-        sep = "\n\n" if self.project.world.strip() else ""
-        self.project.world = (self.project.world.rstrip() + sep + cleaned).strip()
-        logger.info("Added new world-building details extracted from generated text.")
+            cleaned = raw.strip()
+            if not cleaned or "NO_NEW_WORLD_DETAILS" in cleaned.upper():
+                continue
+
+            sep = "\n\n" if self.project.world.strip() else ""
+            self.project.world = (self.project.world.rstrip() + sep + cleaned).strip()
+            logger.info(f"Added new world-building details from chunk {chunk_idx + 1}/{len(text_chunks)}.")
 
     def _run_inference(
         self,
@@ -806,7 +858,7 @@ class WorkflowWorker(QObject):
         # the author actually typed (e.g. "sigue con el capítulo 3"), not
         # the long constructed prompt we're actually sending the model.
         result = self._run_inference(
-            TaskType.WRITE_CHAPTER, model_prompt, add_to_chat=False, max_tokens=4000
+            TaskType.WRITE_CHAPTER, model_prompt, add_to_chat=False, max_tokens=self._content_max_tokens()
         )
         if result:
             sep = "\n\n" if chapter.content.strip() else ""
@@ -859,25 +911,146 @@ class WorkflowWorker(QObject):
             self.step_finished.emit("Synopsis", result)
 
     def _run_generate_outline(self) -> None:
+        """
+        Generates the outline, and — same idea as _run_write_chapter's
+        multi-pass loop — keeps generating continuations if the model
+        stops (runs out of tokens / hits max_tokens) before reaching the
+        requested chapter count, instead of silently saving a partial
+        outline. Unlike chapter completion (which needs a small LLM call
+        to judge "is this scene finished?"), outline completion is
+        checked deterministically: does "## Chapter <requested_n>" exist
+        yet? That's exactly what Write Book will look for later, so it's
+        the right thing to check here too.
+        """
         self.step_started.emit("Generating outline...")
-        prompt = (
-            self.extra_input
-            if self.extra_input
-            else (
-                f"Generate a complete chapter-by-chapter outline for '{self.project.title}'.\n"
-                "Use the structured format with Objective, Scenes required, and Scenes prohibited for each chapter.\n"
-                + (f"Synopsis: {self.project.synopsis}" if self.project.synopsis else "")
+        # extra_input carries the chapter-count requirement (and any
+        # optional author notes) collected by the "Generate" dialog on the
+        # Outline tab — see ui/story.py's GenerateOutlineDialog. It is always
+        # ADDED to the base prompt rather than replacing it, so the synopsis
+        # is never silently dropped just because a chapter count was given.
+        base_prompt = (
+            f"Generate a complete chapter-by-chapter outline for '{self.project.title}'.\n"
+            "Use the structured format with Objective, Scenes required, and Scenes prohibited for each chapter."
+        )
+        if self.extra_input:
+            base_prompt += f"\n\n{self.extra_input}"
+        if self.project.synopsis:
+            base_prompt += f"\n\nSynopsis: {self.project.synopsis}"
+
+        requested_n = self._extract_requested_chapter_count(self.extra_input)
+
+        outline_text = ""
+        generation_pass = 0
+        while generation_pass < MAX_OUTLINE_CONTINUATIONS:
+            generation_pass += 1
+            if generation_pass == 1:
+                logger.info(f"[generate_outline] Generation pass {generation_pass}...")
+                generated = self._run_inference(
+                    TaskType.GENERATE_OUTLINE, base_prompt, add_to_chat=True, max_tokens=self._content_max_tokens()
+                )
+            else:
+                self.step_started.emit(f"Continuing outline (pass {generation_pass})...")
+                logger.info(f"[generate_outline] Continuing outline (pass {generation_pass})...")
+                continuation_prompt = self._build_outline_continuation_prompt(outline_text, requested_n)
+                generated = self._run_inference(
+                    TaskType.GENERATE_OUTLINE, continuation_prompt, add_to_chat=True, max_tokens=self._content_max_tokens()
+                )
+
+            if not generated:
+                logger.warning(f"[generate_outline] generation pass {generation_pass} returned empty text.")
+                break
+
+            outline_text = (
+                (outline_text.rstrip() + "\n\n" + generated.strip()).strip()
+                if outline_text else generated.strip()
             )
-        )
-        result = self._run_inference(
-            TaskType.GENERATE_OUTLINE, prompt, add_to_chat=True, max_tokens=3000
-        )
-        if result:
-            self.project.outline = result
-            self._extract_and_merge_characters(result)
-            self._extract_and_merge_world_info(result)
+
+            if not requested_n:
+                # No explicit chapter count to check against (e.g. outline
+                # was generated some other way) — one pass is the best we
+                # can do without a target.
+                break
+
+            actual_numbers = self._chapter_numbers_in_text(outline_text)
+            if actual_numbers and max(actual_numbers) >= requested_n:
+                logger.info(
+                    f"[generate_outline] Reached requested chapter count "
+                    f"({len(actual_numbers)}/{requested_n}) after {generation_pass} pass(es)."
+                )
+                break
+
+            if generation_pass >= MAX_OUTLINE_CONTINUATIONS:
+                logger.warning(
+                    f"[generate_outline] Reached MAX_OUTLINE_CONTINUATIONS="
+                    f"{MAX_OUTLINE_CONTINUATIONS} with only "
+                    f"{len(actual_numbers)}/{requested_n} chapters. Saving as-is."
+                )
+                break
+
+            logger.info("[generate_outline] Outline not complete yet. Generating continuation...")
+            self._clear_chat_messages_for_continuation()
+
+        if outline_text:
+            self.project.outline = outline_text
+            self._extract_and_merge_characters(outline_text)
+            self._extract_and_merge_world_info(outline_text)
+
+            # Final sanity check — covers the (rare) case where even
+            # MAX_OUTLINE_CONTINUATIONS passes weren't enough, or the model
+            # overshot/undershot the count despite reaching it.
+            actual_numbers = self._outline_chapter_numbers()
+            if requested_n and actual_numbers and len(actual_numbers) != requested_n:
+                note = (
+                    f"\n\n---\n**Note:** {requested_n} chapters were requested, but this "
+                    f"outline has {len(actual_numbers)}. You can edit it directly on the "
+                    "Outline tab, or click Generate again."
+                )
+                if (
+                    self.project.chat_messages
+                    and self.project.chat_messages[-1].role == MessageRole.ASSISTANT
+                ):
+                    self.project.chat_messages[-1].content += note
+
             storage.save_project(self.project)
-            self.step_finished.emit("Outline", result)
+            self.step_finished.emit("Outline", outline_text)
+
+    def _extract_requested_chapter_count(self, text: str) -> Optional[int]:
+        """Pulls the chapter count out of the requirement text the Outline
+        tab's Generate dialog inserts into extra_input (see
+        GenerateOutlineDialog in ui/story.py), so we can sanity-check the
+        model's output against what was actually asked for."""
+        if not text:
+            return None
+        match = re.search(r"EXACTLY\s+(\d+)\s+chapters", text, re.IGNORECASE)
+        if match:
+            try:
+                return int(match.group(1))
+            except ValueError:
+                return None
+        return None
+
+    def _build_outline_continuation_prompt(self, outline_so_far: str, requested_n: Optional[int]) -> str:
+        """
+        Mirrors _build_chapter_continuation_prompt: asks the model to pick
+        up exactly where the outline left off, instead of restarting from
+        Chapter 1 (which is what would happen if we just re-sent the
+        original prompt after running out of tokens).
+        """
+        numbers = self._chapter_numbers_in_text(outline_so_far)
+        highest_so_far = max(numbers) if numbers else 0
+        next_num = highest_so_far + 1
+        tail = outline_so_far[-1200:].strip()
+        target = f" through Chapter {requested_n}" if requested_n else ""
+        parts = [
+            f"Continue the chapter-by-chapter outline for '{self.project.title}'.",
+            f"It currently covers chapters up to Chapter {highest_so_far}.",
+            f'Continue writing starting exactly at "## Chapter {next_num}"{target}.',
+            "Do not repeat or rewrite any earlier chapter.",
+            "Use the same structured format for each chapter: Objective, Scenes required, Scenes prohibited.",
+            "",
+            f"Outline so far ends with:\n...{tail}",
+        ]
+        return "\n\n".join(parts).strip()
 
     def _run_review_outline(self) -> None:
         self.step_started.emit("Reviewing outline...")
@@ -943,15 +1116,24 @@ class WorkflowWorker(QObject):
                 result.append(line)
         return "\n".join(result).strip()
 
-    def _outline_chapter_numbers(self) -> list[int]:
-        outline = self.project.outline or ""
+    @staticmethod
+    def _chapter_numbers_in_text(text: str) -> list[int]:
+        """
+        Chapter numbers found in any block of "## Chapter N" headings.
+        Shared by outline generation/continuation (working off a text
+        buffer that may not be saved to the project yet) and
+        _outline_chapter_numbers() (working off the saved outline).
+        """
         numbers = set()
-        for match in re.finditer(r"^\s*##\s*Chapter\s+(\d+)\b", outline, re.IGNORECASE | re.MULTILINE):
+        for match in re.finditer(r"^\s*##\s*Chapter\s+(\d+)\b", text or "", re.IGNORECASE | re.MULTILINE):
             try:
                 numbers.add(int(match.group(1)))
             except ValueError:
                 continue
         return sorted(numbers)
+
+    def _outline_chapter_numbers(self) -> list[int]:
+        return self._chapter_numbers_in_text(self.project.outline or "")
 
     def _outline_max_chapter_number(self) -> int:
         numbers = self._outline_chapter_numbers()
@@ -1136,7 +1318,7 @@ class WorkflowWorker(QObject):
                 self.step_started.emit(f"Generation pass {generation_pass}...")
                 logger.info(f"[write_chapter] Generation pass {generation_pass}...")
                 generated = self._run_inference(
-                    TaskType.WRITE_CHAPTER, prompt, add_to_chat=True, max_tokens=4000
+                    TaskType.WRITE_CHAPTER, prompt, add_to_chat=True, max_tokens=self._content_max_tokens()
                 )
             else:
                 self.step_started.emit(f"Generating continuation (pass {generation_pass})...")
@@ -1147,7 +1329,7 @@ class WorkflowWorker(QObject):
                     chapter_goal,
                 )
                 generated = self._run_inference(
-                    TaskType.WRITE_CHAPTER, continuation_prompt, add_to_chat=True, max_tokens=4000
+                    TaskType.WRITE_CHAPTER, continuation_prompt, add_to_chat=True, max_tokens=self._content_max_tokens()
                 )
 
             if not generated:
@@ -1207,11 +1389,30 @@ class WorkflowWorker(QObject):
         while not self._cancelled:
             if not self._reload_project_from_storage():
                 break
-            total = len(self._outline_chapter_numbers()) or total
+            # Refresh outline metadata after reload so the cap always
+            # reflects the actual saved outline (in case it was edited).
+            current_outline_numbers = self._outline_chapter_numbers()
+            if current_outline_numbers:
+                max_outline_chapter = max(current_outline_numbers)
+                total = len(current_outline_numbers)
+            total = total or max(1, len(self.project.chapters) + 1)
             pending = self._next_chapter_number()
             if pending <= 0:
                 break
             if self.project.outline:
+                # Stop if the outline doesn't contain this chapter number at
+                # all, OR if the chapter number exceeds the highest outlined
+                # chapter. Using both checks covers outlines that use
+                # non-sequential numbering AND the common case where the model
+                # generated fewer headings than requested (max_outline_chapter
+                # would be 0 in that edge case, making the old "> 0 and >"
+                # guard silently skip — now we check the heading set directly).
+                if not self._outline_has_chapter(pending):
+                    logger.info(
+                        f"[write_book] Chapter {pending} has no outline entry "
+                        f"(outline covers: {current_outline_numbers}). Stopping."
+                    )
+                    break
                 if max_outline_chapter and pending > max_outline_chapter:
                     break
             self.project.current_chapter = pending - 1
@@ -1256,6 +1457,11 @@ class WorkflowWorker(QObject):
             if next_pending <= pending:
                 break
             if self.project.outline:
+                if not self._outline_has_chapter(next_pending):
+                    logger.info(
+                        f"[write_book] Next chapter {next_pending} has no outline entry. Stopping."
+                    )
+                    break
                 if max_outline_chapter and next_pending > max_outline_chapter:
                     break
             if next_pending is not None:
@@ -1320,7 +1526,7 @@ class WorkflowWorker(QObject):
             )
         )
         result = self._run_inference(
-            TaskType.REWRITE_CHAPTER, prompt, add_to_chat=True, max_tokens=4000
+            TaskType.REWRITE_CHAPTER, prompt, add_to_chat=True, max_tokens=self._content_max_tokens()
         )
         if result:
             chapter.content = result

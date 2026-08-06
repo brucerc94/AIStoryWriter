@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from agents.manager import ManagerAgent
 from engine import storage
 from engine import export as book_export
 from engine.models import AppSettings, Project, TaskType
@@ -38,7 +39,7 @@ from ui.chat import ChatPanel
 from ui.projects import ProjectsPanel
 from ui.settings import ModelsPanel, SettingsPanel
 from ui.story import StoryPanel
-from ui.styles import COLOR_BORDER, COLOR_SURFACE, COLOR_TEXT_DIM, COLOR_TEXT_MUTED
+from ui.styles import COLOR_ACCENT, COLOR_BORDER, COLOR_SURFACE, COLOR_TEXT_DIM, COLOR_TEXT_MUTED
 from ui.widgets import SizeAdjustingTabWidget
 
 logger = logging.getLogger("ui.main")
@@ -72,6 +73,8 @@ class MainWindow(QMainWindow):
 
         self._settings: AppSettings = storage.load_settings()
         self._current_project: Optional[Project] = None
+        self._manager = ManagerAgent()
+        self._suggested_task: Optional[TaskType] = None
 
         self._build_ui()
         self._wire_signals()
@@ -121,6 +124,19 @@ class MainWindow(QMainWindow):
         )
         title_bar_layout.addWidget(self.project_title_bar)
         title_bar_layout.addStretch()
+
+        self.next_step_btn = QPushButton("")
+        self.next_step_btn.setObjectName("subtle")
+        self.next_step_btn.setStyleSheet(
+            f"QPushButton#subtle {{ color: {COLOR_ACCENT}; }}"
+        )
+        self.next_step_btn.setToolTip(
+            "Suggested next step in the synopsis → outline → characters/world → "
+            "chapters → memory flow. Click to jump there."
+        )
+        self.next_step_btn.clicked.connect(self._go_to_suggested_step)
+        self.next_step_btn.hide()
+        title_bar_layout.addWidget(self.next_step_btn)
 
         self.export_btn = QPushButton("⇩ Export Book")
         self.export_btn.setObjectName("subtle")
@@ -200,6 +216,7 @@ class MainWindow(QMainWindow):
         self.project_title_bar.setText(project.title)
         self.projects_panel.select_project(project_id)
         self._show_workspace()
+        self._update_next_step()
         logger.info(f"Opened project '{project.title}' ({project_id})")
         self.status.showMessage(f"Opened '{project.title}'", 3000)
 
@@ -216,6 +233,7 @@ class MainWindow(QMainWindow):
             return
         self.projects_panel.refresh()
         self.project_title_bar.setText(self._current_project.title)
+        self._update_next_step()
 
     def _on_ai_task_finished(self) -> None:
         """An AI workflow task finished and persisted its own changes."""
@@ -236,6 +254,7 @@ class MainWindow(QMainWindow):
         # them off ChatPanel's stale copy instead.
         self.chat_panel.sync_project_reference(refreshed)
         self.projects_panel.refresh()
+        self._update_next_step()
 
     def _run_task(self, task: TaskType, extra_input: str) -> None:
         if not self._current_project:
@@ -243,6 +262,42 @@ class MainWindow(QMainWindow):
         logger.info(f"Task requested: {task.value} (project='{self._current_project.title}')")
         self.tabs.setCurrentWidget(self.chat_panel)
         self.chat_panel.run_task(task, extra_input)
+
+    # ──────────────────────────────────────────────
+    # Suggested next step
+    # ──────────────────────────────────────────────
+
+    def _update_next_step(self) -> None:
+        """
+        Refreshes the "suggested next step" chip in the title bar, using
+        the synopsis → outline → chapters → memory flow ManagerAgent
+        already knows about. Clicking the chip jumps to where that step
+        happens — it never triggers generation on its own, since some
+        steps (like the outline) need the author to make a choice first
+        (e.g. how many chapters).
+        """
+        project = self._current_project
+        if not project:
+            self.next_step_btn.hide()
+            self._suggested_task = None
+            return
+        task, description = self._manager.suggest_workflow_next_step(project)
+        self._suggested_task = task
+        self.next_step_btn.setText(f"Next: {description} →")
+        self.next_step_btn.show()
+
+    def _go_to_suggested_step(self) -> None:
+        if not self._current_project or not self._suggested_task:
+            return
+        task = self._suggested_task
+        self.tabs.setCurrentWidget(self.story_panel)
+        story_tabs = self.story_panel.tabs
+        if task == TaskType.WRITE_SYNOPSIS:
+            story_tabs.setCurrentWidget(self.story_panel.synopsis_tab)
+        elif task == TaskType.GENERATE_OUTLINE:
+            story_tabs.setCurrentWidget(self.story_panel.outline_tab)
+        else:
+            story_tabs.setCurrentWidget(self.story_panel.chapters_tab)
 
     # ──────────────────────────────────────────────
     # Export
@@ -319,6 +374,8 @@ class MainWindow(QMainWindow):
 
     def _show_empty_state(self) -> None:
         self.project_title_bar.setText("")
+        self.next_step_btn.hide()
+        self._suggested_task = None
         self.tabs.hide()
         self.empty_state.show()
 

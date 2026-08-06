@@ -92,7 +92,10 @@ def _estimate_task_instruction(task: TaskType) -> str:
             "- Bullet anything that must not happen yet.\n\n"
             "Keep the outline concrete and binding. "
             "Do not turn it into a free-form summary. "
-            "Write enough chapters to tell the full story."
+            "If the user's request specifies an exact number of chapters, "
+            "produce precisely that many, numbered sequentially starting at 1 "
+            "— do not stop early or pad with extra chapters. If no number is "
+            "given, use enough chapters to tell the full story."
         ),
         TaskType.REVIEW_OUTLINE: (
             "Review the provided story outline. Analyze it for:\n"
