@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -394,15 +395,43 @@ class ChatPanel(QWidget):
 
         layout.addWidget(header)
 
-        # Status bar for model loading / task info
-        self.status_bar = QLabel("")
-        self.status_bar.setFixedHeight(28)
-        self.status_bar.setStyleSheet(
-            f"background: {COLOR_SURFACE}; color: {COLOR_ACCENT}; "
-            f"font-size: 12px; padding: 0 16px; border-bottom: 1px solid {COLOR_BORDER};"
-        )
+        # Status bar for model loading / task progress — a small card that
+        # reads as "the AI is actively working", not a frozen app.
+        self.status_bar = QFrame()
+        self.status_bar.setObjectName("aiStatusBar")
+        self.status_bar.setFixedHeight(36)
+        status_layout = QVBoxLayout(self.status_bar)
+        status_layout.setContentsMargins(16, 4, 16, 4)
+        status_layout.setSpacing(2)
+
+        status_top = QHBoxLayout()
+        status_top.setSpacing(8)
+        self.status_icon = QLabel("⠋")
+        self.status_icon.setObjectName("aiStatusIcon")
+        self.status_icon.setFixedWidth(14)
+        status_top.addWidget(self.status_icon)
+        self.status_label = QLabel("")
+        self.status_label.setObjectName("aiStatusLabel")
+        status_top.addWidget(self.status_label, 1)
+        status_layout.addLayout(status_top)
+
+        self.status_progress = QProgressBar()
+        self.status_progress.setObjectName("aiProgress")
+        self.status_progress.setRange(0, 0)  # indeterminate — busy, not stalled
+        self.status_progress.setTextVisible(False)
+        self.status_progress.setFixedHeight(3)
+        status_layout.addWidget(self.status_progress)
+
         self.status_bar.hide()
         layout.addWidget(self.status_bar)
+
+        # Cycles the small spinner glyph while a task is running, so the
+        # status bar visibly animates instead of just holding static text.
+        self._spinner_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+        self._spinner_index = 0
+        self._spinner_timer = QTimer(self)
+        self._spinner_timer.setInterval(90)
+        self._spinner_timer.timeout.connect(self._advance_spinner)
 
         # Scroll area
         self.scroll_area = QScrollArea()
@@ -685,9 +714,17 @@ class ChatPanel(QWidget):
         self.input_edit.setEnabled(not busy)
 
     def _show_status(self, msg: str) -> None:
-        self.status_bar.setText(msg)
+        self.status_label.setText(msg)
+        self.status_icon.setText(self._spinner_frames[self._spinner_index])
         self.status_bar.show()
+        if not self._spinner_timer.isActive():
+            self._spinner_timer.start()
 
     def _hide_status(self) -> None:
+        self._spinner_timer.stop()
         self.status_bar.hide()
-        self.status_bar.setText("")
+        self.status_label.setText("")
+
+    def _advance_spinner(self) -> None:
+        self._spinner_index = (self._spinner_index + 1) % len(self._spinner_frames)
+        self.status_icon.setText(self._spinner_frames[self._spinner_index])

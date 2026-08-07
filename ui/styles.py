@@ -373,4 +373,132 @@ QStatusBar {{
     color: {COLOR_TEXT_DIM};
     font-size: 12px;
 }}
+
+/* ── Empty States ──
+   Used for sections with no content yet (Outline, World, Characters, …)
+   so the panel explains itself instead of just being a blank box. */
+QFrame#emptyStateCard {{
+    background: {COLOR_SURFACE};
+    border: 1px dashed {COLOR_BORDER_LIGHT};
+    border-radius: 14px;
+}}
+QLabel#emptyStateIcon {{
+    font-size: 34px;
+    background: transparent;
+}}
+QLabel#emptyStateTitle {{
+    font-size: 16px;
+    font-weight: 700;
+    color: {COLOR_TEXT};
+    background: transparent;
+}}
+QLabel#emptyStateDesc {{
+    font-size: 13px;
+    color: {COLOR_TEXT_DIM};
+    background: transparent;
+}}
+QPushButton#emptyStateCta {{
+    background-color: {COLOR_ACCENT};
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 24px;
+    font-size: 14px;
+    font-weight: 600;
+}}
+QPushButton#emptyStateCta:hover {{
+    background-color: {COLOR_ACCENT_HOVER};
+}}
+QPushButton#emptyStateLink {{
+    background: transparent;
+    border: none;
+    color: {COLOR_TEXT_DIM};
+    font-size: 12px;
+    text-decoration: underline;
+    padding: 4px;
+}}
+QPushButton#emptyStateLink:hover {{
+    color: {COLOR_TEXT};
+}}
+
+/* ── Status chips (project list) ── */
+QLabel#chipMuted, QLabel#chipAccent, QLabel#chipSuccess, QLabel#chipWarning {{
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 2px 7px;
+    border-radius: 8px;
+}}
+QLabel#chipMuted {{
+    color: {COLOR_TEXT_DIM};
+    background: {COLOR_SURFACE_RAISED};
+}}
+QLabel#chipAccent {{
+    color: {COLOR_ACCENT_HOVER};
+    background: {COLOR_ACCENT_DIM};
+}}
+QLabel#chipSuccess {{
+    color: {COLOR_SUCCESS};
+    background: rgba(61, 153, 112, 0.15);
+}}
+QLabel#chipWarning {{
+    color: {COLOR_WARNING};
+    background: rgba(232, 160, 69, 0.15);
+}}
+
+/* ── Thin progress bar for project rows ── */
+QProgressBar#rowProgress {{
+    background: {COLOR_BORDER};
+    border: none;
+    border-radius: 2px;
+    max-height: 4px;
+    min-height: 4px;
+}}
+QProgressBar#rowProgress::chunk {{
+    background: {COLOR_ACCENT};
+    border-radius: 2px;
+}}
+
+/* ── "AI is working" status bar (Chat panel) ── */
+QFrame#aiStatusBar {{
+    background: {COLOR_ACCENT_DIM};
+    border-bottom: 1px solid {COLOR_BORDER};
+}}
+QLabel#aiStatusIcon {{
+    font-size: 14px;
+    background: transparent;
+}}
+QLabel#aiStatusLabel {{
+    color: {COLOR_TEXT};
+    font-size: 12px;
+    font-weight: 600;
+    background: transparent;
+}}
+QProgressBar#aiProgress {{
+    background: transparent;
+    border: none;
+    max-height: 3px;
+    min-height: 3px;
+}}
+QProgressBar#aiProgress::chunk {{
+    background: {COLOR_ACCENT_HOVER};
+    border-radius: 2px;
+}}
+
+/* ── Export action — should read as an important project action ── */
+QPushButton#exportButton {{
+    background: transparent;
+    color: {COLOR_ACCENT_HOVER};
+    border: 1px solid {COLOR_ACCENT_DIM};
+    border-radius: 7px;
+    padding: 0 16px;
+    font-size: 14px;
+    font-weight: 600;
+}}
+QPushButton#exportButton:hover {{
+    background: {COLOR_ACCENT_DIM};
+    color: white;
+    border-color: {COLOR_ACCENT};
+}}
 """

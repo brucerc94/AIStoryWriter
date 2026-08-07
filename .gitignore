@@ -182,3 +182,4 @@ cython_debug/
 /models
 /data
 *.docx
+*.pdf

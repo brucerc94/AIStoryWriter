@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMenu,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -31,10 +32,9 @@ from PySide6.QtWidgets import (
 
 from engine import storage
 from engine.models import Project
+from ui.story import outline_chapter_numbers
 from ui.styles import (
-    COLOR_ACCENT,
     COLOR_ACCENT_DIM,
-    COLOR_ACCENT_HOVER,
     COLOR_BORDER,
     COLOR_SURFACE,
     COLOR_SURFACE_RAISED,
@@ -60,45 +60,80 @@ class ProjectListRow(QWidget):
         self._build(project)
 
     def _build(self, project: Project) -> None:
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 10, 8, 10)
-        layout.setSpacing(8)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(12, 10, 10, 10)
+        outer.setSpacing(5)
 
-        text_col = QVBoxLayout()
-        text_col.setSpacing(3)
-        text_col.setContentsMargins(0, 0, 0, 0)
+        # ── Title row: title, status chip, delete button ──
+        top_row = QHBoxLayout()
+        top_row.setSpacing(6)
 
         title_lbl = QLabel(project.title)
         title_lbl.setStyleSheet(
             f"color: {COLOR_TEXT}; font-size: 14px; font-weight: 600; background: transparent;"
         )
         title_lbl.setWordWrap(False)
-        text_col.addWidget(title_lbl)
+        top_row.addWidget(title_lbl, 1)
 
-        try:
-            dt = datetime.fromisoformat(project.updated_at)
-            date_str = dt.strftime("%b %d, %Y")
-        except Exception:
-            date_str = ""
-        chapters = len(project.chapters)
-        ch_str = f"{chapters} cap." if chapters else "Sin capítulos"
-        subtitle_lbl = QLabel(f"{ch_str}  ·  {date_str}" if date_str else ch_str)
-        subtitle_lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 12px; background: transparent;")
-        text_col.addWidget(subtitle_lbl)
+        outline_numbers = outline_chapter_numbers(project.outline)
+        target = max(outline_numbers) if outline_numbers else 0
+        written = len([c for c in project.chapters if c.content.strip()])
 
-        layout.addLayout(text_col, 1)
+        if target and written >= target:
+            status_text, status_id = "Complete", "chipSuccess"
+        elif written > 0 or project.outline.strip():
+            status_text, status_id = "In Progress", "chipAccent"
+        else:
+            status_text, status_id = "Draft", "chipMuted"
+
+        status_lbl = QLabel(status_text)
+        status_lbl.setObjectName(status_id)
+        top_row.addWidget(status_lbl)
 
         self.delete_btn = QPushButton("🗑")
         self.delete_btn.setObjectName("subtle")
-        self.delete_btn.setFixedSize(30, 30)
-        self.delete_btn.setToolTip("Eliminar proyecto")
+        self.delete_btn.setFixedSize(28, 28)
+        self.delete_btn.setToolTip("Delete project")
         self.delete_btn.setCursor(Qt.PointingHandCursor)
         self.delete_btn.setStyleSheet(
             f"QPushButton#subtle {{ font-size: 15px; padding: 0; color: {COLOR_TEXT_DIM}; }}"
             f"QPushButton#subtle:hover {{ color: #c0392b; background: transparent; }}"
         )
         self.delete_btn.clicked.connect(lambda: self.delete_requested.emit(self.project_id))
-        layout.addWidget(self.delete_btn)
+        top_row.addWidget(self.delete_btn)
+
+        outer.addLayout(top_row)
+
+        # ── Progress info: chapters written vs. outline target ──
+        if target:
+            chapters_str = f"{written} / {target} Chapters"
+        else:
+            n = len(project.chapters)
+            chapters_str = f"{n} Chapter{'s' if n != 1 else ''}" if n else "0 Chapters"
+        outline_str = "Outline Ready" if project.outline.strip() else "Outline Pending"
+
+        info_lbl = QLabel(f"{chapters_str}   ·   {outline_str}")
+        info_lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 12px; background: transparent;")
+        outer.addWidget(info_lbl)
+
+        if target:
+            bar = QProgressBar()
+            bar.setObjectName("rowProgress")
+            bar.setRange(0, target)
+            bar.setValue(min(written, target))
+            bar.setTextVisible(False)
+            bar.setFixedHeight(4)
+            outer.addWidget(bar)
+
+        try:
+            dt = datetime.fromisoformat(project.updated_at)
+            date_str = dt.strftime("%b %d, %Y")
+        except Exception:
+            date_str = ""
+        if date_str:
+            date_lbl = QLabel(f"Last edited {date_str}")
+            date_lbl.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px; background: transparent;")
+            outer.addWidget(date_lbl)
 
     def mousePressEvent(self, event) -> None:
         # Clicks on the delete button are handled by the button itself and
@@ -309,6 +344,11 @@ class ProjectsPanel(QWidget):
                 del self._projects[project_id]
             self.refresh()
             self.project_deleted.emit(project_id)
+
+    def create_new_project(self) -> None:
+        """Public entry point so other panels (e.g. the empty-state CTA) can
+        open the same "New Project" dialog as the sidebar's "+ New" button."""
+        self._create_project()
 
     def select_project(self, project_id: str) -> None:
         for i in range(self.list_widget.count()):

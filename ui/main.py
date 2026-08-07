@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -37,6 +37,7 @@ from engine import export as book_export
 from engine.models import AppSettings, Project, TaskType
 from ui.chat import ChatPanel
 from ui.projects import ProjectsPanel
+from ui.resources import get_app_icon
 from ui.settings import ModelsPanel, SettingsPanel
 from ui.story import StoryPanel
 from ui.styles import (
@@ -46,10 +47,8 @@ from ui.styles import (
     COLOR_BORDER,
     COLOR_SURFACE,
     COLOR_TEXT,
-    COLOR_TEXT_DIM,
-    COLOR_TEXT_MUTED,
 )
-from ui.widgets import SizeAdjustingTabWidget
+from ui.widgets import EmptyStateCard, SizeAdjustingTabWidget
 
 logger = logging.getLogger("ui.main")
 
@@ -57,18 +56,25 @@ logger = logging.getLogger("ui.main")
 class EmptyStateWidget(QWidget):
     """Shown in the right pane when no project is open yet."""
 
+    new_project_requested = Signal()
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignCenter)
-        lbl = QLabel(
-            "Selecciona un proyecto a la izquierda\no haz clic en \"+ New\" para crear uno nuevo."
+
+        card = EmptyStateCard(
+            icon="✒️",
+            title="Welcome to AI Story Studio",
+            description=(
+                "Select a project on the left to keep working on it, or start a "
+                "new one — you'll write a synopsis, then let the AI help build "
+                "an outline, characters, world, and chapters from there."
+            ),
+            primary_label="+ New Project",
         )
-        lbl.setAlignment(Qt.AlignCenter)
-        lbl.setWordWrap(True)
-        lbl.setMaximumWidth(460)
-        lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 16px; line-height: 1.6; padding: 40px;")
-        layout.addWidget(lbl)
+        card.primary_clicked.connect(self.new_project_requested)
+        layout.addWidget(card)
 
 
 class MainWindow(QMainWindow):
@@ -77,6 +83,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("AI Story Studio")
+        self.setWindowIcon(get_app_icon())
         self.resize(1500, 950)
         self.setMinimumSize(1000, 650)
 
@@ -149,14 +156,11 @@ class MainWindow(QMainWindow):
         self.next_step_btn.hide()
         title_bar_layout.addWidget(self.next_step_btn)
 
-        self.export_btn = QPushButton("⇩  Export")
-        self.export_btn.setObjectName("subtle")
+        self.export_btn = QPushButton("⇩  Export Book")
+        self.export_btn.setObjectName("exportButton")
         self.export_btn.setMinimumHeight(34)
-        self.export_btn.setStyleSheet(
-            f"QPushButton#subtle {{ font-size: 14px; padding: 0 14px; color: {COLOR_TEXT_DIM}; }}"
-            f"QPushButton#subtle:hover {{ color: {COLOR_TEXT}; }}"
-        )
-        self.export_btn.setToolTip("Exportar la novela completa a Word o PDF")
+        self.export_btn.setCursor(Qt.PointingHandCursor)
+        self.export_btn.setToolTip("Export the full novel to Word or PDF")
         self.export_btn.clicked.connect(self._show_export_menu)
         title_bar_layout.addWidget(self.export_btn)
 
@@ -203,6 +207,8 @@ class MainWindow(QMainWindow):
         self.projects_panel.project_selected.connect(self._open_project)
         self.projects_panel.project_created.connect(self._open_project)
         self.projects_panel.project_deleted.connect(self._on_project_deleted)
+
+        self.empty_state.new_project_requested.connect(self.projects_panel.create_new_project)
 
         self.story_panel.task_requested.connect(self._run_task)
         self.story_panel.project_changed.connect(self._on_project_edited)

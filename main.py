@@ -41,16 +41,39 @@ from PySide6.QtWidgets import QApplication
 
 from engine import storage
 from ui.main import MainWindow
+from ui.resources import get_app_icon
 from ui.styles import MAIN_STYLESHEET
+
+
+def _set_windows_taskbar_identity() -> None:
+    """
+    Windows groups taskbar icons by an "AppUserModelID" rather than by
+    the running executable. Without setting our own, a python.exe-launched
+    app inherits Python's generic icon in the taskbar/alt-tab even after
+    setWindowIcon() — the title-bar icon updates but the taskbar one
+    doesn't. This is a no-op (and safe to skip) on any other OS.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "AnthropicCommunity.AIStoryStudio.App.1"
+        )
+    except Exception:
+        logger.debug("Could not set Windows AppUserModelID (non-fatal).", exc_info=True)
 
 
 def main() -> int:
     logger.info("Starting AI Story Studio...")
     storage.ensure_data_dir()
+    _set_windows_taskbar_identity()
 
     app = QApplication(sys.argv)
     app.setApplicationName("AI Story Studio")
     app.setStyleSheet(MAIN_STYLESHEET)
+    app.setWindowIcon(get_app_icon())
 
     window = MainWindow()
     window.show()

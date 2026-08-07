@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSpinBox,
     QSplitter,
+    QStackedWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -53,10 +54,9 @@ from ui.styles import (
     COLOR_TEXT,
     COLOR_TEXT_DIM,
     COLOR_TEXT_MUTED,
-    COLOR_WARNING,
     FONT_SERIF,
 )
-from ui.widgets import SizeAdjustingTabWidget
+from ui.widgets import EmptyStateCard, SizeAdjustingTabWidget
 
 
 def outline_chapter_numbers(outline_text: str) -> list[int]:
@@ -94,18 +94,38 @@ class SectionHeader(QWidget):
 
 
 class MarkdownEditor(QWidget):
-    """A labeled text editor for markdown content with a save/generate button row."""
+    """
+    A labeled text editor for markdown content with a save/generate button row.
+
+    Optionally shows a friendlier empty state (icon + explanation + a
+    primary "Generate …" action, plus a "write it myself" link) in place
+    of the editor when there's no content yet — pass empty_title to
+    enable it. Without empty_title, behaves exactly as before: a plain
+    text box with placeholder text.
+    """
 
     content_saved = Signal(str)
+    generate_requested = Signal()
 
     def __init__(
         self,
         placeholder: str = "",
         font_serif: bool = False,
+        empty_icon: str = "",
+        empty_title: str = "",
+        empty_description: str = "",
+        generate_label: str = "",
+        manual_label: str = "Write it myself",
         parent=None,
     ) -> None:
         super().__init__(parent)
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # ── Editor page (always built — this is the "real" content view) ──
+        edit_page = QWidget()
+        layout = QVBoxLayout(edit_page)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
@@ -135,8 +155,34 @@ class MarkdownEditor(QWidget):
         btn_row.addWidget(self.save_btn)
         layout.addLayout(btn_row)
 
+        # ── Optional empty state, shown instead of the editor when blank ──
+        self._stack: Optional[QStackedWidget] = None
+        if empty_title:
+            self._stack = QStackedWidget()
+            empty_card = EmptyStateCard(
+                icon=empty_icon,
+                title=empty_title,
+                description=empty_description,
+                primary_label=generate_label,
+                secondary_label=manual_label,
+            )
+            empty_card.primary_clicked.connect(self.generate_requested)
+            empty_card.secondary_clicked.connect(self._show_editor_page)
+            self._stack.addWidget(empty_card)   # index 0
+            self._stack.addWidget(edit_page)    # index 1
+            outer.addWidget(self._stack)
+        else:
+            outer.addWidget(edit_page)
+
+    def _show_editor_page(self) -> None:
+        if self._stack is not None:
+            self._stack.setCurrentIndex(1)
+            self.editor.setFocus()
+
     def set_text(self, text: str) -> None:
         self.editor.setPlainText(text)
+        if self._stack is not None:
+            self._stack.setCurrentIndex(1 if text.strip() else 0)
 
     def get_text(self) -> str:
         return self.editor.toPlainText()
@@ -155,7 +201,7 @@ class SynopsisTab(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
 
-        header = SectionHeader("Synopsis", "Generate with AI")
+        header = SectionHeader("Synopsis", "✨ Generate Synopsis")
         if header.action_btn:
             header.action_btn.clicked.connect(
                 lambda: self.task_requested.emit(TaskType.WRITE_SYNOPSIS, "")
@@ -164,9 +210,19 @@ class SynopsisTab(QWidget):
 
         self.editor = MarkdownEditor(
             placeholder=(
-                "Write your story synopsis here, or use 'Generate with AI' to create one.\n\n"
+                "Write your story synopsis here, or use 'Generate Synopsis' to create one.\n\n"
                 "A good synopsis covers: premise, main characters, central conflict, and stakes."
-            )
+            ),
+            empty_icon="📝",
+            empty_title="Every story starts with a synopsis",
+            empty_description=(
+                "A short premise, main characters, central conflict, and stakes. "
+                "The AI can draft one for you to refine, or you can write it yourself."
+            ),
+            generate_label="✨ Generate Synopsis",
+        )
+        self.editor.generate_requested.connect(
+            lambda: self.task_requested.emit(TaskType.WRITE_SYNOPSIS, "")
         )
         self.editor.content_saved.connect(self.content_changed.emit)
         layout.addWidget(self.editor, 1)
@@ -340,7 +396,7 @@ class GenerateOutlineDialog(QDialog):
     WritingStyle and sent to the model.  Fields left at '— auto —' are
     omitted from the prompt; the model infers them from the synopsis.
 
-    "Write Book" later writes exactly one chapter per outline heading, so
+    "Generate Full Book" later writes exactly one chapter per outline heading, so
     the chapter count set here determines the length of the finished novel.
     """
 
@@ -396,7 +452,7 @@ class GenerateOutlineDialog(QDialog):
         self.chapters_spin.setRange(1, 300)
         self.chapters_spin.setValue(max(1, default_chapters))
         self.chapters_spin.setToolTip(
-            "The outline — and later \"Write Book\" — will follow this number, "
+            "The outline — and later \"Generate Full Book\" — will follow this number, "
             "one chapter per heading."
         )
         struct_form.addRow(_ui("num_chapters", lang), self.chapters_spin)
@@ -566,13 +622,14 @@ class OutlineTab(QWidget):
         header_row.addWidget(self.count_lbl)
         header_row.addStretch()
 
-        gen_btn = QPushButton("Generate")
+        gen_btn = QPushButton("✨ Generate Outline")
         gen_btn.setObjectName("accent")
         gen_btn.setToolTip("Opens the outline wizard, then generates the full outline.")
         gen_btn.clicked.connect(self._on_generate_clicked)
         header_row.addWidget(gen_btn)
 
-        review_btn = QPushButton("Review")
+        review_btn = QPushButton("Review Outline")
+        review_btn.setToolTip("Ask the AI to critique this outline's structure and pacing.")
         review_btn.clicked.connect(lambda: self.task_requested.emit(TaskType.REVIEW_OUTLINE, ""))
         header_row.addWidget(review_btn)
 
@@ -581,11 +638,19 @@ class OutlineTab(QWidget):
         self.editor = MarkdownEditor(
             placeholder=(
                 "Your chapter-by-chapter outline will appear here.\n\n"
-                "Click 'Generate' to create one from your synopsis, "
+                "Click 'Generate Outline' to create one from your synopsis, "
                 "or write it manually.\n\n"
                 "Format:\n## Chapter 1: Title\nObjective:\n...\n\nScenes required:\n- ...\n\nScenes prohibited:\n- ..."
-            )
+            ),
+            empty_icon="🗂️",
+            empty_title="No outline yet",
+            empty_description=(
+                "The AI will build a chapter-by-chapter outline from your Synopsis, "
+                "Characters, and World — or you can write your own below."
+            ),
+            generate_label="✨ Generate Outline",
         )
+        self.editor.generate_requested.connect(self._on_generate_clicked)
         self.editor.editor.textChanged.connect(self._update_count_label)
         self.editor.content_saved.connect(self.content_changed.emit)
         layout.addWidget(self.editor, 1)
@@ -762,9 +827,16 @@ class CharactersTab(QWidget):
             self.cards_layout.insertWidget(self.cards_layout.count() - 1, card)
 
         if not self._project.characters:
-            empty = QLabel("No characters yet. Click '+ Add Character' to begin.")
-            empty.setAlignment(Qt.AlignCenter)
-            empty.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; padding: 30px;")
+            empty = EmptyStateCard(
+                icon="🎭",
+                title="No characters yet",
+                description=(
+                    "Add the people driving your story — protagonists, antagonists, "
+                    "and everyone in between. The outline and chapters will draw on these."
+                ),
+                primary_label="+ Create Character",
+            )
+            empty.primary_clicked.connect(self._add_character)
             self.cards_layout.insertWidget(0, empty)
 
     def _add_character(self) -> None:
@@ -945,11 +1017,31 @@ class ChaptersTab(QWidget):
 
         splitter.addWidget(left)
 
-        # Right: chapter editor
+        # Right: chapter editor (or an empty state when the project has no
+        # chapters at all yet — swapped in/out by _update_empty_state()).
         right = QWidget()
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(8, 12, 12, 12)
         right_layout.setSpacing(8)
+
+        self._chapters_empty_card = EmptyStateCard(
+            icon="📖",
+            title="No chapters yet",
+            description=(
+                "Generate an outline first, then let the AI draft your opening "
+                "chapter from it — or add one manually and write it yourself."
+            ),
+            primary_label="✍ Generate Chapter",
+            secondary_label="+ Add Chapter Manually",
+        )
+        self._chapters_empty_card.primary_clicked.connect(self._write_chapter)
+        self._chapters_empty_card.secondary_clicked.connect(self._add_chapter)
+        right_layout.addWidget(self._chapters_empty_card, 1)
+
+        self._editor_area = QWidget()
+        editor_layout = QVBoxLayout(self._editor_area)
+        editor_layout.setContentsMargins(0, 0, 0, 0)
+        editor_layout.setSpacing(8)
 
         # Chapter title row
         title_row = QHBoxLayout()
@@ -961,7 +1053,7 @@ class ChaptersTab(QWidget):
         )
         title_row.addWidget(self.chapter_title_edit, 1)
         self.chapter_title_edit.editingFinished.connect(self._save_chapter_title)
-        right_layout.addLayout(title_row)
+        editor_layout.addLayout(title_row)
 
         # Chapter content editor
         self.chapter_editor = QTextEdit()
@@ -982,22 +1074,25 @@ class ChaptersTab(QWidget):
             }}
             QTextEdit:focus {{ border-color: {COLOR_ACCENT}; }}
         """)
-        right_layout.addWidget(self.chapter_editor, 1)
+        editor_layout.addWidget(self.chapter_editor, 1)
 
         # Action buttons
         action_row = QHBoxLayout()
         action_row.setSpacing(8)
 
-        self.write_btn = QPushButton("✍ Write Chapter")
+        self.write_btn = QPushButton("✍ Generate Chapter")
         self.write_btn.setObjectName("accent")
+        self.write_btn.setToolTip("Writes the next chapter in the story.")
         self.write_btn.clicked.connect(self._write_chapter)
         action_row.addWidget(self.write_btn)
 
-        self.write_book_btn = QPushButton("📚 Write Book")
+        self.write_book_btn = QPushButton("📚 Generate Full Book")
+        self.write_book_btn.setToolTip("Writes every remaining chapter in the outline, one after another.")
         self.write_book_btn.clicked.connect(self._write_book)
         action_row.addWidget(self.write_book_btn)
 
-        self.review_btn = QPushButton("Review")
+        self.review_btn = QPushButton("AI Review")
+        self.review_btn.setToolTip("Ask the AI to critique the selected chapter.")
         self.review_btn.clicked.connect(self._review_chapter)
         action_row.addWidget(self.review_btn)
 
@@ -1024,7 +1119,9 @@ class ChaptersTab(QWidget):
         self.delete_ch_btn.clicked.connect(self._delete_chapter)
         action_row.addWidget(self.delete_ch_btn)
 
-        right_layout.addLayout(action_row)
+        editor_layout.addLayout(action_row)
+        right_layout.addWidget(self._editor_area, 1)
+
         splitter.addWidget(right)
         splitter.setSizes([220, 700])
 
@@ -1032,7 +1129,13 @@ class ChaptersTab(QWidget):
 
     def load(self, project: Project) -> None:
         self._project = project
+        self._current_chapter = None
         self._refresh_list()
+        self._update_empty_state()
+        # Jump straight to the first chapter instead of leaving the editor
+        # blank — one less click, and the project feels alive immediately.
+        if self.chapter_list.count() > 0:
+            self.chapter_list.setCurrentRow(0)
 
     def _refresh_list(self) -> None:
         self.chapter_list.clear()
@@ -1040,6 +1143,12 @@ class ChaptersTab(QWidget):
             return
         for ch in sorted(self._project.chapters, key=lambda c: c.number):
             self.chapter_list.addItem(ChapterListItem(ch))
+
+    def _update_empty_state(self) -> None:
+        """Show the rich empty state only when the project has zero chapters."""
+        has_chapters = bool(self._project and self._project.chapters)
+        self._chapters_empty_card.setVisible(not has_chapters)
+        self._editor_area.setVisible(has_chapters)
 
     def _on_chapter_selected(self, row: int) -> None:
         if not self._project or row < 0:
@@ -1081,6 +1190,7 @@ class ChaptersTab(QWidget):
             self._project.chapters.append(ch)
             storage.save_project(self._project)
             self._refresh_list()
+            self._update_empty_state()
             self.project_changed.emit()
 
     def _write_chapter(self) -> None:
@@ -1105,7 +1215,7 @@ class ChaptersTab(QWidget):
         if not self._project.outline.strip():
             QMessageBox.information(
                 self, "No Outline Yet",
-                "Generate an outline first (Outline tab) — \"Write Book\" writes "
+                "Generate an outline first (Outline tab) — \"Generate Full Book\" writes "
                 "one chapter per heading in the outline, so it needs one to follow.",
             )
             return
@@ -1125,7 +1235,7 @@ class ChaptersTab(QWidget):
             )
             return
         reply = QMessageBox.question(
-            self, "Write Book",
+            self, "Generate Full Book",
             f"This will write {remaining} remaining chapter(s) (of {total} in the "
             "outline) one after another, updating Story Memory in between. This "
             "can take a while, especially for longer books.\n\nContinue?",
@@ -1179,7 +1289,7 @@ class ChaptersTab(QWidget):
             # the old (now possibly nonexistent) chapter number, the engine's
             # _next_chapter_number() will trust that stale value over the
             # real chapter list and silently skip past the gap we just
-            # created next time "Write Chapter"/"Write Book" runs — even
+            # created next time "Generate Chapter"/"Generate Full Book" runs — even
             # after restarting the app, since it's saved to disk below.
             self._project.current_chapter = max(
                 (c.number for c in self._project.chapters), default=0
@@ -1189,6 +1299,7 @@ class ChaptersTab(QWidget):
             self.chapter_title_edit.clear()
             self.chapter_editor.clear()
             self._refresh_list()
+            self._update_empty_state()
             self.project_changed.emit()
 
     def refresh_after_generation(self, project: Project) -> None:
@@ -1196,12 +1307,23 @@ class ChaptersTab(QWidget):
         self._project = project
         current_num = self._current_chapter.number if self._current_chapter else None
         self._refresh_list()
+        self._update_empty_state()
+        if current_num is None and project.chapters:
+            # Nothing was selected before (e.g. generating the very first
+            # chapter from the empty state) — jump to the newest one so the
+            # result is immediately visible instead of the editor staying blank.
+            current_num = max(c.number for c in project.chapters)
         if current_num:
             chapter = next((c for c in project.chapters if c.number == current_num), None)
             if chapter:
                 self._current_chapter = chapter
                 self.chapter_title_edit.setText(chapter.title)
                 self.chapter_editor.setPlainText(chapter.content)
+                for i in range(self.chapter_list.count()):
+                    item = self.chapter_list.item(i)
+                    if item and item.data(Qt.UserRole) == current_num:
+                        self.chapter_list.setCurrentRow(i)
+                        break
 
 
 class WorldTab(QWidget):
@@ -1214,7 +1336,7 @@ class WorldTab(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
 
-        header = SectionHeader("World & Setting", "Generate with AI")
+        header = SectionHeader("World & Setting", "✨ Generate World")
         if header.action_btn:
             header.action_btn.setToolTip(
                 "Adds to your existing world notes — doesn't overwrite them."
@@ -1233,7 +1355,17 @@ class WorldTab(QWidget):
                 "- Political structures\n"
                 "- Culture and customs\n"
                 "- History relevant to the story"
-            )
+            ),
+            empty_icon="🌍",
+            empty_title="Build your story's world",
+            empty_description=(
+                "Geography, time period, rules, politics, culture, history. "
+                "The AI can draft it from your Synopsis and Characters — or you can write it yourself."
+            ),
+            generate_label="✨ Generate World",
+        )
+        self.editor.generate_requested.connect(
+            lambda: self.task_requested.emit(TaskType.GENERATE_WORLD, "")
         )
         self.editor.content_saved.connect(self.content_changed.emit)
         layout.addWidget(self.editor, 1)
@@ -1272,7 +1404,14 @@ class MemoryTab(QWidget):
                 "- Plot events that occurred\n"
                 "- World details established\n"
                 "- Open threads and foreshadowing"
-            )
+            ),
+            empty_icon="🧠",
+            empty_title="Story Memory fills in automatically",
+            empty_description=(
+                "Once you write chapters, this tracks characters, plot events, "
+                "world details, and open threads for you — nothing to do here yet."
+            ),
+            manual_label="Add notes manually",
         )
         self.editor.content_saved.connect(self.content_changed.emit)
         layout.addWidget(self.editor, 1)

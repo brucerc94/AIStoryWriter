@@ -83,8 +83,11 @@ _NO_TENSOR_CORE_MARKERS = ("GTX 16", "GTX 10", "GTX 9", "GTX 7")
 # MoE-tuned batch sizes. Only applied when the model is MoE AND the
 # installed llama-cpp-python actually supports these kwargs (checked via
 # engine.llama_features, never assumed).
-_MOE_N_BATCH = 1024
-_MOE_N_UBATCH = 1024
+#_MOE_N_BATCH = 1024
+#_MOE_N_UBATCH = 1024
+
+_MOE_N_BATCH = 2048
+_MOE_N_UBATCH = 512
 
 # How many of a MoE model's transformer layers to CPU-offload experts for
 # by default, when the installed llama-cpp-python supports it at all. This
@@ -299,7 +302,7 @@ class LLMEngine:
                 n_ctx=n_ctx,
                 n_gpu_layers=n_gpu_layers,
                 n_threads=n_threads,
-                verbose=False,
+                verbose=True,
                 **extra_kwargs,
             )
             self._current_path = model_path
