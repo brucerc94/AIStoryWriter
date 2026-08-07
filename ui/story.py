@@ -280,6 +280,11 @@ _UI_STRINGS: dict[str, dict[str, str]] = {
     "genre_placeholder":  {"en": "Only if ambiguous from synopsis — e.g. psychological thriller, neo-noir", "es": "Solo si es ambiguo en la sinopsis — p. ej. thriller psicológico, neo-noir", "fr": "Seulement si ambigu dans le synopsis", "de": "Nur wenn im Synopsis unklar", "pt": "Somente se ambíguo na sinopse", "it": "Solo se ambiguo nella sinossi"},
     "generate_btn":       {"en": "Generate Outline", "es": "Generar estructura", "fr": "Générer le plan", "de": "Gliederung generieren", "pt": "Gerar estrutura", "it": "Genera struttura"},
     "save_profile_btn":   {"en": "Save Profile", "es": "Guardar perfil", "fr": "Enregistrer le profil", "de": "Profil speichern", "pt": "Salvar perfil", "it": "Salva profilo"},
+    "load_profile_btn":   {"en": "Load Profile...", "es": "Cargar perfil...", "fr": "Charger le profil...", "de": "Profil laden...", "pt": "Carregar perfil...", "it": "Carica profilo..."},
+    "load_profile_dialog_title": {"en": "Load Profile From Project", "es": "Cargar perfil de otro proyecto", "fr": "Charger le profil d'un autre projet", "de": "Profil aus anderem Projekt laden", "pt": "Carregar perfil de outro projeto", "it": "Carica profilo da un altro progetto"},
+    "load_profile_dialog_hint": {"en": "Pick a project to copy its Creative Intent and Writing Style from. Nothing is saved until you click \"Save Profile\".", "es": "Elegí un proyecto para copiar su Intención creativa y Estilo de escritura. No se guarda nada hasta que hagas clic en \"Guardar perfil\".", "fr": "Choisissez un projet dont copier l'intention créative et le style d'écriture. Rien n'est enregistré avant de cliquer sur \"Enregistrer le profil\".", "de": "Wähle ein Projekt, um dessen kreative Absicht und Schreibstil zu kopieren. Es wird nichts gespeichert, bis du auf \"Profil speichern\" klickst.", "pt": "Escolha um projeto para copiar sua Intenção criativa e Estilo de escrita. Nada é salvo até você clicar em \"Salvar perfil\".", "it": "Scegli un progetto da cui copiare l'Intenzione creativa e lo Stile di scrittura. Non viene salvato nulla finché non fai clic su \"Salva profilo\"."},
+    "load_profile_no_other_projects": {"en": "No other projects with a saved profile were found.", "es": "No se encontraron otros proyectos con un perfil guardado.", "fr": "Aucun autre projet avec un profil enregistré n'a été trouvé.", "de": "Es wurden keine anderen Projekte mit gespeichertem Profil gefunden.", "pt": "Nenhum outro projeto com um perfil salvo foi encontrado.", "it": "Non è stato trovato nessun altro progetto con un profilo salvato."},
+    "load_profile_loaded_status": {"en": "Profile loaded from \"{title}\" — review it, then click Save Profile.", "es": "Perfil cargado desde \"{title}\" — revisalo y hacé clic en Guardar perfil.", "fr": "Profil chargé depuis \"{title}\" — vérifiez-le, puis cliquez sur Enregistrer le profil.", "de": "Profil aus \"{title}\" geladen — prüfen und dann auf Profil speichern klicken.", "pt": "Perfil carregado de \"{title}\" — revise e clique em Salvar perfil.", "it": "Profilo caricato da \"{title}\" — controllalo, poi clicca su Salva profilo."},
     "profile_tab_hint":   {"en": "Used by Outline · Write Chapter · Rewrite · Review", "es": "Usado por Estructura · Escribir capítulo · Reescribir · Revisión", "fr": "Utilisé par : Plan · Écrire · Réécrire · Relire", "de": "Genutzt von: Gliederung · Kapitel · Neufassung · Review", "pt": "Usado por: Estrutura · Capítulo · Reescrever · Revisão", "it": "Usato da: Schema · Capitolo · Riscrittura · Revisione"},
     "intent_group_short": {"en": "Creative Intent", "es": "Intención creativa", "fr": "Intention créative", "de": "Kreative Absicht", "pt": "Intenção criativa", "it": "Intenzione creativa"},
     "style_group_short":  {"en": "Writing Style  (leave at '— auto —' to let the model infer)", "es": "Estilo de escritura  (dejar en '— auto —' para que el modelo infiera)", "fr": "Style d'écriture  (laisser '— auto —' pour inférer)", "de": "Schreibstil  ('— auto —' lassen zum Ableiten)", "pt": "Estilo de escrita  (deixar '— auto —' para o modelo inferir)", "it": "Stile di scrittura  (lasciare '— auto —' per inferire)"},
@@ -1328,6 +1333,7 @@ class AuthorProfilePanel(QWidget):
         _set_combo(self.violence_level, style.violence_level)
         _set_combo(self.romance_level, style.romance_level)
         _set_combo(self.target_chapter_length, style.target_chapter_length)
+        self.status_lbl.setText("")
 
     def _rebuild_ui(self, lang: str) -> None:
         """Build (or rebuild) the full UI for the given language."""
@@ -1455,11 +1461,22 @@ class AuthorProfilePanel(QWidget):
 
         body.addWidget(style_box)
 
-        # ── Save button ───────────────────────────────────────────────
+        # ── Save / Load buttons ──────────────────────────────────────
+        btn_row = QHBoxLayout()
         save_btn = QPushButton(_ui("save_profile_btn", lang))
         save_btn.setObjectName("accent")
         save_btn.clicked.connect(self._on_save)
-        root.addWidget(save_btn)
+        btn_row.addWidget(save_btn)
+
+        load_btn = QPushButton(_ui("load_profile_btn", lang))
+        load_btn.clicked.connect(self._on_load_from_other_project)
+        btn_row.addWidget(load_btn)
+        root.addLayout(btn_row)
+
+        self.status_lbl = QLabel("")
+        self.status_lbl.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px;")
+        self.status_lbl.setWordWrap(True)
+        root.addWidget(self.status_lbl)
 
         self._built = True
 
@@ -1487,6 +1504,91 @@ class AuthorProfilePanel(QWidget):
             target_chapter_length=_combo_value(self.target_chapter_length),
         )
         self.profile_changed.emit()
+        self.status_lbl.setText("")
+
+    # ── Load from another project ───────────────────────────────────────
+
+    def _on_load_from_other_project(self) -> None:
+        """
+        Copy Creative Intent + Writing Style from another project into
+        this form, so the user doesn't have to retype a profile they've
+        already written once. This only fills the fields shown on
+        screen — nothing is written to disk until the user clicks
+        "Save Profile", so they get a chance to review first.
+        """
+        if not self._project:
+            return
+        lang = self._lang
+
+        candidates = [
+            p for p in storage.load_all_projects()
+            if p.id != self._project.id
+            and not (p.author_intent.is_empty() and p.writing_style.is_empty())
+        ]
+        if not candidates:
+            QMessageBox.information(
+                self, _ui("load_profile_dialog_title", lang),
+                _ui("load_profile_no_other_projects", lang),
+            )
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(_ui("load_profile_dialog_title", lang))
+        dialog.resize(420, 380)
+        layout = QVBoxLayout(dialog)
+
+        hint = QLabel(_ui("load_profile_dialog_hint", lang))
+        hint.setWordWrap(True)
+        hint.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 11px;")
+        layout.addWidget(hint)
+
+        list_widget = QListWidget()
+        for p in candidates:
+            item = QListWidgetItem(p.title)
+            item.setData(Qt.UserRole, p.id)
+            list_widget.addItem(item)
+        list_widget.setCurrentRow(0)
+        layout.addWidget(list_widget, 1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        # Double-clicking a project loads it immediately, same as OK.
+        list_widget.itemDoubleClicked.connect(dialog.accept)
+
+        if dialog.exec() != QDialog.Accepted:
+            return
+        selected = list_widget.currentItem()
+        if not selected:
+            return
+        source = next((p for p in candidates if p.id == selected.data(Qt.UserRole)), None)
+        if not source:
+            return
+
+        intent = source.author_intent
+        style = source.writing_style
+
+        self.emotional_journey.setPlainText(intent.emotional_journey)
+        self.lasting_impression.setPlainText(intent.lasting_impression)
+        self.themes.setPlainText(intent.themes)
+        self.unique_elements.setPlainText(intent.unique_elements)
+        self.inspirations.setPlainText(intent.inspirations)
+        self.avoid.setPlainText(intent.avoid)
+
+        self.genre_tags.setText(style.genre_tags)
+        _set_combo(self.narrator_pov, style.narrator_pov)
+        _set_combo(self.pacing, style.pacing)
+        _set_combo(self.description_density, style.description_density)
+        _set_combo(self.dialogue_style, style.dialogue_style)
+        _set_combo(self.violence_level, style.violence_level)
+        _set_combo(self.romance_level, style.romance_level)
+        _set_combo(self.target_chapter_length, style.target_chapter_length)
+
+        self.status_lbl.setText(
+            _ui("load_profile_loaded_status", lang).format(title=source.title)
+        )
 
 
 class StoryPanel(QWidget):
