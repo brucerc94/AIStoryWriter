@@ -82,6 +82,7 @@ class EmptyStateCard(QWidget):
 
     primary_clicked = Signal()
     secondary_clicked = Signal()
+    tertiary_clicked = Signal()
 
     def __init__(
         self,
@@ -90,6 +91,7 @@ class EmptyStateCard(QWidget):
         description: str = "",
         primary_label: str = "",
         secondary_label: str = "",
+        tertiary_label: str = "",
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -138,14 +140,25 @@ class EmptyStateCard(QWidget):
             btn_row.addStretch()
             card_layout.addLayout(btn_row)
 
-        if secondary_label:
-            secondary_btn = QPushButton(secondary_label)
-            secondary_btn.setObjectName("emptyStateLink")
-            secondary_btn.setCursor(Qt.PointingHandCursor)
-            secondary_btn.clicked.connect(self.secondary_clicked)
+        if secondary_label or tertiary_label:
             link_row = QHBoxLayout()
             link_row.addStretch()
-            link_row.addWidget(secondary_btn)
+            if secondary_label:
+                secondary_btn = QPushButton(secondary_label)
+                secondary_btn.setObjectName("emptyStateLink")
+                secondary_btn.setCursor(Qt.PointingHandCursor)
+                secondary_btn.clicked.connect(self.secondary_clicked)
+                link_row.addWidget(secondary_btn)
+            if secondary_label and tertiary_label:
+                sep = QLabel("·")
+                sep.setStyleSheet("color: transparent;")  # spacing only
+                link_row.addWidget(sep)
+            if tertiary_label:
+                tertiary_btn = QPushButton(tertiary_label)
+                tertiary_btn.setObjectName("emptyStateLink")
+                tertiary_btn.setCursor(Qt.PointingHandCursor)
+                tertiary_btn.clicked.connect(self.tertiary_clicked)
+                link_row.addWidget(tertiary_btn)
             link_row.addStretch()
             card_layout.addLayout(link_row)
 

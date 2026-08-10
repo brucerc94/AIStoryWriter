@@ -225,7 +225,28 @@ class AppSettingsWidget(QWidget):
         self.threads_spin = QSpinBox()
         self.threads_spin.setRange(1, 64)
         self.threads_spin.setValue(4)
+        self.threads_spin.setToolTip(
+            "Threads used for single-token generation (llama.cpp's n_threads)."
+        )
         form.addRow("CPU Threads", self.threads_spin)
+
+        # Batch threads (n_threads_batch)
+        self.threads_batch_spin = QSpinBox()
+        self.threads_batch_spin.setRange(0, 64)
+        self.threads_batch_spin.setValue(0)
+        self.threads_batch_spin.setSpecialValueText("Auto (same as CPU Threads)")
+        self.threads_batch_spin.setToolTip(
+            "Threads used for prompt/batch processing (llama.cpp's "
+            "n_threads_batch) — separate from CPU Threads above, which only "
+            "covers single-token generation. Prompt processing is highly "
+            "parallel, so this often benefits from a higher value than CPU "
+            "Threads, especially on machines with many cores.\n\n"
+            "0 = auto: not passed explicitly, so llama-cpp-python falls "
+            "back to its own default (mirrors CPU Threads).\n\n"
+            "Only applied if the installed llama-cpp-python build actually "
+            "exposes this parameter."
+        )
+        form.addRow("CPU Threads (Batch)", self.threads_batch_spin)
 
         # Auto-save
         self.autosave_check = QCheckBox("Auto-save after AI responses")
@@ -319,6 +340,47 @@ class AppSettingsWidget(QWidget):
 
         layout.addWidget(gen_box)
 
+        # ── MoE performance (only applies to detected MoE models) ──
+        moe_box = QGroupBox("MoE Performance")
+        moe_form = QFormLayout(moe_box)
+        moe_form.setSpacing(10)
+        moe_form.setContentsMargins(14, 18, 14, 14)
+
+        moe_note = QLabel(
+            "Only applied when a Mixture-of-Experts model is detected "
+            "(Qwen MoE, Mixtral, GPT-OSS-style checkpoints, …) — dense "
+            "models are completely unaffected. Also only used if the "
+            "installed llama-cpp-python build actually supports these "
+            "parameters."
+        )
+        moe_note.setWordWrap(True)
+        moe_note.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 11px;")
+        moe_form.addRow(moe_note)
+
+        self.moe_batch_spin = QSpinBox()
+        self.moe_batch_spin.setRange(128, 8192)
+        self.moe_batch_spin.setSingleStep(128)
+        self.moe_batch_spin.setValue(1024)
+        self.moe_batch_spin.setToolTip(
+            "Batch size (llama.cpp's n_batch) used for MoE models. Larger "
+            "batches amortize per-token expert-routing overhead better than "
+            "dense models need, so MoE models often benefit from a bigger "
+            "value than you'd otherwise use."
+        )
+        moe_form.addRow("MoE Batch Size", self.moe_batch_spin)
+
+        self.moe_ubatch_spin = QSpinBox()
+        self.moe_ubatch_spin.setRange(128, 8192)
+        self.moe_ubatch_spin.setSingleStep(128)
+        self.moe_ubatch_spin.setValue(1024)
+        self.moe_ubatch_spin.setToolTip(
+            "Micro-batch size (llama.cpp's n_ubatch) used for MoE models. "
+            "Usually kept equal to MoE Batch Size."
+        )
+        moe_form.addRow("MoE Micro-Batch Size", self.moe_ubatch_spin)
+
+        layout.addWidget(moe_box)
+
         save_btn = QPushButton("Save App Settings")
         save_btn.setObjectName("accent")
         save_btn.clicked.connect(self._save)
@@ -330,12 +392,15 @@ class AppSettingsWidget(QWidget):
         self.ctx_spin.setValue(settings.default_context_size)
         self.gpu_spin.setValue(settings.default_gpu_layers)
         self.threads_spin.setValue(settings.default_threads)
+        self.threads_batch_spin.setValue(getattr(settings, "default_threads_batch", 0))
         self.autosave_check.setChecked(settings.auto_save)
         self.enable_thinking_check.setChecked(getattr(settings, "enable_thinking", False))
         self.allow_nsfw_check.setChecked(getattr(settings, "allow_nsfw", False))
         self.language_input.setText(settings.response_language)
         self.max_tokens_spin.setValue(getattr(settings, "content_max_tokens", 4000))
         self.system_prompt_input.setPlainText(settings.custom_system_prompt)
+        self.moe_batch_spin.setValue(getattr(settings, "moe_n_batch", 1024))
+        self.moe_ubatch_spin.setValue(getattr(settings, "moe_n_ubatch", 1024))
 
     def _browse_models_dir(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "Select Models Directory")
@@ -349,12 +414,15 @@ class AppSettingsWidget(QWidget):
         self._settings.default_context_size = self.ctx_spin.value()
         self._settings.default_gpu_layers = self.gpu_spin.value()
         self._settings.default_threads = self.threads_spin.value()
+        self._settings.default_threads_batch = self.threads_batch_spin.value()
         self._settings.auto_save = self.autosave_check.isChecked()
         self._settings.enable_thinking = self.enable_thinking_check.isChecked()
         self._settings.allow_nsfw = self.allow_nsfw_check.isChecked()
         self._settings.response_language = self.language_input.text().strip()
         self._settings.content_max_tokens = self.max_tokens_spin.value()
         self._settings.custom_system_prompt = self.system_prompt_input.toPlainText().strip()
+        self._settings.moe_n_batch = self.moe_batch_spin.value()
+        self._settings.moe_n_ubatch = self.moe_ubatch_spin.value()
         storage.save_settings(self._settings)
         self.settings_changed.emit(self._settings)
 

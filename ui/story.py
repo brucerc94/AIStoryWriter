@@ -1033,9 +1033,11 @@ class ChaptersTab(QWidget):
             ),
             primary_label="✍ Generate Chapter",
             secondary_label="+ Add Chapter Manually",
+            tertiary_label="📚 Generate Full Book",
         )
         self._chapters_empty_card.primary_clicked.connect(self._write_chapter)
         self._chapters_empty_card.secondary_clicked.connect(self._add_chapter)
+        self._chapters_empty_card.tertiary_clicked.connect(self._write_book)
         right_layout.addWidget(self._chapters_empty_card, 1)
 
         self._editor_area = QWidget()

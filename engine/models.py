@@ -473,6 +473,11 @@ class AppSettings:
     default_context_size: int = 4096
     default_gpu_layers: int = 0
     default_threads: int = 4
+    # Threads used for prompt/batch processing (llama.cpp's n_threads_batch),
+    # separate from default_threads which controls single-token generation.
+    # 0 = auto (let llama-cpp-python mirror default_threads, its own default
+    # behavior when this kwarg isn't passed at all).
+    default_threads_batch: int = 0
     theme: str = "dark"
     font_size: int = 13
     auto_save: bool = True
@@ -507,6 +512,13 @@ class AppSettings:
     # creative-writing tasks (synopsis, outline, chapters, world, memory,
     # characters); review/chat/summary tasks are unaffected.
     allow_nsfw: bool = False
+    # Batch/micro-batch size used ONLY when a MoE model is detected (see
+    # engine/chat.py) — larger batches amortize per-token expert-routing
+    # overhead better than dense models. Ignored entirely for dense models,
+    # and only ever applied if the installed llama-cpp-python build actually
+    # supports the n_batch/n_ubatch kwargs (checked via engine.llama_features).
+    moe_n_batch: int = 1024
+    moe_n_ubatch: int = 1024
 
     def to_dict(self) -> dict:
         return {
@@ -514,6 +526,7 @@ class AppSettings:
             "default_context_size": self.default_context_size,
             "default_gpu_layers": self.default_gpu_layers,
             "default_threads": self.default_threads,
+            "default_threads_batch": self.default_threads_batch,
             "theme": self.theme,
             "font_size": self.font_size,
             "auto_save": self.auto_save,
@@ -523,6 +536,8 @@ class AppSettings:
             "enable_thinking": self.enable_thinking,
             "content_max_tokens": self.content_max_tokens,
             "allow_nsfw": self.allow_nsfw,
+            "moe_n_batch": self.moe_n_batch,
+            "moe_n_ubatch": self.moe_n_ubatch,
         }
 
     @classmethod

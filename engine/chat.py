@@ -83,11 +83,8 @@ _NO_TENSOR_CORE_MARKERS = ("GTX 16", "GTX 10", "GTX 9", "GTX 7")
 # MoE-tuned batch sizes. Only applied when the model is MoE AND the
 # installed llama-cpp-python actually supports these kwargs (checked via
 # engine.llama_features, never assumed).
-#_MOE_N_BATCH = 1024
-#_MOE_N_UBATCH = 1024
-
-_MOE_N_BATCH = 2048
-_MOE_N_UBATCH = 512
+_MOE_N_BATCH = 1024
+_MOE_N_UBATCH = 1024
 
 # How many of a MoE model's transformer layers to CPU-offload experts for
 # by default, when the installed llama-cpp-python supports it at all. This
@@ -180,9 +177,24 @@ class LLMEngine:
         n_ctx: int = 4096,
         n_gpu_layers: int = 0,
         n_threads: int = 4,
+        n_threads_batch: int = 0,
+        moe_n_batch: int = _MOE_N_BATCH,
+        moe_n_ubatch: int = _MOE_N_UBATCH,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> None:
-        """Load a GGUF model. Unloads the previous model first."""
+        """
+        Load a GGUF model. Unloads the previous model first.
+
+        n_threads_batch: threads used for prompt/batch processing, separate
+        from n_threads (single-token generation). 0 = don't pass it at all,
+        which is llama-cpp-python's own "mirror n_threads" default — not
+        forced here, so builds that pick a different internal default still
+        get it.
+
+        moe_n_batch / moe_n_ubatch: batch/micro-batch size applied ONLY when
+        this model is detected as MoE (see module docstring) — ignored
+        entirely for dense models.
+        """
         if not _llama_available:
             raise RuntimeError(
                 "llama-cpp-python is not installed. "
@@ -270,9 +282,9 @@ class LLMEngine:
 
                 # 2) Bigger batch/ubatch — only if actually supported.
                 if llama_features.supports("n_batch"):
-                    extra_kwargs["n_batch"] = _MOE_N_BATCH
+                    extra_kwargs["n_batch"] = moe_n_batch
                 if llama_features.supports("n_ubatch"):
-                    extra_kwargs["n_ubatch"] = _MOE_N_UBATCH
+                    extra_kwargs["n_ubatch"] = moe_n_ubatch
                 if "n_batch" in extra_kwargs or "n_ubatch" in extra_kwargs:
                     logger.info(
                         f"[llm_engine] MoE optimization: n_batch="
@@ -297,12 +309,18 @@ class LLMEngine:
             if llama_features.supports("flash_attn"):
                 extra_kwargs.setdefault("flash_attn", flash_attn)
 
+            # Prompt/batch-processing threads, separate from n_threads
+            # (single-token generation). 0 = leave it unset so
+            # llama-cpp-python applies its own default (mirrors n_threads).
+            if n_threads_batch > 0 and llama_features.supports("n_threads_batch"):
+                extra_kwargs["n_threads_batch"] = n_threads_batch
+
             self._model = Llama(
                 model_path=model_path,
                 n_ctx=n_ctx,
                 n_gpu_layers=n_gpu_layers,
                 n_threads=n_threads,
-                verbose=True,
+                verbose=False,
                 **extra_kwargs,
             )
             self._current_path = model_path

@@ -85,7 +85,7 @@ def supported_advanced_params() -> dict:
     """Snapshot of which optional kwargs this installed version supports —
     useful for logging/diagnostics."""
     candidates = [
-        "flash_attn", "n_batch", "n_ubatch", "n_gpu_layers",
+        "flash_attn", "n_batch", "n_ubatch", "n_gpu_layers", "n_threads_batch",
         "offload_kqv", "split_mode", "main_gpu", "tensor_split",
         "n_cpu_moe", "cpu_moe",
     ]

@@ -119,14 +119,21 @@ class WorkflowWorker(QObject):
         ctx = 4096
         gpu = 0
         threads = 4
+        threads_batch = 0
+        moe_n_batch = 1024
+        moe_n_ubatch = 1024
         if self.settings:
             ctx = self.settings.default_context_size
             gpu = self.settings.default_gpu_layers
             threads = self.settings.default_threads
+            threads_batch = getattr(self.settings, "default_threads_batch", 0)
+            moe_n_batch = getattr(self.settings, "moe_n_batch", 1024)
+            moe_n_ubatch = getattr(self.settings, "moe_n_ubatch", 1024)
 
         logger.info(
             f"[{task.value}] requesting model load: {model_path} "
-            f"(n_ctx={ctx}, n_gpu_layers={gpu}, n_threads={threads})"
+            f"(n_ctx={ctx}, n_gpu_layers={gpu}, n_threads={threads}, "
+            f"n_threads_batch={threads_batch or 'auto'})"
         )
         try:
             engine.load_model(
@@ -134,6 +141,9 @@ class WorkflowWorker(QObject):
                 n_ctx=ctx,
                 n_gpu_layers=gpu,
                 n_threads=threads,
+                n_threads_batch=threads_batch,
+                moe_n_batch=moe_n_batch,
+                moe_n_ubatch=moe_n_ubatch,
                 progress_callback=lambda msg: self.model_loading.emit(msg),
             )
             return True
