@@ -108,6 +108,67 @@ def export_to_pdf(project: Project, output_path: str) -> None:
     doc.build(flow)
 
 
+def export_to_txt(project: Project, output_path: str) -> None:
+    """Write the full novel to a plain-text file — no dependencies needed."""
+    lines: list[str] = []
+
+    lines.append(project.title.upper())
+    lines.append("=" * min(len(project.title), 72))
+    lines.append("")
+
+    if project.synopsis.strip():
+        lines.append("SYNOPSIS")
+        lines.append("-" * 8)
+        lines.append(project.synopsis.strip())
+        lines.append("")
+        lines.append("")
+
+    for ch in sorted(project.chapters, key=lambda c: c.number):
+        heading = f"Chapter {ch.number}: {ch.title}"
+        lines.append(heading)
+        lines.append("-" * min(len(heading), 72))
+        lines.append("")
+        content = ch.content.strip()
+        if content:
+            lines.append(content)
+        else:
+            lines.append("(This chapter hasn't been written yet.)")
+        lines.append("")
+        lines.append("")
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+
+def export_to_markdown(project: Project, output_path: str) -> None:
+    """Write the full novel to a Markdown (.md) file — no dependencies needed."""
+    lines: list[str] = []
+
+    lines.append(f"# {project.title}")
+    lines.append("")
+
+    if project.synopsis.strip():
+        lines.append("## Synopsis")
+        lines.append("")
+        lines.append(project.synopsis.strip())
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    for ch in sorted(project.chapters, key=lambda c: c.number):
+        lines.append(f"## Chapter {ch.number}: {ch.title}")
+        lines.append("")
+        content = ch.content.strip()
+        if content:
+            lines.append(content)
+        else:
+            lines.append("*(This chapter hasn't been written yet.)*")
+        lines.append("")
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+
 def _escape(text: str) -> str:
     """Escape for reportlab's mini-HTML Paragraph markup, keep line breaks."""
     escaped = (

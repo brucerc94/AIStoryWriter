@@ -184,10 +184,21 @@ class AppSettingsWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
 
+        # Helper: label with a fixed minimum width so Qt never truncates it
+        # when the form is narrow.  160 px fits "CPU Threads (Batch)" at 14px
+        # with a small margin on both Windows and Linux.
+        def _lbl(text: str) -> QLabel:
+            lbl = QLabel(text)
+            lbl.setMinimumWidth(160)
+            lbl.setWordWrap(False)
+            return lbl
+
         box = QGroupBox("Application")
         form = QFormLayout(box)
-        form.setSpacing(10)
-        form.setContentsMargins(14, 18, 14, 14)
+        form.setSpacing(12)
+        form.setContentsMargins(14, 18, 14, 18)
+        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
 
         # Models directory
         dir_row = QHBoxLayout()
@@ -206,6 +217,7 @@ class AppSettingsWidget(QWidget):
         self.ctx_spin.setSingleStep(512)
         self.ctx_spin.setValue(4096)
         self.ctx_spin.setSuffix(" tokens")
+        self.ctx_spin.setMinimumWidth(160)
         self.ctx_spin.setToolTip(
             "The model's total window: prompt + reply combined. This is a "
             "hard ceiling set by the model itself — it does not control how "
@@ -218,6 +230,7 @@ class AppSettingsWidget(QWidget):
         self.gpu_spin = QSpinBox()
         self.gpu_spin.setRange(0, 999)
         self.gpu_spin.setValue(0)
+        self.gpu_spin.setMinimumWidth(160)
         self.gpu_spin.setToolTip("Number of layers to offload to GPU. 0 = CPU only.")
         form.addRow("GPU Layers", self.gpu_spin)
 
@@ -225,6 +238,7 @@ class AppSettingsWidget(QWidget):
         self.threads_spin = QSpinBox()
         self.threads_spin.setRange(1, 64)
         self.threads_spin.setValue(4)
+        self.threads_spin.setMinimumWidth(160)
         self.threads_spin.setToolTip(
             "Threads used for single-token generation (llama.cpp's n_threads)."
         )
@@ -234,6 +248,7 @@ class AppSettingsWidget(QWidget):
         self.threads_batch_spin = QSpinBox()
         self.threads_batch_spin.setRange(0, 64)
         self.threads_batch_spin.setValue(0)
+        self.threads_batch_spin.setMinimumWidth(200)
         self.threads_batch_spin.setSpecialValueText("Auto (same as CPU Threads)")
         self.threads_batch_spin.setToolTip(
             "Threads used for prompt/batch processing (llama.cpp's "
@@ -279,8 +294,10 @@ class AppSettingsWidget(QWidget):
         # ── Generation settings ──
         gen_box = QGroupBox("Generation")
         gen_form = QFormLayout(gen_box)
-        gen_form.setSpacing(10)
-        gen_form.setContentsMargins(14, 18, 14, 14)
+        gen_form.setSpacing(12)
+        gen_form.setContentsMargins(14, 18, 14, 18)
+        gen_form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        gen_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
 
         # NOTE: temperature now lives per-task in the Models tab, next to
         # each task's assigned GGUF model — different models need very
@@ -343,8 +360,10 @@ class AppSettingsWidget(QWidget):
         # ── MoE performance (only applies to detected MoE models) ──
         moe_box = QGroupBox("MoE Performance")
         moe_form = QFormLayout(moe_box)
-        moe_form.setSpacing(10)
-        moe_form.setContentsMargins(14, 18, 14, 14)
+        moe_form.setSpacing(12)
+        moe_form.setContentsMargins(14, 18, 14, 18)
+        moe_form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        moe_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
 
         moe_note = QLabel(
             "Only applied when a Mixture-of-Experts model is detected "
@@ -576,16 +595,25 @@ class SettingsPanel(QWidget):
 
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(20, 20, 20, 20)
-        outer.setSpacing(16)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+
+        inner = QWidget()
+        inner_layout = QVBoxLayout(inner)
+        inner_layout.setContentsMargins(20, 20, 20, 20)
+        inner_layout.setSpacing(16)
 
         title = QLabel("Settings")
         title.setObjectName("heading")
-        outer.addWidget(title)
+        inner_layout.addWidget(title)
 
         self.app_settings_widget = AppSettingsWidget()
         self.app_settings_widget.settings_changed.connect(self.settings_changed)
-        outer.addWidget(self.app_settings_widget)
+        inner_layout.addWidget(self.app_settings_widget)
 
         # llama-cpp-python install notice
         notice_box = QGroupBox("Installation")
@@ -610,9 +638,12 @@ class SettingsPanel(QWidget):
         status_lbl.setStyleSheet(f"color: {status_color}; font-size: 13px;")
         status_lbl.setWordWrap(True)
         nb_layout.addWidget(status_lbl)
-        outer.addWidget(notice_box)
+        inner_layout.addWidget(notice_box)
 
-        outer.addStretch()
+        inner_layout.addStretch()
+
+        scroll.setWidget(inner)
+        outer.addWidget(scroll)
 
     def load(self, settings: AppSettings) -> None:
         self.app_settings_widget.load(settings)

@@ -314,12 +314,18 @@ class MainWindow(QMainWindow):
         task = self._suggested_task
         self.tabs.setCurrentWidget(self.story_panel)
         story_tabs = self.story_panel.tabs
-        if task == TaskType.WRITE_SYNOPSIS:
-            story_tabs.setCurrentWidget(self.story_panel.synopsis_tab)
-        elif task == TaskType.GENERATE_OUTLINE:
-            story_tabs.setCurrentWidget(self.story_panel.outline_tab)
-        else:
-            story_tabs.setCurrentWidget(self.story_panel.chapters_tab)
+        _tab_map = {
+            TaskType.WRITE_SYNOPSIS:    self.story_panel.synopsis_tab,
+            TaskType.GENERATE_OUTLINE:  self.story_panel.outline_tab,
+            TaskType.GENERATE_WORLD:    self.story_panel.world_tab,
+            TaskType.WRITE_CHAPTER:     self.story_panel.chapters_tab,
+            TaskType.WRITE_BOOK:        self.story_panel.chapters_tab,
+            TaskType.REVIEW_CHAPTER:    self.story_panel.chapters_tab,
+            TaskType.REWRITE_CHAPTER:   self.story_panel.chapters_tab,
+            TaskType.UPDATE_MEMORY:     self.story_panel.memory_tab,
+        }
+        target_tab = _tab_map.get(task, self.story_panel.chapters_tab)
+        story_tabs.setCurrentWidget(target_tab)
 
     # ──────────────────────────────────────────────
     # Export
@@ -331,14 +337,22 @@ class MainWindow(QMainWindow):
             return
 
         menu = QMenu(self)
-        docx_action = menu.addAction("Export as Word (.docx)…")
-        pdf_action = menu.addAction("Export as PDF (.pdf)…")
+        docx_action = menu.addAction("📄  Word (.docx)…")
+        pdf_action  = menu.addAction("📑  PDF (.pdf)…")
+        menu.addSeparator()
+        md_action   = menu.addAction("📝  Markdown (.md)…")
+        txt_action  = menu.addAction("🗒  Plain text (.txt)…")
+
         chosen = menu.exec(self.export_btn.mapToGlobal(self.export_btn.rect().bottomLeft()))
 
         if chosen == docx_action:
             self._export_book("docx")
         elif chosen == pdf_action:
             self._export_book("pdf")
+        elif chosen == md_action:
+            self._export_book("md")
+        elif chosen == txt_action:
+            self._export_book("txt")
 
     def _export_book(self, fmt: str) -> None:
         project = self._current_project
@@ -349,12 +363,13 @@ class MainWindow(QMainWindow):
             c for c in project.title if c.isalnum() or c in (" ", "-", "_")
         ).strip() or "novel"
 
-        if fmt == "docx":
-            filter_str = "Word Document (*.docx)"
-            default_name = f"{safe_title}.docx"
-        else:
-            filter_str = "PDF Document (*.pdf)"
-            default_name = f"{safe_title}.pdf"
+        fmt_map = {
+            "docx": ("Word Document (*.docx)",    f"{safe_title}.docx"),
+            "pdf":  ("PDF Document (*.pdf)",      f"{safe_title}.pdf"),
+            "md":   ("Markdown (*.md)",            f"{safe_title}.md"),
+            "txt":  ("Plain Text (*.txt)",         f"{safe_title}.txt"),
+        }
+        filter_str, default_name = fmt_map.get(fmt, ("All Files (*)", safe_title))
 
         path, _ = QFileDialog.getSaveFileName(
             self, "Export Book", default_name, filter_str
@@ -365,8 +380,12 @@ class MainWindow(QMainWindow):
         try:
             if fmt == "docx":
                 book_export.export_to_docx(project, path)
-            else:
+            elif fmt == "pdf":
                 book_export.export_to_pdf(project, path)
+            elif fmt == "md":
+                book_export.export_to_markdown(project, path)
+            elif fmt == "txt":
+                book_export.export_to_txt(project, path)
         except RuntimeError as e:
             logger.error(f"Export failed: {e}")
             QMessageBox.warning(self, "Export Failed", str(e))

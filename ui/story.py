@@ -58,6 +58,11 @@ from ui.styles import (
 )
 from ui.widgets import EmptyStateCard, SizeAdjustingTabWidget
 
+# Imported here (not at top) to avoid circular imports — stats.py itself
+# imports outline_chapter_numbers from this module.
+from ui.stats import StatsTab
+from ui.search import SearchTab
+
 
 def outline_chapter_numbers(outline_text: str) -> list[int]:
     """
@@ -1078,7 +1083,30 @@ class ChaptersTab(QWidget):
         """)
         editor_layout.addWidget(self.chapter_editor, 1)
 
-        # Action buttons
+        # ── Word count footer ──────────────────────────────────────────
+        # Updates on every keystroke via textChanged. Sits between the
+        # editor and the action buttons so it reads as part of the editor,
+        # not as a separate control.
+        wc_row = QHBoxLayout()
+        wc_row.setContentsMargins(2, 0, 2, 0)
+
+        self._wc_label = QLabel("0 words")
+        self._wc_label.setStyleSheet(
+            f"color: {COLOR_TEXT_MUTED}; font-size: 11px; background: transparent;"
+        )
+        wc_row.addWidget(self._wc_label)
+
+        wc_row.addStretch()
+
+        self._read_time_label = QLabel("")
+        self._read_time_label.setStyleSheet(
+            f"color: {COLOR_TEXT_MUTED}; font-size: 11px; background: transparent;"
+        )
+        wc_row.addWidget(self._read_time_label)
+
+        editor_layout.addLayout(wc_row)
+
+        self.chapter_editor.textChanged.connect(self._update_word_count)
         action_row = QHBoxLayout()
         action_row.setSpacing(8)
 
@@ -1164,6 +1192,7 @@ class ChaptersTab(QWidget):
             self._current_chapter = chapter
             self.chapter_title_edit.setText(chapter.title)
             self.chapter_editor.setPlainText(chapter.content)
+            self._update_word_count()
 
     def _save_chapter_title(self) -> None:
         if self._current_chapter:
@@ -1194,6 +1223,31 @@ class ChaptersTab(QWidget):
             self._refresh_list()
             self._update_empty_state()
             self.project_changed.emit()
+
+    def _update_word_count(self) -> None:
+        text = self.chapter_editor.toPlainText()
+        words = len(text.split()) if text.strip() else 0
+        chars = len(text)
+
+        if words == 0:
+            self._wc_label.setText("0 words")
+            self._read_time_label.setText("")
+            return
+
+        # Word count with thousands separator
+        self._wc_label.setText(f"{words:,} words  ·  {chars:,} chars")
+
+        # Reading time at 250 wpm
+        minutes = words / 250
+        if minutes < 1:
+            rt = "< 1 min read"
+        elif minutes < 60:
+            rt = f"~{round(minutes)} min read"
+        else:
+            h = int(minutes // 60)
+            m = int(minutes % 60)
+            rt = f"~{h}h {m}m read" if m else f"~{h}h read"
+        self._read_time_label.setText(rt)
 
     def _write_chapter(self) -> None:
         """
@@ -1300,6 +1354,8 @@ class ChaptersTab(QWidget):
             self._current_chapter = None
             self.chapter_title_edit.clear()
             self.chapter_editor.clear()
+            self._wc_label.setText("0 words")
+            self._read_time_label.setText("")
             self._refresh_list()
             self._update_empty_state()
             self.project_changed.emit()
@@ -1321,6 +1377,7 @@ class ChaptersTab(QWidget):
                 self._current_chapter = chapter
                 self.chapter_title_edit.setText(chapter.title)
                 self.chapter_editor.setPlainText(chapter.content)
+                self._update_word_count()
                 for i in range(self.chapter_list.count()):
                     item = self.chapter_list.item(i)
                     if item and item.data(Qt.UserRole) == current_num:
@@ -1787,6 +1844,12 @@ class StoryPanel(QWidget):
         self.author_profile_tab.profile_changed.connect(self._on_profile_updated)
         self.tabs.addTab(self.author_profile_tab, "Author")
 
+        self.stats_tab = StatsTab()
+        self.tabs.addTab(self.stats_tab, "📊 Stats")
+
+        self.search_tab = SearchTab()
+        self.tabs.addTab(self.search_tab, "🔍 Search")
+
         layout.addWidget(self.tabs)
 
     def load_project(self, project: Project) -> None:
@@ -1798,6 +1861,8 @@ class StoryPanel(QWidget):
         self.chapters_tab.load(project)
         self.memory_tab.load(project)
         self.author_profile_tab.load(project)
+        self.stats_tab.load(project)
+        self.search_tab.load(project)
 
     def refresh_after_task(self, project: Project) -> None:
         """Called after an AI task finishes to refresh content."""
@@ -1809,6 +1874,8 @@ class StoryPanel(QWidget):
         self.memory_tab.load(project)
         self.chapters_tab.refresh_after_generation(project)
         self.author_profile_tab.load(project)
+        self.stats_tab.load(project)
+        self.search_tab.load(project)
 
     def _save_project(self) -> None:
         if self._project:
