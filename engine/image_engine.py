@@ -499,6 +499,18 @@ class StableDiffusionCppEngine(ImageEngine):
         if vae_path and not os.path.isfile(vae_path):
             raise RuntimeError(f"VAE file not found: {vae_path!r}")
 
+        same_model = (
+            self._sd is not None
+            and self._model_path == model_path
+            and self._text_encoder_path == text_encoder_path
+            and self._vae_path == vae_path
+        )
+
+        if same_model:
+            logger.info("[sd_cpp] Model already loaded — reusing existing instance.")
+            return
+
+
         # Unload existing model first to free memory.
         if self._sd is not None:
             self.unload_model()
@@ -650,16 +662,7 @@ class StableDiffusionCppEngine(ImageEngine):
         effective_steps = request.steps
         effective_cfg = request.cfg_scale
 
-        if self._is_multi_component:
-            if effective_steps != self._ZIMAGE_STEPS_DEFAULT or effective_cfg != self._ZIMAGE_CFG_DEFAULT:
-                logger.info(
-                    "[sd_cpp] Overriding requested steps=%s cfg=%s -> "
-                    "Z-Image-Turbo defaults steps=%s cfg=%s",
-                    request.steps, request.cfg_scale,
-                    self._ZIMAGE_STEPS_DEFAULT, self._ZIMAGE_CFG_DEFAULT,
-                )
-            effective_steps = self._ZIMAGE_STEPS_DEFAULT
-            effective_cfg = self._ZIMAGE_CFG_DEFAULT
+
 
         logger.info(
             "[sd_cpp] generate() — task=%s prompt=%.60r size=%dx%d steps=%d cfg=%.1f",
