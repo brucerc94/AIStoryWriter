@@ -722,27 +722,15 @@ class OutlineTab(QWidget):
         project.outline = self.editor.get_text()
 
 
-class _ClickableImageLabel(QLabel):
-    """A QLabel that emits a clicked signal when the user presses it."""
-    clicked = Signal()
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.clicked.emit()
-        super().mousePressEvent(event)
-
-
 class CharacterCard(QFrame):
     edit_requested = Signal(str)  # character id
     delete_requested = Signal(str)
     image_requested = Signal(str, bool)  # character id, regenerate
 
-    def __init__(self, character: Character, project_id: str = "", parent=None) -> None:
+    def __init__(self, character: Character, parent=None) -> None:
         super().__init__(parent)
         self.char_id = character.id
-        self._project_id_value = project_id
-        self._current_pixmap: Optional[QPixmap] = None
-        self._character_name = character.name
+        self._project_id_value = ""
         self.setStyleSheet(f"""
             QFrame {{
                 background: {COLOR_SURFACE_RAISED};
@@ -773,11 +761,10 @@ class CharacterCard(QFrame):
         header_row.addWidget(self.image_status_lbl)
         layout.addLayout(header_row)
 
-        self.image_preview = _ClickableImageLabel()
+        self.image_preview = QLabel()
         self.image_preview.setFixedSize(96, 96)
         self.image_preview.setStyleSheet(f"border: 1px solid {COLOR_BORDER}; border-radius: 6px; background: {COLOR_SURFACE};")
         self.image_preview.setAlignment(Qt.AlignCenter)
-        self.image_preview.clicked.connect(self._show_image_preview)
         self._set_preview(character)
         layout.addWidget(self.image_preview, 0, Qt.AlignLeft)
 
@@ -809,12 +796,9 @@ class CharacterCard(QFrame):
         layout.addLayout(btn_row)
 
     def _set_preview(self, character: Character) -> None:
-        self._current_pixmap = None
         if not character.image_ref:
             self.image_preview.setText("🖼️")
             self.image_preview.setStyleSheet(f"border: 1px dashed {COLOR_BORDER}; border-radius: 6px; background: {COLOR_SURFACE}; font-size: 28px;")
-            self.image_preview.setCursor(Qt.ArrowCursor)
-            self.image_preview.setToolTip("")
             return
         try:
             data = storage.load_binary_resource(self._project_id_value, character.image_ref)
@@ -822,44 +806,12 @@ class CharacterCard(QFrame):
                 pixmap = QPixmap()
                 pixmap.loadFromData(data)
                 if not pixmap.isNull():
-                    self._current_pixmap = pixmap
                     self.image_preview.setPixmap(pixmap.scaled(96, 96, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-                    self.image_preview.setStyleSheet(
-                        f"border: 1px solid {COLOR_ACCENT}; border-radius: 6px; background: {COLOR_SURFACE};"
-                    )
-                    self.image_preview.setCursor(Qt.PointingHandCursor)
-                    self.image_preview.setToolTip("Click to view full image")
                     return
         except Exception:
             pass
         self.image_preview.setText("🖼️")
         self.image_preview.setStyleSheet(f"border: 1px dashed {COLOR_BORDER}; border-radius: 6px; background: {COLOR_SURFACE}; font-size: 28px;")
-        self.image_preview.setCursor(Qt.ArrowCursor)
-        self.image_preview.setToolTip("")
-
-    def _show_image_preview(self) -> None:
-        if self._current_pixmap is None or self._current_pixmap.isNull():
-            return
-        dialog = QDialog(self)
-        dialog.setWindowTitle(f"{self._character_name} — Portrait")
-        dialog.setModal(True)
-        vbox = QVBoxLayout(dialog)
-        vbox.setContentsMargins(16, 16, 16, 16)
-        vbox.setSpacing(12)
-
-        img_lbl = QLabel()
-        img_lbl.setAlignment(Qt.AlignCenter)
-        max_size = 512
-        scaled = self._current_pixmap.scaled(max_size, max_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        img_lbl.setPixmap(scaled)
-        vbox.addWidget(img_lbl)
-
-        close_btn = QPushButton("Close")
-        close_btn.setObjectName("accent")
-        close_btn.clicked.connect(dialog.accept)
-        vbox.addWidget(close_btn, 0, Qt.AlignCenter)
-
-        dialog.exec()
 
     def _project_id(self) -> str:
         return self._project_id_value
@@ -939,7 +891,8 @@ class CharactersTab(QWidget):
             return
 
         for char in self._project.characters:
-            card = CharacterCard(char, project_id=self._project.id)
+            card = CharacterCard(char)
+            card._project_id_value = self._project.id
             card.edit_requested.connect(self._edit_character)
             card.delete_requested.connect(self._delete_character)
             card.image_requested.connect(self._handle_character_image)

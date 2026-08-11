@@ -24,7 +24,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from engine.encryption import EncryptionService, get_default_encryption_service
 from engine.models import (
@@ -355,6 +355,49 @@ def _chapter_sort_key(path: Path) -> int:
         return int(path.stem.split("_")[1])
     except Exception:
         return 0
+
+
+def save_binary_resource(
+    project_id: str,
+    resource_name: str,
+    data: bytes,
+    *,
+    mime_type: str = "application/octet-stream",
+    subfolder: str = "resources",
+) -> dict[str, Any]:
+    """Persist binary data through the existing encrypted storage layer.
+
+    The project already uses encrypted files for all persisted content. This
+    reuses that same path for character-image resources by writing the bytes
+    to a dedicated file under the project's data directory and returning only
+    a small metadata reference that gets stored in the Character object.
+
+    ``subfolder`` controls which sub-directory under the project folder the
+    file lands in.  Pass ``"characters"`` for character portrait images so
+    they sit alongside the character JSON files rather than in a generic
+    ``resources/`` bucket.
+    """
+    ensure_data_dir()
+    resource_dir = project_dir(project_id) / subfolder
+    resource_dir.mkdir(parents=True, exist_ok=True)
+    target = resource_dir / resource_name
+    _write_bytes(target, data)
+    return {
+        "path": f"{subfolder}/{resource_name}",
+        "mime_type": mime_type,
+        "size_bytes": len(data),
+        "storage_mode": "encrypted_file",
+    }
+
+
+def load_binary_resource(project_id: str, resource_ref: Optional[dict[str, Any]]) -> Optional[bytes]:
+    """Load a binary resource that was previously saved via save_binary_resource()."""
+    if not resource_ref:
+        return None
+    path = project_dir(project_id) / resource_ref.get("path", "")
+    if not path.exists():
+        return None
+    return _read_bytes(path)
 
 
 def list_gguf_models(directory: str) -> list[str]:

@@ -239,6 +239,7 @@ class MainWindow(QMainWindow):
         self.story_panel.load_project(project)
         self.chat_panel.load_project(project)
         self.models_panel.load_project(project)
+        self.images_panel.load_project(project)
 
         self.project_title_bar.setText(project.title)
         self.projects_panel.select_project(project_id)
@@ -250,6 +251,7 @@ class MainWindow(QMainWindow):
     def _on_project_deleted(self, project_id: str) -> None:
         if self._current_project and self._current_project.id == project_id:
             self._current_project = None
+            self.images_panel.load_project(None)
             self._show_empty_state()
         logger.info(f"Project deleted ({project_id})")
         self.status.showMessage("Project deleted", 3000)

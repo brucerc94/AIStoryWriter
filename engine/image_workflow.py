@@ -27,6 +27,7 @@ from typing import Callable, Optional
 
 from PySide6.QtCore import QObject, QThread, Signal
 
+from engine import storage
 from engine.image_engine import get_image_engine
 from engine.models import (
     AppSettings,
@@ -102,8 +103,7 @@ class ImageWorkflowWorker(QObject):
     def _run_generation(self) -> None:
         self.status_changed.emit("Loading image model…")
 
-        model_path = self._model_path()
-        if not model_path:
+        if not self._model_path():
             self.error_occurred.emit(
                 "No image model selected.\n\n"
                 "Go to Settings and set an Image Model path."
@@ -112,7 +112,6 @@ class ImageWorkflowWorker(QObject):
 
         backend = self._backend()
         engine = get_image_engine(backend)
-
         if not engine.is_available:
             self.error_occurred.emit(
                 f"The {engine.backend_name} library is not installed.\n\n"
@@ -120,10 +119,9 @@ class ImageWorkflowWorker(QObject):
             )
             return
 
-        # Load model (noop if already loaded with the same path)
         try:
             engine.load_model(
-                model_path,
+                self._model_path(),
                 text_encoder_path=self._text_encoder_path(),
                 vae_path=self._vae_path(),
                 progress_callback=lambda msg: self.model_loading.emit(msg),
@@ -135,9 +133,7 @@ class ImageWorkflowWorker(QObject):
         if self._cancelled:
             return
 
-        # Prepare output path
         output_path = self._make_output_path()
-
         self.status_changed.emit("Generating image…")
         logger.info(
             f"[image_workflow] Generating: task={self.request.task_type.value}, "
@@ -188,11 +184,15 @@ class ImageWorkflowWorker(QObject):
         return ImageBackend.STABLE_DIFFUSION_CPP
 
     def _make_output_path(self) -> str:
-        os.makedirs(self.output_directory, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        uid = uuid.uuid4().hex[:6]
-        filename = f"{self.request.task_type.value}_{timestamp}_{uid}.png"
-        return os.path.join(self.output_directory, filename)
+        return _make_output_path_from_request(self.request, self.output_directory)
+
+
+def _make_output_path_from_request(request: ImageGenerationRequest, output_directory: str) -> str:
+    os.makedirs(output_directory, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    uid = uuid.uuid4().hex[:6]
+    filename = f"{request.task_type.value}_{timestamp}_{uid}.png"
+    return os.path.join(output_directory, filename)
 
 
 def _default_output_directory() -> str:
@@ -202,6 +202,98 @@ def _default_output_directory() -> str:
         "data",
         "images",
     )
+
+
+def generate_character_image(project_id: str, character, settings: Optional[AppSettings] = None) -> tuple[bool, Optional[dict], str]:
+    """Generate a character image and persist it through the existing encrypted storage layer."""
+    prompt = (
+        f"Portrait of {character.name}. "
+        f"Role: {character.role}. "
+        f"Description: {character.description}."
+    )
+    request = ImageGenerationRequest(
+        task_type=ImageTaskType.CHARACTER_PORTRAIT,
+        prompt=prompt,
+        negative_prompt="blurry, low quality, bad anatomy, text, watermark",
+        width=getattr(settings, "image_default_width", 512) if settings else 512,
+        height=getattr(settings, "image_default_height", 512) if settings else 512,
+        steps=getattr(settings, "image_default_steps", 20) if settings else 20,
+        cfg_scale=getattr(settings, "image_default_cfg_scale", 7.0) if settings else 7.0,
+    )
+    # Use a temp directory for the raw engine output; the final copy goes
+    # through the encrypted storage layer into the project's characters/ folder.
+    import tempfile
+    output_dir = tempfile.mkdtemp(prefix="aiss_img_")
+    output_path = os.path.join(output_dir, f"character_{character.id}.png")
+    engine = get_image_engine(_backend(settings))
+    if not engine.is_available:
+        return False, None, f"The {engine.backend_name} library is not installed."
+
+    try:
+        engine.load_model(
+            _model_path(settings),
+            text_encoder_path=_text_encoder_path(settings),
+            vae_path=_vae_path(settings),
+            progress_callback=lambda _msg: None,
+        )
+    except RuntimeError as exc:
+        return False, None, str(exc)
+
+    result = engine.generate(
+        request,
+        output_path=output_path,
+        progress_callback=lambda _step, _total: None,
+        cancel_check=lambda: False,
+    )
+    if not result.success or not result.image_path:
+        return False, None, result.error_message or "Image generation failed."
+
+    with open(result.image_path, "rb") as fh:
+        image_bytes = fh.read()
+
+    # Clean up the temp file used by the engine
+    try:
+        os.remove(result.image_path)
+        os.rmdir(output_dir)
+    except Exception:
+        pass
+
+    image_ref = storage.save_binary_resource(
+        project_id,
+        f"character_{character.id}.png",
+        image_bytes,
+        mime_type="image/png",
+        subfolder="characters",
+    )
+    return True, image_ref, ""
+
+
+def _backend(settings: Optional[AppSettings]) -> ImageBackend:
+    if settings:
+        raw = getattr(settings, "image_backend", "")
+        try:
+            return ImageBackend(raw)
+        except ValueError:
+            pass
+    return ImageBackend.STABLE_DIFFUSION_CPP
+
+
+def _model_path(settings: Optional[AppSettings]) -> str:
+    if settings:
+        return getattr(settings, "image_model_path", "") or ""
+    return ""
+
+
+def _text_encoder_path(settings: Optional[AppSettings]) -> str:
+    if settings:
+        return getattr(settings, "image_text_encoder_path", "") or ""
+    return ""
+
+
+def _vae_path(settings: Optional[AppSettings]) -> str:
+    if settings:
+        return getattr(settings, "image_vae_path", "") or ""
+    return ""
 
 
 # ──────────────────────────────────────────────────────────────────────────────

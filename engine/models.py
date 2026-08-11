@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 
 class ImageTaskType(str, Enum):
@@ -138,6 +138,9 @@ class Character:
     backstory: str = ""
     traits: list[str] = field(default_factory=list)
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    image_ref: Optional[dict[str, Any]] = None
+    image_status: str = "No Image"
+    image_error: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -147,6 +150,9 @@ class Character:
             "description": self.description,
             "backstory": self.backstory,
             "traits": self.traits,
+            "image_ref": self.image_ref,
+            "image_status": self.image_status,
+            "image_error": self.image_error,
         }
 
     @classmethod
@@ -158,6 +164,9 @@ class Character:
             description=d.get("description", ""),
             backstory=d.get("backstory", ""),
             traits=d.get("traits", []),
+            image_ref=d.get("image_ref"),
+            image_status=d.get("image_status", "No Image"),
+            image_error=d.get("image_error", ""),
         )
 
     def to_markdown(self) -> str:

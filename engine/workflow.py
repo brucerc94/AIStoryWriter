@@ -1128,7 +1128,10 @@ class WorkflowWorker(QObject):
         chapter_text: str,
         chapter_goal: str,
     ) -> str:
-        tail = chapter_text[-1200:].strip()
+        # Use a longer tail so the model has more overlap context and is
+        # less likely to invent a scene-break or repeat a sentence already
+        # written just before the cut-off point.
+        tail = chapter_text[-2000:].strip()
 
         # List already-completed chapters so the model cannot confuse which
         # chapter is currently in progress or restart from Chapter 1.
@@ -1142,22 +1145,24 @@ class WorkflowWorker(QObject):
             completed_note = ""
 
         parts = [
-            f"You are in the middle of writing Chapter {chapter_num} of '{self.project.title}'.",
-            f"Chapter {chapter_num} is NOT finished yet. Continue it — do not restart it, "
-            f"do not start a new chapter, do not write Chapter 1 or any other chapter.",
+            f"You are continuing Chapter {chapter_num} of '{self.project.title}'.",
+            (
+                f"The text below shows where Chapter {chapter_num} currently ends. "
+                "Your job is to pick up immediately after the last word shown and keep writing. "
+                "Do NOT rewrite or paraphrase anything already written. "
+                "Do NOT add a heading, title, or chapter number. "
+                "Do NOT restart the scene. "
+                "Just continue the prose seamlessly."
+            ),
         ]
 
         if completed_note:
             parts.append(completed_note)
 
         parts += [
-            "Do not repeat any text already written.",
-            "Write only the missing material that completes Chapter "
-            f"{chapter_num} according to its goal.",
-            "",
-            f"Chapter {chapter_num} Goal:\n{chapter_goal.strip() or '(none)'}",
-            "",
-            f"Chapter {chapter_num} so far ends with:\n...{tail}",
+            f"Chapter {chapter_num} Goal (what must be accomplished before the chapter ends):"
+            f"\n{chapter_goal.strip() or '(none)'}",
+            f"--- END OF CHAPTER {chapter_num} SO FAR ---\n{tail}\n--- CONTINUE FROM HERE ---",
         ]
         return "\n\n".join(parts).strip()
 
@@ -1282,13 +1287,23 @@ class WorkflowWorker(QObject):
             else:
                 self.step_started.emit(f"Generating continuation (pass {generation_pass})...")
                 logger.info(f"[write_chapter] Generating continuation (pass {generation_pass})...")
+                # Clear chat history BEFORE building the continuation prompt so
+                # build_context_for_model does not see the previous pass's
+                # user+assistant messages in the context window. Those messages
+                # already contain the chapter tail embedded in the prompt, so
+                # including them again causes the model to see — and repeat —
+                # the same text twice.
+                self._clear_chat_messages_for_continuation()
                 continuation_prompt = self._build_chapter_continuation_prompt(
                     chapter_num,
                     chapter_text,
                     chapter_goal,
                 )
+                # add_to_chat=False: the continuation prompt embeds the chapter
+                # tail directly, so accumulating it in chat history would cause
+                # it to appear again in the context of the next pass.
                 generated = self._run_inference(
-                    TaskType.WRITE_CHAPTER, continuation_prompt, add_to_chat=True, max_tokens=self._content_max_tokens()
+                    TaskType.WRITE_CHAPTER, continuation_prompt, add_to_chat=False, max_tokens=self._content_max_tokens()
                 )
 
             if not generated:
@@ -1319,7 +1334,6 @@ class WorkflowWorker(QObject):
             logger.info(
                 "[write_chapter] Chapter not complete yet. Generating continuation..."
             )
-            self._clear_chat_messages_for_continuation()
 
         if chapter_text:
             existing = next((c for c in self.project.chapters if c.number == chapter_num), None)

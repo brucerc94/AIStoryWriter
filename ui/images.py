@@ -11,6 +11,10 @@ Architecture:
         ├─ Reads image config from AppSettings (no hardcoded paths)
         └─ Delegates generation to ImageWorkflowThread
 
+Character Portraits are handled inside the Characters tab (ui/story.py).
+This panel covers Book Cover, Scene Illustration, Location, and Object/Item.
+All generated images are saved encrypted inside the active project folder.
+
 The story workflow (Synopsis, Outline, Chapters, etc.) is NOT modified
 by this module in any way.
 """
@@ -21,31 +25,35 @@ import logging
 import os
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
+    QDialog,
     QDoubleSpinBox,
     QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
     QSpinBox,
-    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from engine.image_workflow import ImageWorkflowThread
+from engine import storage
+from engine.image_workflow import ImageWorkflowThread, generate_character_image
 from engine.models import (
     AppSettings,
     ImageGenerationRequest,
     ImageGenerationResult,
     ImageTaskType,
+    Project,
 )
 from ui.styles import (
     COLOR_ACCENT,
@@ -123,10 +131,21 @@ class _StatusBar(QWidget):
         self.setVisible(False)
 
 
+class _ClickableImageLabel(QLabel):
+    """QLabel that emits clicked when the user presses it."""
+    clicked = Signal()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+
 class _ImageTaskSection(QGroupBox):
     """
-    A single collapsible section for one image task type (e.g. Character
-    Portrait). Contains a prompt/options form and a Generate button.
+    A single section for one image task type (e.g. Book Cover).
+    Contains a prompt/options form and a Generate button.
+    After generation the result is saved encrypted into the active project.
 
     generate_requested(ImageGenerationRequest) is emitted when the user
     clicks Generate — the parent ImagesPanel handles the actual workflow.
@@ -135,16 +154,7 @@ class _ImageTaskSection(QGroupBox):
     generate_requested = Signal(object)   # ImageGenerationRequest
 
     # ── Section definitions ──────────────────────────────────────────────
-    # Each task type declares which extra fields it needs beyond the
-    # universal prompt / negative-prompt pair.
     _TASK_META: dict[ImageTaskType, dict] = {
-        ImageTaskType.CHARACTER_PORTRAIT: {
-            "title": "Character Portrait",
-            "icon": "🧑",
-            "prompt_placeholder": "e.g. A stoic warrior woman with silver hair, wearing plate armor, dramatic lighting…",
-            "show_seed": True,
-            "show_dimensions": True,
-        },
         ImageTaskType.BOOK_COVER: {
             "title": "Book Cover",
             "icon": "📖",
@@ -181,6 +191,7 @@ class _ImageTaskSection(QGroupBox):
         super().__init__(title, parent)
         self.task_type = task_type
         self._meta = meta
+        self._current_pixmap: Optional[QPixmap] = None
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -254,39 +265,36 @@ class _ImageTaskSection(QGroupBox):
             self.width_spin = None
             self.height_spin = None
 
-        if self._meta.get("show_sampling", True):
-            steps_lbl = QLabel("Steps")
-            steps_lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 12px;")
-            options_row.addWidget(steps_lbl)
+        # Steps / CFG are always shown
+        steps_lbl = QLabel("Steps")
+        steps_lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 12px;")
+        options_row.addWidget(steps_lbl)
 
-            self.steps_spin = QSpinBox()
-            self.steps_spin.setRange(1, 200)
-            self.steps_spin.setValue(20)
-            self.steps_spin.setFixedWidth(80)
-            self.steps_spin.setToolTip(
-                "Number of diffusion sampling steps.\n"
-                "Recommended: 8 for Z-Image-Turbo, 4 for Flux schnell, 20 for SD."
-            )
-            options_row.addWidget(self.steps_spin)
+        self.steps_spin = QSpinBox()
+        self.steps_spin.setRange(1, 200)
+        self.steps_spin.setValue(20)
+        self.steps_spin.setFixedWidth(80)
+        self.steps_spin.setToolTip(
+            "Number of diffusion sampling steps.\n"
+            "Recommended: 8 for Z-Image-Turbo, 4 for Flux schnell, 20 for SD."
+        )
+        options_row.addWidget(self.steps_spin)
 
-            cfg_lbl = QLabel("CFG")
-            cfg_lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 12px;")
-            options_row.addWidget(cfg_lbl)
+        cfg_lbl = QLabel("CFG")
+        cfg_lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 12px;")
+        options_row.addWidget(cfg_lbl)
 
-            self.cfg_spin = QDoubleSpinBox()
-            self.cfg_spin.setRange(1.0, 30.0)
-            self.cfg_spin.setSingleStep(0.5)
-            self.cfg_spin.setValue(7.0)
-            self.cfg_spin.setDecimals(1)
-            self.cfg_spin.setFixedWidth(80)
-            self.cfg_spin.setToolTip(
-                "Classifier-free guidance scale.\n"
-                "Recommended: 1.0 for Z-Image-Turbo / Flux, 7.0 for SD."
-            )
-            options_row.addWidget(self.cfg_spin)
-        else:
-            self.steps_spin = None
-            self.cfg_spin = None
+        self.cfg_spin = QDoubleSpinBox()
+        self.cfg_spin.setRange(1.0, 30.0)
+        self.cfg_spin.setSingleStep(0.5)
+        self.cfg_spin.setValue(7.0)
+        self.cfg_spin.setDecimals(1)
+        self.cfg_spin.setFixedWidth(80)
+        self.cfg_spin.setToolTip(
+            "Classifier-free guidance scale.\n"
+            "Recommended: 1.0 for Z-Image-Turbo / Flux, 7.0 for SD."
+        )
+        options_row.addWidget(self.cfg_spin)
 
         options_row.addStretch()
         layout.addLayout(options_row)
@@ -312,6 +320,19 @@ class _ImageTaskSection(QGroupBox):
 
         layout.addLayout(btn_row)
 
+        # ── Image preview (shown after generation) ───────────────────────
+        self._preview_lbl = _ClickableImageLabel()
+        self._preview_lbl.setFixedSize(128, 128)
+        self._preview_lbl.setAlignment(Qt.AlignCenter)
+        self._preview_lbl.setStyleSheet(
+            f"border: 1px dashed {COLOR_BORDER}; border-radius: 6px; "
+            f"background: {COLOR_SURFACE}; font-size: 28px;"
+        )
+        self._preview_lbl.setText("🖼️")
+        self._preview_lbl.setVisible(False)
+        self._preview_lbl.clicked.connect(self._show_full_preview)
+        layout.addWidget(self._preview_lbl, 0, Qt.AlignLeft)
+
     # ── Public API ───────────────────────────────────────────────────────
 
     def apply_settings(self, settings: AppSettings) -> None:
@@ -320,17 +341,12 @@ class _ImageTaskSection(QGroupBox):
             self.width_spin.setValue(getattr(settings, "image_default_width", 512))
         if self.height_spin:
             self.height_spin.setValue(getattr(settings, "image_default_height", 512))
-        if self.steps_spin:
-            self.steps_spin.setValue(getattr(settings, "image_default_steps", 20))
-        if self.cfg_spin:
-            self.cfg_spin.setValue(getattr(settings, "image_default_cfg_scale", 7.0))
+        self.steps_spin.setValue(getattr(settings, "image_default_steps", 20))
+        self.cfg_spin.setValue(getattr(settings, "image_default_cfg_scale", 7.0))
 
     def set_busy(self, busy: bool) -> None:
         self.generate_btn.setEnabled(not busy)
-        if busy:
-            self.generate_btn.setText("Generating…")
-        else:
-            self.generate_btn.setText("Generate")
+        self.generate_btn.setText("Generating…" if busy else "Generate")
 
     def show_status(self, text: str, icon: str = "⏳") -> None:
         self._status_bar.show_status(text, icon)
@@ -341,13 +357,27 @@ class _ImageTaskSection(QGroupBox):
     def hide_status(self) -> None:
         self._status_bar.hide_status()
 
-    def show_result(self, result: ImageGenerationResult) -> None:
+    def show_result(self, result: ImageGenerationResult, image_bytes: Optional[bytes] = None) -> None:
         if result.success:
-            fname = os.path.basename(result.image_path)
-            self._result_label.setText(f"✓  Saved: {fname}")
+            self._result_label.setText("✓  Saved to project (encrypted)")
             self._result_label.setStyleSheet(f"color: {COLOR_SUCCESS}; font-size: 12px;")
+            if image_bytes:
+                pixmap = QPixmap()
+                pixmap.loadFromData(image_bytes)
+                if not pixmap.isNull():
+                    self._current_pixmap = pixmap
+                    self._preview_lbl.setPixmap(
+                        pixmap.scaled(128, 128, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    )
+                    self._preview_lbl.setStyleSheet(
+                        f"border: 1px solid {COLOR_ACCENT}; border-radius: 6px; "
+                        f"background: {COLOR_SURFACE};"
+                    )
+                    self._preview_lbl.setCursor(Qt.PointingHandCursor)
+                    self._preview_lbl.setToolTip("Click to view full image")
+                    self._preview_lbl.setVisible(True)
         else:
-            short = result.error_message.split("\n")[0]
+            short = (result.error_message or "Unknown error").split("\n")[0]
             self._result_label.setText(f"✗  {short}")
             self._result_label.setStyleSheet(f"color: {COLOR_ERROR}; font-size: 12px;")
 
@@ -361,10 +391,61 @@ class _ImageTaskSection(QGroupBox):
             seed=self.seed_spin.value() if self.seed_spin else -1,
             width=self.width_spin.value() if self.width_spin else 512,
             height=self.height_spin.value() if self.height_spin else 512,
-            steps=self.steps_spin.value() if self.steps_spin else 20,
-            cfg_scale=self.cfg_spin.value() if self.cfg_spin else 7.0,
+            steps=self.steps_spin.value(),
+            cfg_scale=self.cfg_spin.value(),
         )
         self.generate_requested.emit(request)
+
+    def _show_full_preview(self) -> None:
+        if not hasattr(self, "_current_pixmap") or self._current_pixmap is None:
+            return
+        meta = self._TASK_META.get(self.task_type, {})
+        title = meta.get("title", "Image Preview")
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        dialog.setModal(True)
+        vbox = QVBoxLayout(dialog)
+        vbox.setContentsMargins(16, 16, 16, 16)
+        vbox.setSpacing(12)
+        img_lbl = QLabel()
+        img_lbl.setAlignment(Qt.AlignCenter)
+        scaled = self._current_pixmap.scaled(512, 512, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        img_lbl.setPixmap(scaled)
+        vbox.addWidget(img_lbl)
+        close_btn = QPushButton("Close")
+        close_btn.setObjectName("accent")
+        close_btn.clicked.connect(dialog.accept)
+        vbox.addWidget(close_btn, 0, Qt.AlignCenter)
+        dialog.exec()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Character batch worker
+# ──────────────────────────────────────────────────────────────────────────────
+
+class _CharacterImageBatchWorker(Qt.QObject if hasattr(Qt, "QObject") else object):
+    pass
+
+
+from PySide6.QtCore import QObject
+
+class _CharacterBatchWorker(QObject):
+    finished = Signal(object)  # (ok, image_ref, error, char_id)
+
+    def __init__(self, project_id: str, character, settings) -> None:
+        super().__init__()
+        self.project_id = project_id
+        self.character = character
+        self.settings = settings
+
+    def run(self) -> None:
+        try:
+            ok, image_ref, error = generate_character_image(
+                self.project_id, self.character, self.settings
+            )
+        except Exception as exc:
+            ok, image_ref, error = False, None, str(exc)
+        self.finished.emit((ok, image_ref, error, self.character.id))
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -374,7 +455,11 @@ class _ImageTaskSection(QGroupBox):
 class ImagesPanel(QWidget):
     """
     The Images tab.  Acts as the ImageController:
-        - Owns all _ImageTaskSection widgets
+        - Owns _ImageTaskSection widgets (no Character Portrait — that lives in Characters tab)
+        - "Create Character Images" button generates portraits for all project characters
+          that don't have one yet, saves them encrypted inside the project folder
+        - Other task images (book cover, scene, location, object) are also saved
+          encrypted inside the active project folder
         - Manages ImageWorkflowThread lifecycle
         - Reads config from AppSettings (never hardcoded paths)
 
@@ -384,9 +469,18 @@ class ImagesPanel(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._settings: Optional[AppSettings] = None
+        self._project: Optional[Project] = None
         self._active_thread: Optional[ImageWorkflowThread] = None
         self._active_section: Optional[_ImageTaskSection] = None
+        self._active_request: Optional[ImageGenerationRequest] = None
         self._sections: dict[ImageTaskType, _ImageTaskSection] = {}
+
+        # Character batch state
+        self._char_batch_thread: Optional[QThread] = None
+        self._char_batch_worker: Optional[_CharacterBatchWorker] = None
+        self._char_batch_queue: list[str] = []
+        self._char_batch_label: Optional[QLabel] = None
+
         self._build_ui()
 
     # ── UI construction ──────────────────────────────────────────────────
@@ -413,7 +507,6 @@ class ImagesPanel(QWidget):
         header_row.addWidget(title)
         header_row.addStretch()
 
-        # Backend badge — read-only info chip
         self._backend_badge = QLabel("")
         self._backend_badge.setObjectName("chipMuted")
         self._backend_badge.setVisible(False)
@@ -422,21 +515,55 @@ class ImagesPanel(QWidget):
         layout.addLayout(header_row)
 
         subtitle = QLabel(
-            "Generate images for your story — characters, covers, scenes, locations, and objects."
+            "Generate images for your story — characters, covers, scenes, locations, and objects.\n"
+            "All images are saved encrypted inside the active project."
         )
         subtitle.setObjectName("subheading")
         subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
 
-        # No-model notice (shown when image_model_path is empty)
-        self._no_model_notice = self._build_no_model_notice()
+        # ── No-project notice ─────────────────────────────────────────────
+        self._no_project_notice = self._build_notice(
+            "📂",
+            "No project open.",
+            "Open a project from the sidebar to generate and save images.",
+        )
+        layout.addWidget(self._no_project_notice)
+
+        # ── No-model notice ───────────────────────────────────────────────
+        self._no_model_notice = self._build_notice(
+            "🖼️",
+            "No image model configured.",
+            "Go to Settings and set an Image Model path to enable generation.\n"
+            "The model file should be a diffusion checkpoint compatible with the selected backend.",
+        )
         layout.addWidget(self._no_model_notice)
 
         layout.addSpacing(20)
 
-        # ── Task sections ─────────────────────────────────────────────────
+        # ── Create Character Images button ────────────────────────────────
+        char_row = QHBoxLayout()
+        self._character_batch_btn = QPushButton("🎭  Create Character Images")
+        self._character_batch_btn.setObjectName("accent")
+        self._character_batch_btn.setMinimumHeight(36)
+        self._character_batch_btn.setToolTip(
+            "Generate portrait images for all project characters that don't have one yet.\n"
+            "Images are saved encrypted inside the project's characters/ folder."
+        )
+        self._character_batch_btn.clicked.connect(self._create_character_images)
+        char_row.addWidget(self._character_batch_btn)
+        char_row.addStretch()
+        layout.addLayout(char_row)
+
+        self._char_batch_status = QLabel("")
+        self._char_batch_status.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px;")
+        self._char_batch_status.setVisible(False)
+        layout.addWidget(self._char_batch_status)
+
+        layout.addSpacing(20)
+
+        # ── Task sections (no Character Portrait — that's in Characters tab) ──
         task_order = [
-            ImageTaskType.CHARACTER_PORTRAIT,
             ImageTaskType.BOOK_COVER,
             ImageTaskType.SCENE_ILLUSTRATION,
             ImageTaskType.LOCATION,
@@ -457,7 +584,7 @@ class ImagesPanel(QWidget):
         scroll.setWidget(inner)
         outer.addWidget(scroll)
 
-    def _build_no_model_notice(self) -> QFrame:
+    def _build_notice(self, icon: str, title: str, body: str) -> QFrame:
         frame = QFrame()
         frame.setObjectName("emptyStateCard")
         frame.setVisible(False)
@@ -466,33 +593,34 @@ class ImagesPanel(QWidget):
         fl.setContentsMargins(20, 18, 20, 18)
         fl.setSpacing(6)
 
-        icon = QLabel("🖼️")
-        icon.setObjectName("emptyStateIcon")
-        icon.setAlignment(Qt.AlignCenter)
-        fl.addWidget(icon)
+        icon_lbl = QLabel(icon)
+        icon_lbl.setObjectName("emptyStateIcon")
+        icon_lbl.setAlignment(Qt.AlignCenter)
+        fl.addWidget(icon_lbl)
 
-        msg = QLabel(
-            "No image model configured.\n\n"
-            "Go to <b>Settings</b> and set an <b>Image Model</b> path to enable generation.\n"
-            "The model file should be a diffusion checkpoint compatible with the selected backend."
-        )
-        msg.setObjectName("emptyStateDesc")
-        msg.setAlignment(Qt.AlignCenter)
-        msg.setWordWrap(True)
-        fl.addWidget(msg)
+        title_lbl = QLabel(f"<b>{title}</b>")
+        title_lbl.setAlignment(Qt.AlignCenter)
+        fl.addWidget(title_lbl)
+
+        body_lbl = QLabel(body)
+        body_lbl.setObjectName("emptyStateDesc")
+        body_lbl.setAlignment(Qt.AlignCenter)
+        body_lbl.setWordWrap(True)
+        fl.addWidget(body_lbl)
 
         return frame
 
     # ── Public API ───────────────────────────────────────────────────────
 
+    def load_project(self, project: Optional[Project]) -> None:
+        """Called by MainWindow whenever the active project changes."""
+        self._project = project
+        self._update_notices()
+
     def set_settings(self, settings: AppSettings) -> None:
-        """
-        Called by MainWindow whenever AppSettings change.
-        Updates the backend badge and pre-fills dimension defaults.
-        """
+        """Called by MainWindow whenever AppSettings change."""
         self._settings = settings
 
-        # Backend badge
         backend_raw = getattr(settings, "image_backend", "stable_diffusion_cpp")
         friendly = {
             "stable_diffusion_cpp": "stable-diffusion.cpp",
@@ -500,17 +628,112 @@ class ImagesPanel(QWidget):
         self._backend_badge.setText(f"Backend: {friendly}")
         self._backend_badge.setVisible(True)
 
-        # No-model notice
-        has_model = bool(getattr(settings, "image_model_path", ""))
-        self._no_model_notice.setVisible(not has_model)
+        self._update_notices()
 
-        # Pre-fill dimensions in all sections
         for section in self._sections.values():
             section.apply_settings(settings)
 
-    # ── Generation ───────────────────────────────────────────────────────
+    # ── Internal helpers ─────────────────────────────────────────────────
+
+    def _update_notices(self) -> None:
+        has_project = self._project is not None
+        has_model = bool(getattr(self._settings, "image_model_path", "")) if self._settings else False
+
+        self._no_project_notice.setVisible(not has_project)
+        self._no_model_notice.setVisible(has_project and not has_model)
+
+        sections_enabled = has_project and has_model
+        self._character_batch_btn.setEnabled(sections_enabled)
+        for section in self._sections.values():
+            section.setEnabled(sections_enabled)
+
+    # ── Character batch ───────────────────────────────────────────────────
+
+    def _create_character_images(self) -> None:
+        if not self._project:
+            QMessageBox.warning(self, "No Project", "Open a project first.")
+            return
+        if not self._settings:
+            return
+        if self._char_batch_thread and self._char_batch_thread.isRunning():
+            return
+
+        pending = [c for c in self._project.characters if not c.image_ref]
+        if not pending:
+            QMessageBox.information(
+                self, "All Done",
+                "All characters already have images.\n"
+                "Use the 'Regenerate Image' button on a character card to update one."
+            )
+            return
+
+        self._char_batch_queue = [c.id for c in pending]
+        self._character_batch_btn.setEnabled(False)
+        self._char_batch_status.setText(f"Queued {len(self._char_batch_queue)} character(s)…")
+        self._char_batch_status.setVisible(True)
+        self._start_next_char_batch()
+
+    def _start_next_char_batch(self) -> None:
+        if not self._char_batch_queue or not self._project:
+            self._character_batch_btn.setEnabled(True)
+            remaining = len(self._char_batch_queue)
+            if remaining == 0:
+                self._char_batch_status.setText("✓ All character images generated.")
+            self._char_batch_worker = None
+            self._char_batch_thread = None
+            return
+
+        char_id = self._char_batch_queue.pop(0)
+        char = next((c for c in self._project.characters if c.id == char_id), None)
+        if not char:
+            self._start_next_char_batch()
+            return
+
+        remaining = len(self._char_batch_queue)
+        self._char_batch_status.setText(
+            f"Generating portrait for {char.name}…"
+            + (f" ({remaining} more after this)" if remaining else "")
+        )
+
+        char.image_status = "Generating"
+        char.image_error = ""
+        storage.save_project(self._project)
+
+        worker = _CharacterBatchWorker(self._project.id, char, self._settings)
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_char_batch_finished)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(thread.deleteLater)
+
+        self._char_batch_worker = worker
+        self._char_batch_thread = thread
+        thread.start()
+
+    def _on_char_batch_finished(self, payload) -> None:
+        ok, image_ref, error, char_id = payload
+        if self._project:
+            char = next((c for c in self._project.characters if c.id == char_id), None)
+            if char:
+                if ok and image_ref:
+                    char.image_ref = image_ref
+                    char.image_status = "Ready"
+                    char.image_error = ""
+                else:
+                    char.image_status = "Error"
+                    char.image_error = error or "Image generation failed."
+                storage.save_project(self._project)
+        self._char_batch_worker = None
+        self._char_batch_thread = None
+        self._start_next_char_batch()
+
+    # ── Standalone generation (book cover, scene, etc.) ──────────────────
 
     def _on_generate_requested(self, request: ImageGenerationRequest) -> None:
+        if not self._project:
+            QMessageBox.warning(self, "No Project", "Open a project first.")
+            return
         if self._active_thread and self._active_thread.isRunning():
             logger.warning("[images] Generation already in progress — ignoring new request.")
             return
@@ -520,16 +743,17 @@ class ImagesPanel(QWidget):
             return
 
         if not request.prompt:
-            section.show_result(
-                _error_result("Please enter a prompt before generating.")
-            )
+            section.show_result(_error_result("Please enter a prompt before generating."))
             return
 
         self._active_section = section
+        self._active_request = request
         section.set_busy(True)
         section.show_status("Starting…")
 
-        output_dir = getattr(self._settings, "image_output_directory", "") if self._settings else ""
+        # Use a temp dir for engine output; we'll copy encrypted into the project.
+        import tempfile
+        output_dir = tempfile.mkdtemp(prefix="aiss_img_")
 
         thread = ImageWorkflowThread(
             request=request,
@@ -560,15 +784,43 @@ class ImagesPanel(QWidget):
             self._active_section.show_progress(step, total)
 
     def _on_generation_finished(self, result: object) -> None:
-        if self._active_section:
-            self._active_section.show_result(result)
+        if not self._active_section or not self._active_request:
+            return
+
+        image_bytes: Optional[bytes] = None
+
+        if result.success and result.image_path and self._project:
+            # Read raw bytes from the engine's temp file
+            try:
+                with open(result.image_path, "rb") as fh:
+                    image_bytes = fh.read()
+                # Save encrypted into the project's images/ folder
+                import uuid, datetime as _dt
+                ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+                uid = uuid.uuid4().hex[:6]
+                filename = f"{self._active_request.task_type.value}_{ts}_{uid}.png"
+                storage.save_binary_resource(
+                    self._project.id,
+                    filename,
+                    image_bytes,
+                    mime_type="image/png",
+                    subfolder="images",
+                )
+                # Clean up temp file
+                try:
+                    os.remove(result.image_path)
+                    os.rmdir(os.path.dirname(result.image_path))
+                except Exception:
+                    pass
+            except Exception as exc:
+                logger.error(f"[images] Failed to save image to project: {exc}")
+
+        self._active_section.show_result(result, image_bytes)
 
     def _on_error_occurred(self, message: str) -> None:
         logger.error(f"[images] Error: {message}")
         if self._active_section:
-            self._active_section.show_result(
-                _error_result(message.split("\n")[0])
-            )
+            self._active_section.show_result(_error_result(message.split("\n")[0]))
 
     def _on_thread_finished(self) -> None:
         if self._active_section:
@@ -576,10 +828,10 @@ class ImagesPanel(QWidget):
             self._active_section.hide_status()
         self._active_thread = None
         self._active_section = None
+        self._active_request = None
 
 
 # ── Small helpers ────────────────────────────────────────────────────────────
 
 def _error_result(message: str) -> ImageGenerationResult:
-    from engine.models import ImageGenerationResult
     return ImageGenerationResult(success=False, error_message=message)
