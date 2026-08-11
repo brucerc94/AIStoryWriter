@@ -36,6 +36,7 @@ from engine import storage
 from engine import export as book_export
 from engine.models import AppSettings, Project, TaskType
 from ui.chat import ChatPanel
+from ui.images import ImagesPanel
 from ui.projects import ProjectsPanel
 from ui.resources import get_app_icon
 from ui.settings import ModelsPanel, SettingsPanel
@@ -99,6 +100,7 @@ class MainWindow(QMainWindow):
         self.settings_panel.load(self._settings)
         self.models_panel.update_available_models(self._settings.models_directory)
         self.chat_panel.set_settings(self._settings)
+        self.images_panel.set_settings(self._settings)
 
         self.projects_panel.refresh()
         self._show_empty_state()
@@ -174,6 +176,9 @@ class MainWindow(QMainWindow):
 
         self.chat_panel = ChatPanel()
         self.tabs.addTab(self.chat_panel, "Chat")
+
+        self.images_panel = ImagesPanel()
+        self.tabs.addTab(self.images_panel, "Images")
 
         self.models_panel = ModelsPanel()
         self.tabs.addTab(self.models_panel, "Models")
@@ -406,6 +411,7 @@ class MainWindow(QMainWindow):
     def _on_settings_changed(self, settings: AppSettings) -> None:
         self._settings = settings
         self.chat_panel.set_settings(settings)
+        self.images_panel.set_settings(settings)
         self.models_panel.update_available_models(settings.models_directory)
         self.status.showMessage("Settings saved", 3000)
 

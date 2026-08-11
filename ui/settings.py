@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from engine import storage
-from engine.models import AppSettings, Project, TaskType
+from engine.models import AppSettings, ImageBackend, Project, TaskType
 from ui.styles import (
     COLOR_ACCENT,
     COLOR_BORDER,
@@ -400,6 +400,130 @@ class AppSettingsWidget(QWidget):
 
         layout.addWidget(moe_box)
 
+        # ── Image Generation ──────────────────────────────────────────────
+        # Extends the existing model-selection system to image generation.
+        # Uses the same patterns as the text-model section above so the
+        # author sees a familiar, consistent interface.
+        img_box = QGroupBox("Image Generation")
+        img_form = QFormLayout(img_box)
+        img_form.setSpacing(12)
+        img_form.setContentsMargins(14, 18, 14, 18)
+        img_form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        img_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+
+        img_note = QLabel(
+            "Configure the local image generation backend. "
+            "The Images tab uses these settings — the story workflow is unaffected."
+        )
+        img_note.setWordWrap(True)
+        img_note.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 11px;")
+        img_form.addRow(img_note)
+
+        # Image Model path (mirrors the GGUF browse pattern)
+        img_model_row = QHBoxLayout()
+        self.image_model_input = QLineEdit()
+        self.image_model_input.setPlaceholderText("Path to diffusion model checkpoint…")
+        self.image_model_input.setToolTip(
+            "Path to the image model used by the Images tab.\n"
+            "For stable-diffusion.cpp this is a .gguf or .safetensors diffusion checkpoint.\n"
+            "Leave blank if you haven't set up an image backend yet."
+        )
+        img_model_row.addWidget(self.image_model_input, 1)
+
+        browse_img_btn = QPushButton("Browse…")
+        browse_img_btn.setFixedWidth(70)
+        browse_img_btn.clicked.connect(self._browse_image_model)
+        img_model_row.addWidget(browse_img_btn)
+        img_form.addRow("Image Model", img_model_row)
+
+        # Image Backend selector
+        self.image_backend_combo = QComboBox()
+        self.image_backend_combo.addItem("stable-diffusion.cpp", ImageBackend.STABLE_DIFFUSION_CPP.value)
+        # Future backends added here without changing anything else:
+        # self.image_backend_combo.addItem("Flux",       ImageBackend.FLUX.value)
+        # self.image_backend_combo.addItem("Qwen Image", ImageBackend.QWEN_IMAGE.value)
+        self.image_backend_combo.setToolTip(
+            "Which local image generation backend to use.\n"
+            "Only stable-diffusion.cpp is available now; more will be added later."
+        )
+        img_form.addRow("Image Backend", self.image_backend_combo)
+
+        # Output directory
+        img_out_row = QHBoxLayout()
+        self.image_output_dir_input = QLineEdit()
+        self.image_output_dir_input.setPlaceholderText("Where to save generated images (leave blank for default)…")
+        img_out_row.addWidget(self.image_output_dir_input, 1)
+
+        browse_out_btn = QPushButton("Browse…")
+        browse_out_btn.setFixedWidth(70)
+        browse_out_btn.clicked.connect(self._browse_image_output_dir)
+        img_out_row.addWidget(browse_out_btn)
+        img_form.addRow("Output Directory", img_out_row)
+
+        # Default dimensions
+        dims_row = QHBoxLayout()
+        dims_row.setSpacing(12)
+
+        img_w_lbl = QLabel("Default Width")
+        img_w_lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 12px;")
+        dims_row.addWidget(img_w_lbl)
+
+        self.image_width_spin = QSpinBox()
+        self.image_width_spin.setRange(64, 2048)
+        self.image_width_spin.setSingleStep(64)
+        self.image_width_spin.setValue(512)
+        self.image_width_spin.setSuffix(" px")
+        self.image_width_spin.setFixedWidth(100)
+        dims_row.addWidget(self.image_width_spin)
+
+        img_h_lbl = QLabel("Default Height")
+        img_h_lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 12px;")
+        dims_row.addWidget(img_h_lbl)
+
+        self.image_height_spin = QSpinBox()
+        self.image_height_spin.setRange(64, 2048)
+        self.image_height_spin.setSingleStep(64)
+        self.image_height_spin.setValue(512)
+        self.image_height_spin.setSuffix(" px")
+        self.image_height_spin.setFixedWidth(100)
+        dims_row.addWidget(self.image_height_spin)
+
+        dims_row.addStretch()
+        img_form.addRow("", dims_row)
+
+        # Steps + CFG
+        gen_row = QHBoxLayout()
+        gen_row.setSpacing(12)
+
+        steps_lbl = QLabel("Default Steps")
+        steps_lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 12px;")
+        gen_row.addWidget(steps_lbl)
+
+        self.image_steps_spin = QSpinBox()
+        self.image_steps_spin.setRange(1, 200)
+        self.image_steps_spin.setValue(20)
+        self.image_steps_spin.setFixedWidth(80)
+        self.image_steps_spin.setToolTip("Number of diffusion sampling steps. More = higher quality, slower.")
+        gen_row.addWidget(self.image_steps_spin)
+
+        cfg_lbl = QLabel("CFG Scale")
+        cfg_lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 12px;")
+        gen_row.addWidget(cfg_lbl)
+
+        self.image_cfg_spin = QDoubleSpinBox()
+        self.image_cfg_spin.setRange(1.0, 30.0)
+        self.image_cfg_spin.setSingleStep(0.5)
+        self.image_cfg_spin.setValue(7.0)
+        self.image_cfg_spin.setDecimals(1)
+        self.image_cfg_spin.setFixedWidth(80)
+        self.image_cfg_spin.setToolTip("Classifier-free guidance scale. Higher = more prompt-faithful but less creative.")
+        gen_row.addWidget(self.image_cfg_spin)
+
+        gen_row.addStretch()
+        img_form.addRow("", gen_row)
+
+        layout.addWidget(img_box)
+
         save_btn = QPushButton("Save App Settings")
         save_btn.setObjectName("accent")
         save_btn.clicked.connect(self._save)
@@ -420,11 +544,39 @@ class AppSettingsWidget(QWidget):
         self.system_prompt_input.setPlainText(settings.custom_system_prompt)
         self.moe_batch_spin.setValue(getattr(settings, "moe_n_batch", 1024))
         self.moe_ubatch_spin.setValue(getattr(settings, "moe_n_ubatch", 1024))
+        # Image settings
+        self.image_model_input.setText(getattr(settings, "image_model_path", ""))
+        self.image_output_dir_input.setText(getattr(settings, "image_output_directory", ""))
+        self.image_width_spin.setValue(getattr(settings, "image_default_width", 512))
+        self.image_height_spin.setValue(getattr(settings, "image_default_height", 512))
+        self.image_steps_spin.setValue(getattr(settings, "image_default_steps", 20))
+        self.image_cfg_spin.setValue(getattr(settings, "image_default_cfg_scale", 7.0))
+        # Backend combo
+        backend_val = getattr(settings, "image_backend", ImageBackend.STABLE_DIFFUSION_CPP.value)
+        for i in range(self.image_backend_combo.count()):
+            if self.image_backend_combo.itemData(i) == backend_val:
+                self.image_backend_combo.setCurrentIndex(i)
+                break
 
     def _browse_models_dir(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "Select Models Directory")
         if d:
             self.models_dir_input.setText(d)
+
+    def _browse_image_model(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Image Model",
+            "",
+            "Model Files (*.gguf *.safetensors *.ckpt *.bin);;All Files (*)",
+        )
+        if path:
+            self.image_model_input.setText(path)
+
+    def _browse_image_output_dir(self) -> None:
+        d = QFileDialog.getExistingDirectory(self, "Select Image Output Directory")
+        if d:
+            self.image_output_dir_input.setText(d)
 
     def _save(self) -> None:
         if self._settings is None:
@@ -442,6 +594,14 @@ class AppSettingsWidget(QWidget):
         self._settings.custom_system_prompt = self.system_prompt_input.toPlainText().strip()
         self._settings.moe_n_batch = self.moe_batch_spin.value()
         self._settings.moe_n_ubatch = self.moe_ubatch_spin.value()
+        # Image settings
+        self._settings.image_model_path = self.image_model_input.text().strip()
+        self._settings.image_backend = self.image_backend_combo.currentData() or ImageBackend.STABLE_DIFFUSION_CPP.value
+        self._settings.image_output_directory = self.image_output_dir_input.text().strip()
+        self._settings.image_default_width = self.image_width_spin.value()
+        self._settings.image_default_height = self.image_height_spin.value()
+        self._settings.image_default_steps = self.image_steps_spin.value()
+        self._settings.image_default_cfg_scale = self.image_cfg_spin.value()
         storage.save_settings(self._settings)
         self.settings_changed.emit(self._settings)
 

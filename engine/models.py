@@ -12,6 +12,66 @@ from enum import Enum
 from typing import Optional
 
 
+class ImageTaskType(str, Enum):
+    """Types of image generation tasks available in the Images tab."""
+    CHARACTER_PORTRAIT = "character_portrait"
+    BOOK_COVER = "book_cover"
+    SCENE_ILLUSTRATION = "scene_illustration"
+    LOCATION = "location"
+    OBJECT_ITEM = "object_item"
+
+
+class ImageBackend(str, Enum):
+    """Supported image generation backends. Designed for easy extension."""
+    STABLE_DIFFUSION_CPP = "stable_diffusion_cpp"
+    # Future backends: FLUX = "flux", QWEN_IMAGE = "qwen_image"
+
+
+class ImageGenerationRequest:
+    """
+    Data transfer object for an image generation request.
+    Passed from ImageController → ImageWorkflow → ImageEngine.
+    All fields are optional — the engine fills defaults for unset ones.
+    """
+    def __init__(
+        self,
+        task_type: ImageTaskType,
+        prompt: str = "",
+        negative_prompt: str = "",
+        seed: int = -1,
+        width: int = 512,
+        height: int = 512,
+        steps: int = 20,
+        cfg_scale: float = 7.0,
+    ) -> None:
+        self.task_type = task_type
+        self.prompt = prompt
+        self.negative_prompt = negative_prompt
+        self.seed = seed          # -1 = random
+        self.width = width
+        self.height = height
+        self.steps = steps
+        self.cfg_scale = cfg_scale
+
+
+class ImageGenerationResult:
+    """
+    Result returned by ImageEngine after generation (or failure).
+    image_path is set only on success; error_message only on failure.
+    """
+    def __init__(
+        self,
+        success: bool,
+        image_path: str = "",
+        error_message: str = "",
+        seed_used: int = -1,
+    ) -> None:
+        self.success = success
+        self.image_path = image_path
+        self.error_message = error_message
+        self.seed_used = seed_used
+
+
 class TaskType(str, Enum):
     WRITE_SYNOPSIS = "write_synopsis"
     GENERATE_OUTLINE = "generate_outline"
@@ -190,6 +250,46 @@ class ModelAssignment:
 
     @classmethod
     def from_dict(cls, d: dict) -> "ModelAssignment":
+        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
+
+
+@dataclass
+class ImageModelAssignment:
+    """
+    Maps image task types to a model path (GGUF or diffusion checkpoint).
+    Follows the exact same pattern as ModelAssignment so the Settings UI
+    can reuse ModelPicker without modification.
+
+    A single ``default`` path acts as the catch-all model for all image
+    tasks — individual task overrides can be added later without changing
+    the architecture.
+    """
+    default: str = ""
+    character_portrait: str = ""
+    book_cover: str = ""
+    scene_illustration: str = ""
+    location: str = ""
+    object_item: str = ""
+
+    def get(self, task: "ImageTaskType") -> str:  # noqa: F821
+        specific = getattr(self, task.value, "")
+        return specific or self.default
+
+    def set(self, task: "ImageTaskType", model_path: str) -> None:  # noqa: F821
+        setattr(self, task.value, model_path)
+
+    def to_dict(self) -> dict:
+        return {
+            "default": self.default,
+            "character_portrait": self.character_portrait,
+            "book_cover": self.book_cover,
+            "scene_illustration": self.scene_illustration,
+            "location": self.location,
+            "object_item": self.object_item,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ImageModelAssignment":
         return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
 
@@ -520,6 +620,31 @@ class AppSettings:
     moe_n_batch: int = 1024
     moe_n_ubatch: int = 1024
 
+    # ── Image generation ──────────────────────────────────────────────────
+    # These settings are completely independent of the text-generation
+    # pipeline above. The image engine reads them; the story workflow ignores
+    # them entirely.
+
+    # Path to the image model (diffusion checkpoint / GGUF diffusion model).
+    # Shown and edited in Settings under "Image Model".
+    image_model_path: str = ""
+
+    # Which backend to use for image generation.
+    image_backend: str = ImageBackend.STABLE_DIFFUSION_CPP.value
+
+    # Directory where generated images are saved.
+    image_output_directory: str = ""
+
+    # Default image dimensions (can be overridden per-request in the UI).
+    image_default_width: int = 512
+    image_default_height: int = 512
+
+    # Default sampling steps.
+    image_default_steps: int = 20
+
+    # Default CFG scale.
+    image_default_cfg_scale: float = 7.0
+
     def to_dict(self) -> dict:
         return {
             "models_directory": self.models_directory,
@@ -538,6 +663,14 @@ class AppSettings:
             "allow_nsfw": self.allow_nsfw,
             "moe_n_batch": self.moe_n_batch,
             "moe_n_ubatch": self.moe_n_ubatch,
+            # Image generation
+            "image_model_path": self.image_model_path,
+            "image_backend": self.image_backend,
+            "image_output_directory": self.image_output_directory,
+            "image_default_width": self.image_default_width,
+            "image_default_height": self.image_default_height,
+            "image_default_steps": self.image_default_steps,
+            "image_default_cfg_scale": self.image_default_cfg_scale,
         }
 
     @classmethod
