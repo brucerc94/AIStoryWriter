@@ -254,6 +254,40 @@ class _ImageTaskSection(QGroupBox):
             self.width_spin = None
             self.height_spin = None
 
+        if self._meta.get("show_sampling", True):
+            steps_lbl = QLabel("Steps")
+            steps_lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 12px;")
+            options_row.addWidget(steps_lbl)
+
+            self.steps_spin = QSpinBox()
+            self.steps_spin.setRange(1, 200)
+            self.steps_spin.setValue(20)
+            self.steps_spin.setFixedWidth(80)
+            self.steps_spin.setToolTip(
+                "Number of diffusion sampling steps.\n"
+                "Recommended: 8 for Z-Image-Turbo, 4 for Flux schnell, 20 for SD."
+            )
+            options_row.addWidget(self.steps_spin)
+
+            cfg_lbl = QLabel("CFG")
+            cfg_lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 12px;")
+            options_row.addWidget(cfg_lbl)
+
+            self.cfg_spin = QDoubleSpinBox()
+            self.cfg_spin.setRange(1.0, 30.0)
+            self.cfg_spin.setSingleStep(0.5)
+            self.cfg_spin.setValue(7.0)
+            self.cfg_spin.setDecimals(1)
+            self.cfg_spin.setFixedWidth(80)
+            self.cfg_spin.setToolTip(
+                "Classifier-free guidance scale.\n"
+                "Recommended: 1.0 for Z-Image-Turbo / Flux, 7.0 for SD."
+            )
+            options_row.addWidget(self.cfg_spin)
+        else:
+            self.steps_spin = None
+            self.cfg_spin = None
+
         options_row.addStretch()
         layout.addLayout(options_row)
 
@@ -281,11 +315,15 @@ class _ImageTaskSection(QGroupBox):
     # ── Public API ───────────────────────────────────────────────────────
 
     def apply_settings(self, settings: AppSettings) -> None:
-        """Pre-fill dimensions from AppSettings defaults."""
+        """Pre-fill dimensions and sampling defaults from AppSettings."""
         if self.width_spin:
             self.width_spin.setValue(getattr(settings, "image_default_width", 512))
         if self.height_spin:
             self.height_spin.setValue(getattr(settings, "image_default_height", 512))
+        if self.steps_spin:
+            self.steps_spin.setValue(getattr(settings, "image_default_steps", 20))
+        if self.cfg_spin:
+            self.cfg_spin.setValue(getattr(settings, "image_default_cfg_scale", 7.0))
 
     def set_busy(self, busy: bool) -> None:
         self.generate_btn.setEnabled(not busy)
@@ -323,6 +361,8 @@ class _ImageTaskSection(QGroupBox):
             seed=self.seed_spin.value() if self.seed_spin else -1,
             width=self.width_spin.value() if self.width_spin else 512,
             height=self.height_spin.value() if self.height_spin else 512,
+            steps=self.steps_spin.value() if self.steps_spin else 20,
+            cfg_scale=self.cfg_spin.value() if self.cfg_spin else 7.0,
         )
         self.generate_requested.emit(request)
 
