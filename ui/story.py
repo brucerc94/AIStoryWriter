@@ -1068,7 +1068,10 @@ class CharacterDialog(QDialog):
         form.addRow("Role", self.role_input)
 
         self.desc_input = QTextEdit()
-        self.desc_input.setPlaceholderText("Physical appearance, personality, voice…")
+        self.desc_input.setPlaceholderText(
+            "Only physical description. Include age, overall appearance, and visible traits only. "
+            "Example: 'Age: 28. Tall and slim, dark hair, green eyes, pale skin, sharp features, black coat, scar on the left cheek.'"
+        )
         self.desc_input.setFixedHeight(80)
         form.addRow("Description", self.desc_input)
 

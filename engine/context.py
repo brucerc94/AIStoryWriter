@@ -76,7 +76,7 @@ def _estimate_task_instruction(task: TaskType) -> str:
             "brainstorm ideas, and provide creative suggestions. Be concise and helpful."
         ),
         TaskType.WRITE_SYNOPSIS: (
-            "Write a compelling 2-3 paragraph synopsis for this novel. "
+            "Write a compelling 5-10 paragraph synopsis for this novel. "
             "Cover the main premise, central conflict, and emotional core. "
             "Write only the synopsis text."
         ),
@@ -783,6 +783,14 @@ def build_system_prompt(
     instruction = task_instructions.get(task, "")
     if project.synopsis:
         base += f"\n\nStory Synopsis:\n{project.synopsis}"
+
+    # Include the author's creative direction in synopsis generation so the
+    # initial pitch matches the intended emotional arc, themes, and style.
+    intent_fragment = project.author_intent.to_prompt_fragment()
+    style_fragment = project.writing_style.to_prompt_fragment()
+    creative_direction = "\n".join(part for part in [intent_fragment, style_fragment] if part)
+    if creative_direction:
+        base += f"\n\n## Author's Creative Direction\n{creative_direction}"
 
     if project.characters:
         chars = "\n".join(
