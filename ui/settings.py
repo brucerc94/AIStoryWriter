@@ -317,13 +317,7 @@ class AppSettingsWidget(QWidget):
         )
         gen_form.addRow("Response Language", self.language_input)
 
-        # Max tokens per generation pass — shared by Outline, Write Chapter
-        # (and therefore Write Book, which calls it per chapter), and
-        # Rewrite Chapter. NOT the same as Context Size above: this is how
-        # much reply the app requests in one pass before its continuation
-        # loop kicks in if the model stops early (out of tokens) or the
-        # content isn't finished yet — Context Size is the model's total
-        # window and still caps this from the other side.
+        # Max tokens per generation pass
         self.max_tokens_spin = QSpinBox()
         self.max_tokens_spin.setRange(256, 32000)
         self.max_tokens_spin.setSingleStep(256)
@@ -401,9 +395,14 @@ class AppSettingsWidget(QWidget):
         layout.addWidget(moe_box)
 
         # ── Image Generation ──────────────────────────────────────────────
-        # Extends the existing model-selection system to image generation.
-        # Uses the same patterns as the text-model section above so the
-        # author sees a familiar, consistent interface.
+        # Supports both monolithic checkpoints (SD 1.x, SDXL, …) and
+        # multi-component architectures (Z-Image-Turbo, Flux, Anima, …).
+        #
+        # "Diffusion Model" — the primary file, reused from the previous
+        #   design. For Z-Image-Turbo this is z_image_turbo-Q4_0.gguf.
+        # "Text Encoder"   — NEW. LLM / text encoder for multi-component
+        #   models. For Z-Image: Qwen3-4B-ZImage-Heretic-Genesis-Q8.gguf.
+        # "VAE"            — NEW. Standalone VAE. For Z-Image: ae.safetensors.
         img_box = QGroupBox("Image Generation")
         img_form = QFormLayout(img_box)
         img_form.setSpacing(12)
@@ -413,20 +412,26 @@ class AppSettingsWidget(QWidget):
 
         img_note = QLabel(
             "Configure the local image generation backend. "
-            "The Images tab uses these settings — the story workflow is unaffected."
+            "For monolithic checkpoints (SD 1.x, SDXL…) only set "
+            "\"Diffusion Model\". For multi-component architectures like "
+            "Z-Image-Turbo, also set \"Text Encoder\" and \"VAE\"."
         )
         img_note.setWordWrap(True)
         img_note.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 11px;")
         img_form.addRow(img_note)
 
-        # Image Model path (mirrors the GGUF browse pattern)
+        # ── Diffusion Model (existing field, reused) ──────────────────────
         img_model_row = QHBoxLayout()
         self.image_model_input = QLineEdit()
-        self.image_model_input.setPlaceholderText("Path to diffusion model checkpoint…")
+        self.image_model_input.setPlaceholderText(
+            "Path to diffusion model checkpoint (.gguf or .safetensors)…"
+        )
         self.image_model_input.setToolTip(
-            "Path to the image model used by the Images tab.\n"
-            "For stable-diffusion.cpp this is a .gguf or .safetensors diffusion checkpoint.\n"
-            "Leave blank if you haven't set up an image backend yet."
+            "Primary image model file.\n\n"
+            "• Monolithic checkpoints (SD 1.x, SDXL, …): the full checkpoint file.\n"
+            "• Multi-component (Z-Image-Turbo, Flux, Anima, …): the standalone "
+            "  diffusion model GGUF — e.g. z_image_turbo-Q4_0.gguf.\n\n"
+            "Leave \"Text Encoder\" and \"VAE\" empty for monolithic checkpoints."
         )
         img_model_row.addWidget(self.image_model_input, 1)
 
@@ -434,24 +439,66 @@ class AppSettingsWidget(QWidget):
         browse_img_btn.setFixedWidth(70)
         browse_img_btn.clicked.connect(self._browse_image_model)
         img_model_row.addWidget(browse_img_btn)
-        img_form.addRow("Image Model", img_model_row)
+        img_form.addRow("Diffusion Model", img_model_row)
 
-        # Image Backend selector
+        # ── Text Encoder (NEW) ────────────────────────────────────────────
+        img_enc_row = QHBoxLayout()
+        self.image_text_encoder_input = QLineEdit()
+        self.image_text_encoder_input.setPlaceholderText(
+            "Optional: path to standalone text encoder / LLM (.gguf)…"
+        )
+        self.image_text_encoder_input.setToolTip(
+            "Standalone text encoder / LLM for multi-component architectures.\n\n"
+            "• Z-Image-Turbo: Qwen3-4B-ZImage-Heretic-Genesis-Q8.gguf\n"
+            "• Flux 2: Mistral-Small-3.2-…Q4_K_M.gguf\n"
+            "• Anima / Klein: Qwen3-4B-Instruct-2507-Q4_K_M.gguf\n\n"
+            "Leave empty for monolithic checkpoints (SD 1.x, SDXL, …)."
+        )
+        img_enc_row.addWidget(self.image_text_encoder_input, 1)
+
+        browse_enc_btn = QPushButton("Browse…")
+        browse_enc_btn.setFixedWidth(70)
+        browse_enc_btn.clicked.connect(self._browse_image_text_encoder)
+        img_enc_row.addWidget(browse_enc_btn)
+        img_form.addRow("Text Encoder", img_enc_row)
+
+        # ── VAE (NEW) ─────────────────────────────────────────────────────
+        img_vae_row = QHBoxLayout()
+        self.image_vae_input = QLineEdit()
+        self.image_vae_input.setPlaceholderText(
+            "Optional: path to standalone VAE (.safetensors or .gguf)…"
+        )
+        self.image_vae_input.setToolTip(
+            "Standalone VAE for multi-component architectures.\n\n"
+            "• Z-Image-Turbo: ae.safetensors\n"
+            "• Flux (schnell / dev): ae.safetensors or ae-f16.gguf\n\n"
+            "Leave empty when the VAE is baked into the main checkpoint."
+        )
+        img_vae_row.addWidget(self.image_vae_input, 1)
+
+        browse_vae_btn = QPushButton("Browse…")
+        browse_vae_btn.setFixedWidth(70)
+        browse_vae_btn.clicked.connect(self._browse_image_vae)
+        img_vae_row.addWidget(browse_vae_btn)
+        img_form.addRow("VAE", img_vae_row)
+
+        # ── Image Backend selector ────────────────────────────────────────
         self.image_backend_combo = QComboBox()
-        self.image_backend_combo.addItem("stable-diffusion.cpp", ImageBackend.STABLE_DIFFUSION_CPP.value)
-        # Future backends added here without changing anything else:
-        # self.image_backend_combo.addItem("Flux",       ImageBackend.FLUX.value)
-        # self.image_backend_combo.addItem("Qwen Image", ImageBackend.QWEN_IMAGE.value)
+        self.image_backend_combo.addItem(
+            "stable-diffusion.cpp", ImageBackend.STABLE_DIFFUSION_CPP.value
+        )
         self.image_backend_combo.setToolTip(
             "Which local image generation backend to use.\n"
             "Only stable-diffusion.cpp is available now; more will be added later."
         )
         img_form.addRow("Image Backend", self.image_backend_combo)
 
-        # Output directory
+        # ── Output directory ──────────────────────────────────────────────
         img_out_row = QHBoxLayout()
         self.image_output_dir_input = QLineEdit()
-        self.image_output_dir_input.setPlaceholderText("Where to save generated images (leave blank for default)…")
+        self.image_output_dir_input.setPlaceholderText(
+            "Where to save generated images (leave blank for default)…"
+        )
         img_out_row.addWidget(self.image_output_dir_input, 1)
 
         browse_out_btn = QPushButton("Browse…")
@@ -460,7 +507,7 @@ class AppSettingsWidget(QWidget):
         img_out_row.addWidget(browse_out_btn)
         img_form.addRow("Output Directory", img_out_row)
 
-        # Default dimensions
+        # ── Default dimensions ────────────────────────────────────────────
         dims_row = QHBoxLayout()
         dims_row.setSpacing(12)
 
@@ -491,7 +538,7 @@ class AppSettingsWidget(QWidget):
         dims_row.addStretch()
         img_form.addRow("", dims_row)
 
-        # Steps + CFG
+        # ── Steps + CFG ───────────────────────────────────────────────────
         gen_row = QHBoxLayout()
         gen_row.setSpacing(12)
 
@@ -503,7 +550,10 @@ class AppSettingsWidget(QWidget):
         self.image_steps_spin.setRange(1, 200)
         self.image_steps_spin.setValue(20)
         self.image_steps_spin.setFixedWidth(80)
-        self.image_steps_spin.setToolTip("Number of diffusion sampling steps. More = higher quality, slower.")
+        self.image_steps_spin.setToolTip(
+            "Number of diffusion sampling steps.\n"
+            "Recommended: 8 for Z-Image-Turbo, 4 for Flux schnell, 20 for SD."
+        )
         gen_row.addWidget(self.image_steps_spin)
 
         cfg_lbl = QLabel("CFG Scale")
@@ -516,7 +566,10 @@ class AppSettingsWidget(QWidget):
         self.image_cfg_spin.setValue(7.0)
         self.image_cfg_spin.setDecimals(1)
         self.image_cfg_spin.setFixedWidth(80)
-        self.image_cfg_spin.setToolTip("Classifier-free guidance scale. Higher = more prompt-faithful but less creative.")
+        self.image_cfg_spin.setToolTip(
+            "Classifier-free guidance scale.\n"
+            "Recommended: 1.0 for Z-Image-Turbo / Flux, 7.0 for SD."
+        )
         gen_row.addWidget(self.image_cfg_spin)
 
         gen_row.addStretch()
@@ -528,6 +581,8 @@ class AppSettingsWidget(QWidget):
         save_btn.setObjectName("accent")
         save_btn.clicked.connect(self._save)
         layout.addWidget(save_btn)
+
+    # ── load / save ───────────────────────────────────────────────────────
 
     def load(self, settings: AppSettings) -> None:
         self._settings = settings
@@ -546,17 +601,25 @@ class AppSettingsWidget(QWidget):
         self.moe_ubatch_spin.setValue(getattr(settings, "moe_n_ubatch", 1024))
         # Image settings
         self.image_model_input.setText(getattr(settings, "image_model_path", ""))
+        self.image_text_encoder_input.setText(
+            getattr(settings, "image_text_encoder_path", "")
+        )
+        self.image_vae_input.setText(getattr(settings, "image_vae_path", ""))
         self.image_output_dir_input.setText(getattr(settings, "image_output_directory", ""))
         self.image_width_spin.setValue(getattr(settings, "image_default_width", 512))
         self.image_height_spin.setValue(getattr(settings, "image_default_height", 512))
         self.image_steps_spin.setValue(getattr(settings, "image_default_steps", 20))
         self.image_cfg_spin.setValue(getattr(settings, "image_default_cfg_scale", 7.0))
         # Backend combo
-        backend_val = getattr(settings, "image_backend", ImageBackend.STABLE_DIFFUSION_CPP.value)
+        backend_val = getattr(
+            settings, "image_backend", ImageBackend.STABLE_DIFFUSION_CPP.value
+        )
         for i in range(self.image_backend_combo.count()):
             if self.image_backend_combo.itemData(i) == backend_val:
                 self.image_backend_combo.setCurrentIndex(i)
                 break
+
+    # ── browse helpers ────────────────────────────────────────────────────
 
     def _browse_models_dir(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "Select Models Directory")
@@ -566,17 +629,39 @@ class AppSettingsWidget(QWidget):
     def _browse_image_model(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Select Image Model",
+            "Select Diffusion Model",
             "",
             "Model Files (*.gguf *.safetensors *.ckpt *.bin);;All Files (*)",
         )
         if path:
             self.image_model_input.setText(path)
 
+    def _browse_image_text_encoder(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Text Encoder / LLM",
+            "",
+            "GGUF Models (*.gguf);;All Files (*)",
+        )
+        if path:
+            self.image_text_encoder_input.setText(path)
+
+    def _browse_image_vae(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select VAE",
+            "",
+            "Model Files (*.safetensors *.gguf *.bin);;All Files (*)",
+        )
+        if path:
+            self.image_vae_input.setText(path)
+
     def _browse_image_output_dir(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "Select Image Output Directory")
         if d:
             self.image_output_dir_input.setText(d)
+
+    # ── _save ─────────────────────────────────────────────────────────────
 
     def _save(self) -> None:
         if self._settings is None:
@@ -596,8 +681,17 @@ class AppSettingsWidget(QWidget):
         self._settings.moe_n_ubatch = self.moe_ubatch_spin.value()
         # Image settings
         self._settings.image_model_path = self.image_model_input.text().strip()
-        self._settings.image_backend = self.image_backend_combo.currentData() or ImageBackend.STABLE_DIFFUSION_CPP.value
-        self._settings.image_output_directory = self.image_output_dir_input.text().strip()
+        self._settings.image_text_encoder_path = (
+            self.image_text_encoder_input.text().strip()
+        )
+        self._settings.image_vae_path = self.image_vae_input.text().strip()
+        self._settings.image_backend = (
+            self.image_backend_combo.currentData()
+            or ImageBackend.STABLE_DIFFUSION_CPP.value
+        )
+        self._settings.image_output_directory = (
+            self.image_output_dir_input.text().strip()
+        )
         self._settings.image_default_width = self.image_width_spin.value()
         self._settings.image_default_height = self.image_height_spin.value()
         self._settings.image_default_steps = self.image_steps_spin.value()
@@ -698,7 +792,9 @@ class ModelsPanel(QWidget):
         self._available_models = models
 
         if models_dir:
-            self.dir_label.setText(f"Directory: {models_dir} ({len(models)} model{'s' if len(models) != 1 else ''} found)")
+            self.dir_label.setText(
+                f"Directory: {models_dir} ({len(models)} model{'s' if len(models) != 1 else ''} found)"
+            )
         else:
             self.dir_label.setText("No models directory set. Configure in Settings.")
 

@@ -124,6 +124,8 @@ class ImageWorkflowWorker(QObject):
         try:
             engine.load_model(
                 model_path,
+                text_encoder_path=self._text_encoder_path(),
+                vae_path=self._vae_path(),
                 progress_callback=lambda msg: self.model_loading.emit(msg),
             )
         except RuntimeError as e:
@@ -164,6 +166,16 @@ class ImageWorkflowWorker(QObject):
     def _model_path(self) -> str:
         if self.settings:
             return getattr(self.settings, "image_model_path", "") or ""
+        return ""
+
+    def _text_encoder_path(self) -> str:
+        if self.settings:
+            return getattr(self.settings, "image_text_encoder_path", "") or ""
+        return ""
+
+    def _vae_path(self) -> str:
+        if self.settings:
+            return getattr(self.settings, "image_vae_path", "") or ""
         return ""
 
     def _backend(self) -> ImageBackend:

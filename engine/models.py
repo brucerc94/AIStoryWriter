@@ -625,9 +625,21 @@ class AppSettings:
     # pipeline above. The image engine reads them; the story workflow ignores
     # them entirely.
 
-    # Path to the image model (diffusion checkpoint / GGUF diffusion model).
-    # Shown and edited in Settings under "Image Model".
+    # Path to the diffusion model (standalone diffusion checkpoint / GGUF).
+    # For Z-Image-Turbo: z_image_turbo-Q4_0.gguf
+    # For monolithic checkpoints (SD 1.x, SDXL, …): the full model file.
     image_model_path: str = ""
+
+    # Optional: path to a standalone text encoder / LLM used by the image
+    # model. Required by multi-component architectures like Z-Image-Turbo
+    # (Qwen3-4B-ZImage-Heretic-Genesis-Q8.gguf) and Flux 2
+    # (Mistral-Small-3.2). Leave empty for monolithic checkpoints.
+    image_text_encoder_path: str = ""
+
+    # Optional: path to a standalone VAE. Required by multi-component
+    # architectures (Z-Image-Turbo: ae.safetensors, Flux: ae.safetensors).
+    # Leave empty when the VAE is baked into the main checkpoint.
+    image_vae_path: str = ""
 
     # Which backend to use for image generation.
     image_backend: str = ImageBackend.STABLE_DIFFUSION_CPP.value
@@ -665,6 +677,8 @@ class AppSettings:
             "moe_n_ubatch": self.moe_n_ubatch,
             # Image generation
             "image_model_path": self.image_model_path,
+            "image_text_encoder_path": self.image_text_encoder_path,
+            "image_vae_path": self.image_vae_path,
             "image_backend": self.image_backend,
             "image_output_directory": self.image_output_directory,
             "image_default_width": self.image_default_width,
