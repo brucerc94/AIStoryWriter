@@ -95,7 +95,10 @@ def _estimate_task_instruction(task: TaskType) -> str:
             "If the user's request specifies an exact number of chapters, "
             "produce precisely that many, numbered sequentially starting at 1 "
             "— do not stop early or pad with extra chapters. If no number is "
-            "given, use enough chapters to tell the full story."
+            "given, use enough chapters to tell the full story. "
+            "When you mention or generate characters, their description must stay purely visual: "
+            "age, overall appearance, visible physical traits, notable scars/features, and clothing/style. "
+            "Do not include personality, backstory, secrets, memory, or motivations in the description."
         ),
         TaskType.REVIEW_OUTLINE: (
             "Review the provided story outline. Analyze it for:\n"
@@ -717,7 +720,10 @@ def build_system_prompt(
             "Format each chapter as:\n"
             "## Chapter N: Title\n"
             "Summary text.\n\n"
-            "Write a complete outline with enough chapters to tell the full story."
+            "Write a complete outline with enough chapters to tell the full story. "
+            "When you mention or generate characters, their description must stay purely visual: "
+            "age, overall appearance, visible physical traits, notable scars/features, and clothing/style. "
+            "Do not include personality, backstory, secrets, memory, or motivations in the description."
         ),
         TaskType.REVIEW_OUTLINE: (
             "Review the provided story outline. Analyze it for:\n"

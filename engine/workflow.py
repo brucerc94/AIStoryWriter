@@ -434,7 +434,10 @@ class WorkflowWorker(QObject):
                 f"description text should be translated):\n"
                 '  "name": the character\'s name\n'
                 '  "role": one of "protagonist", "antagonist", "supporting", "minor"\n'
-                f'  "description": one concise sentence.{language_note}\n\n'
+                '  "description": one concise sentence describing only visible appearance and physical traits. '
+                'It must include age, ethnicity or race, overall appearance, notable physical features, scars or facial traits, and clothing/style if relevant. '
+                'Do not include personality, backstory, memory, motivations, secrets, or inner emotions. '
+                f"{language_note}\n\n"
                 f"Characters already tracked (skip these unless the text reveals "
                 f"something significant enough to be worth its own new entry): {existing_names}\n\n"
                 f"Text:\n{chunk}\n\n"

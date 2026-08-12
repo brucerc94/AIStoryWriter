@@ -209,7 +209,7 @@ def generate_character_image(project_id: str, character, settings: Optional[AppS
     prompt = (
         f"Portrait of {character.name}. "
         f"Role: {character.role}. "
-        "Focus only on physical appearance, age, visible traits, and clothing. "
+        "Focus only on physical appearance, age, ethnicity or race, visible traits, and clothing. "
         f"Description: {character.description}. "
         "Do not include personality, backstory, or internal traits."
     )
