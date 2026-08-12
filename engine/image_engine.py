@@ -366,7 +366,13 @@ class ImageEngine(ABC):
         more expected tensors in them (see module docstring).
         """
 
-    @abstractmethod
+    def load_loras(self, loras: list) -> None:
+        """
+        Register active LoRA adapters. Base implementation is a no-op so that
+        backends that don't support LoRAs don't need to override this method.
+        StableDiffusionCppEngine overrides it with a full implementation.
+        """
+
     def generate(
         self,
         request: ImageGenerationRequest,
@@ -432,6 +438,40 @@ class StableDiffusionCppEngine(ImageEngine):
         self._text_encoder_path: str = ""
         self._vae_path: str = ""
         self._is_multi_component: bool = False
+        self._loras: list[dict] = []
+        self._loaded_lora_dir: str = ""
+
+    # ── LoRA support ───────────────────────────────────────────────────
+
+    def load_loras(self, loras: list) -> None:
+        """Register active LoRA adapters before calling load_model()."""
+        self._loras = [
+            e for e in (loras or [])
+            if e.get("enabled", True) and e.get("path", "").strip()
+        ]
+
+    def _lora_prompt_tags(self, base_prompt: str) -> str:
+        """Append <lora:stem:weight> tags for every active LoRA."""
+        if not self._loras:
+            return base_prompt
+        tags = []
+        for entry in self._loras:
+            path = entry.get("path", "").strip()
+            if not path:
+                continue
+            stem = os.path.splitext(os.path.basename(path))[0]
+            weight = float(entry.get("weight", 0.8))
+            tags.append(f"<lora:{stem}:{weight:.2f}>")
+        if not tags:
+            return base_prompt
+        return base_prompt.rstrip() + " " + " ".join(tags)
+
+    def _lora_model_dir(self) -> str:
+        """Directory of the first active LoRA, passed as lora_model_dir= to StableDiffusion."""
+        if not self._loras:
+            return ""
+        first_path = self._loras[0].get("path", "").strip()
+        return os.path.dirname(first_path) if first_path else ""
 
     # ── Properties ────────────────────────────────────────────────────
 
@@ -504,6 +544,7 @@ class StableDiffusionCppEngine(ImageEngine):
             and self._model_path == model_path
             and self._text_encoder_path == text_encoder_path
             and self._vae_path == vae_path
+            and self._lora_model_dir() == getattr(self, "_loaded_lora_dir", "")
         )
 
         if same_model:
@@ -562,6 +603,14 @@ class StableDiffusionCppEngine(ImageEngine):
             kwargs["model_path"] = model_path
             if vae_path:
                 kwargs["vae_path"] = vae_path
+
+        # If the caller has already registered LoRAs via load_loras(), tell
+        # stable-diffusion.cpp where to find the .safetensors files so the
+        # <lora:name:weight> tags injected at generation time resolve correctly.
+        lora_dir = self._lora_model_dir()
+        if lora_dir and os.path.isdir(lora_dir):
+            kwargs["lora_model_dir"] = lora_dir
+            logger.info("[sd_cpp] lora_model_dir=%s", lora_dir)
 
         basename = os.path.basename(model_path)
         if progress_callback:
@@ -624,6 +673,7 @@ class StableDiffusionCppEngine(ImageEngine):
         self._model_path = model_path
         self._text_encoder_path = text_encoder_path
         self._vae_path = vae_path
+        self._loaded_lora_dir = kwargs.get("lora_model_dir", "")
 
         logger.info("[sd_cpp] Model loaded successfully.")
 
@@ -679,9 +729,18 @@ class StableDiffusionCppEngine(ImageEngine):
             if progress_callback:
                 progress_callback(step, steps)
 
+        # Inject <lora:name:weight> tags for any active LoRA adapters.
+        effective_prompt = self._lora_prompt_tags(request.prompt)
+        if effective_prompt != request.prompt:
+            logger.info(
+                "[sd_cpp] LoRA tags injected — original: %.60r → effective: %.80r",
+                request.prompt,
+                effective_prompt,
+            )
+
         try:
             images = self._sd.generate_image(
-                prompt=request.prompt,
+                prompt=effective_prompt,
                 negative_prompt=request.negative_prompt or "",
                 width=request.width,
                 height=request.height,

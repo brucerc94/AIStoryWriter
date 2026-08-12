@@ -666,6 +666,16 @@ class AppSettings:
     # Default CFG scale.
     image_default_cfg_scale: float = 7.0
 
+    # LoRA models for image generation.
+    # Each entry is a dict: {"path": str, "weight": float, "enabled": bool}
+    # weight range: -2.0 to 2.0, typical values 0.5 – 1.0
+    # enabled: False means the entry is stored but skipped during generation.
+    image_loras: list = None  # type: list[dict]
+
+    def __post_init__(self):
+        if self.image_loras is None:
+            self.image_loras = []
+
     def to_dict(self) -> dict:
         return {
             "models_directory": self.models_directory,
@@ -694,6 +704,7 @@ class AppSettings:
             "image_default_height": self.image_default_height,
             "image_default_steps": self.image_default_steps,
             "image_default_cfg_scale": self.image_default_cfg_scale,
+            "image_loras": self.image_loras if self.image_loras is not None else [],
         }
 
     @classmethod

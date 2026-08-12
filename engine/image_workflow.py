@@ -119,6 +119,11 @@ class ImageWorkflowWorker(QObject):
             )
             return
 
+        # Register active LoRAs BEFORE load_model so lora_model_dir is
+        # included in the constructor kwargs (stable-diffusion.cpp needs
+        # it at construction time, not at generation time).
+        engine.load_loras(self._loras())
+
         try:
             engine.load_model(
                 self._model_path(),
@@ -174,6 +179,11 @@ class ImageWorkflowWorker(QObject):
             return getattr(self.settings, "image_vae_path", "") or ""
         return ""
 
+    def _loras(self) -> list:
+        if self.settings:
+            return getattr(self.settings, "image_loras", None) or []
+        return []
+
     def _backend(self) -> ImageBackend:
         if self.settings:
             raw = getattr(self.settings, "image_backend", "")
@@ -207,11 +217,9 @@ def _default_output_directory() -> str:
 def generate_character_image(project_id: str, character, settings: Optional[AppSettings] = None) -> tuple[bool, Optional[dict], str]:
     """Generate a character image and persist it through the existing encrypted storage layer."""
     prompt = (
-        f"Portrait of {character.name}. "
-        f"Role: {character.role}. "
-        "Focus only on physical appearance, age, ethnicity or race, visible traits, and clothing. "
-        f"Description: {character.description}. "
-        "Do not include personality, backstory, or internal traits."
+        "Character portrait. "
+        f"{character.description}. "
+        "Focus only on physical appearance, age, ethnicity or race, visible traits, clothing, and silhouette. "
     )
     request = ImageGenerationRequest(
         task_type=ImageTaskType.CHARACTER_PORTRAIT,
@@ -230,6 +238,10 @@ def generate_character_image(project_id: str, character, settings: Optional[AppS
     engine = get_image_engine(_backend(settings))
     if not engine.is_available:
         return False, None, f"The {engine.backend_name} library is not installed."
+
+    # Apply any configured LoRAs before loading so lora_model_dir is set.
+    loras = getattr(settings, "image_loras", None) or [] if settings else []
+    engine.load_loras(loras)
 
     try:
         engine.load_model(

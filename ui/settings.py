@@ -13,6 +13,7 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -29,6 +31,8 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -575,6 +579,36 @@ class AppSettingsWidget(QWidget):
         gen_row.addStretch()
         img_form.addRow("", gen_row)
 
+        # ── LoRA Models ───────────────────────────────────────────────────
+        lora_note = QLabel(
+            "LoRA adapters are applied at generation time. "
+            "Each LoRA must be a .safetensors file compatible with the selected diffusion model. "
+            "Weight controls adapter strength (typical range 0.5 – 1.0, negative values invert). "
+            "Use the Enable checkbox to toggle a LoRA without removing it."
+        )
+        lora_note.setWordWrap(True)
+        lora_note.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 11px;")
+        img_form.addRow(lora_note)
+
+        # Table: columns = Enabled | Path | Weight | Remove
+        self.lora_table = QTableWidget(0, 4)
+        self.lora_table.setHorizontalHeaderLabels(["On", "LoRA Path", "Weight", ""])
+        self.lora_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.lora_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.lora_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.lora_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.lora_table.verticalHeader().setVisible(False)
+        self.lora_table.setSelectionMode(QAbstractItemView.NoSelection)
+        self.lora_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.lora_table.setMinimumHeight(100)
+        self.lora_table.setMaximumHeight(220)
+        img_form.addRow("LoRA Adapters", self.lora_table)
+
+        add_lora_btn = QPushButton("＋  Add LoRA…")
+        add_lora_btn.setObjectName("subtle")
+        add_lora_btn.clicked.connect(self._add_lora)
+        img_form.addRow("", add_lora_btn)
+
         layout.addWidget(img_box)
 
         save_btn = QPushButton("Save App Settings")
@@ -610,6 +644,8 @@ class AppSettingsWidget(QWidget):
         self.image_height_spin.setValue(getattr(settings, "image_default_height", 512))
         self.image_steps_spin.setValue(getattr(settings, "image_default_steps", 20))
         self.image_cfg_spin.setValue(getattr(settings, "image_default_cfg_scale", 7.0))
+        # LoRAs
+        self._load_loras(getattr(settings, "image_loras", None) or [])
         # Backend combo
         backend_val = getattr(
             settings, "image_backend", ImageBackend.STABLE_DIFFUSION_CPP.value
@@ -661,6 +697,114 @@ class AppSettingsWidget(QWidget):
         if d:
             self.image_output_dir_input.setText(d)
 
+    # ── LoRA helpers ──────────────────────────────────────────────────────
+
+    def _add_lora(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select LoRA Adapter",
+            "",
+            "LoRA Files (*.safetensors *.gguf *.bin);;All Files (*)",
+        )
+        if path:
+            self._insert_lora_row(path, weight=0.8, enabled=True)
+
+    def _insert_lora_row(self, path: str, weight: float = 0.8, enabled: bool = True) -> None:
+        row = self.lora_table.rowCount()
+        self.lora_table.insertRow(row)
+
+        # Col 0 — enable checkbox (centred)
+        chk = QCheckBox()
+        chk.setChecked(enabled)
+        chk_container = QWidget()
+        chk_layout = QHBoxLayout(chk_container)
+        chk_layout.addWidget(chk)
+        chk_layout.setAlignment(Qt.AlignCenter)
+        chk_layout.setContentsMargins(0, 0, 0, 0)
+        self.lora_table.setCellWidget(row, 0, chk_container)
+
+        # Col 1 — path (read-only label with tooltip)
+        path_item = QTableWidgetItem(path)
+        path_item.setToolTip(path)
+        self.lora_table.setItem(row, 1, path_item)
+
+        # Col 2 — weight spinbox
+        weight_spin = QDoubleSpinBox()
+        weight_spin.setRange(-2.0, 2.0)
+        weight_spin.setSingleStep(0.05)
+        weight_spin.setDecimals(2)
+        weight_spin.setValue(weight)
+        weight_spin.setFixedWidth(80)
+        weight_spin.setToolTip(
+            "Adapter strength.\n"
+            "Typical values: 0.5 – 1.0 (positive) or -0.5 – -1.0 (negative/inverse)."
+        )
+        self.lora_table.setCellWidget(row, 2, weight_spin)
+
+        # Col 3 — remove button
+        rm_btn = QPushButton("✕")
+        rm_btn.setObjectName("subtle")
+        rm_btn.setFixedWidth(28)
+        rm_btn.setToolTip("Remove this LoRA")
+        rm_btn.clicked.connect(lambda _, r=row: self._remove_lora_row(r))
+        self.lora_table.setCellWidget(row, 3, rm_btn)
+
+        self.lora_table.resizeRowsToContents()
+
+    def _remove_lora_row(self, row: int) -> None:
+        # Find the actual current row of the button (row index shifts after deletions)
+        btn = self.sender()
+        if btn is None:
+            return
+        for r in range(self.lora_table.rowCount()):
+            widget = self.lora_table.cellWidget(r, 3)
+            if widget is btn:
+                self.lora_table.removeRow(r)
+                # Re-wire remaining remove buttons with updated row indices
+                for new_r in range(self.lora_table.rowCount()):
+                    new_btn = self.lora_table.cellWidget(new_r, 3)
+                    if new_btn:
+                        try:
+                            new_btn.clicked.disconnect()
+                        except RuntimeError:
+                            pass
+                        new_btn.clicked.connect(lambda _, rr=new_r: self._remove_lora_row(rr))
+                return
+
+    def _collect_loras(self) -> list:
+        loras = []
+        for r in range(self.lora_table.rowCount()):
+            path_item = self.lora_table.item(r, 1)
+            if path_item is None:
+                continue
+            path = path_item.text().strip()
+            if not path:
+                continue
+
+            chk_container = self.lora_table.cellWidget(r, 0)
+            enabled = True
+            if chk_container:
+                chk = chk_container.findChild(QCheckBox)
+                if chk:
+                    enabled = chk.isChecked()
+
+            weight_spin = self.lora_table.cellWidget(r, 2)
+            weight = 0.8
+            if weight_spin and isinstance(weight_spin, QDoubleSpinBox):
+                weight = weight_spin.value()
+
+            loras.append({"path": path, "weight": weight, "enabled": enabled})
+        return loras
+
+    def _load_loras(self, loras: list) -> None:
+        self.lora_table.setRowCount(0)
+        for entry in (loras or []):
+            self._insert_lora_row(
+                entry.get("path", ""),
+                weight=float(entry.get("weight", 0.8)),
+                enabled=bool(entry.get("enabled", True)),
+            )
+
     # ── _save ─────────────────────────────────────────────────────────────
 
     def _save(self) -> None:
@@ -696,6 +840,7 @@ class AppSettingsWidget(QWidget):
         self._settings.image_default_height = self.image_height_spin.value()
         self._settings.image_default_steps = self.image_steps_spin.value()
         self._settings.image_default_cfg_scale = self.image_cfg_spin.value()
+        self._settings.image_loras = self._collect_loras()
         storage.save_settings(self._settings)
         self.settings_changed.emit(self._settings)
 
