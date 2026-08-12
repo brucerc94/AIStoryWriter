@@ -749,14 +749,16 @@ class StableDiffusionCppEngine(ImageEngine):
             if progress_callback:
                 progress_callback(step, steps)
 
-        # Inject <lora:name:weight> tags for any active LoRA adapters.
+        # Inject trigger words + <lora:name:weight> tags for active LoRA adapters.
         effective_prompt = self._lora_prompt_tags(request.prompt)
         if effective_prompt != request.prompt:
-            logger.info(
-                "[sd_cpp] LoRA tags injected — original: %.60r → effective: %.80r",
-                request.prompt,
-                effective_prompt,
-            )
+            logger.info("[sd_cpp] LoRA prompt — original : %s", request.prompt)
+            logger.info("[sd_cpp] LoRA prompt — effective: %s", effective_prompt)
+            for i, entry in enumerate(self._loras):
+                logger.info(
+                    "[sd_cpp] LoRA[%d] path=%s  weight=%.2f  trigger=%r",
+                    i, entry.get("path", ""), entry.get("weight", 0.0), entry.get("trigger", ""),
+                )
 
         try:
             images = self._sd.generate_image(

@@ -146,13 +146,17 @@ def _estimate_task_instruction(task: TaskType) -> str:
             "Be concise but complete. Capture all story decisions and context."
         ),
         TaskType.GENERATE_WORLD: (
-            "Write detailed worldbuilding notes for this novel. Cover whichever "
-            "of these are relevant to the story: geography and key locations, "
-            "time period and technology level, magic or other special systems "
-            "and their rules, political/social structures, culture and customs, "
-            "and history relevant to the plot. Format as Markdown with headings. "
-            "If world notes already exist below, add to and expand them rather "
-            "than contradicting or repeating them."
+            "Write concise worldbuilding reference notes for this novel. "
+            "Use short Markdown bullet lists under these headings (only include "
+            "headings that apply to the story): Geography & Key Locations, "
+            "Time Period & Technology, Magic / Power Systems (rules and limits only), "
+            "Political & Social Structure, Culture & Customs, "
+            "History Relevant to the Plot. "
+            "Each bullet must be ONE sentence — a fact, rule, or name. "
+            "No prose paragraphs, no scene descriptions, no character arcs. "
+            "Aim for 15–25 bullets total. "
+            "If world notes already exist below, only add bullets that are "
+            "genuinely new — do not repeat or rephrase existing entries."
         ),
     }
     return task_instructions.get(task, "")
@@ -266,7 +270,9 @@ def _compact_sections(
         "Synopsis": max(120, max_context_tokens // 20),
         "Characters": max(180, max_context_tokens // 14),
         "Outline": max(350, max_context_tokens // 8),
-        "World": max(120, max_context_tokens // 20),
+        # World & Setting: capped lower than other sections because the model
+        # only needs key rules/locations at chapter-write time, not the full wiki.
+        "World": max(80, max_context_tokens // 32),
         "Memory": max(150, max_context_tokens // 16),
         "Chat Summary": max(100, max_context_tokens // 24),
         # Creative Direction is deliberately capped low: it should be a
@@ -808,7 +814,24 @@ def build_system_prompt(
         base += f"\n\n## Outline\n{project.outline}"
 
     if project.world:
-        base += f"\n\n## World & Setting\n{project.world}"
+        world_text = project.world.strip()
+        # For chapter writing the model already has the outline (which embeds
+        # the chapter goal) and Story Memory (current state). Sending the full
+        # world notes on top of that burns context that is better spent on
+        # the actual chapter content. We send a short excerpt — the first
+        # ~400 tokens worth — so key facts are present without crowding the
+        # context. For other tasks (outline, synopsis, world gen itself)
+        # we send more but still cap at ~800 tokens to avoid runaway size.
+        if task == TaskType.WRITE_CHAPTER:
+            world_cap = 400   # ~300 words — enough for rules/locations at a glance
+        else:
+            world_cap = 800   # ~600 words — more context for structural tasks
+
+        # Simple character-based cap (1 token ≈ 4 chars)
+        char_cap = world_cap * 4
+        if len(world_text) > char_cap:
+            world_text = world_text[:char_cap].rsplit("\n", 1)[0] + "\n…(truncated)"
+        base += f"\n\n## World & Setting\n{world_text}"
 
     prompt = f"{base}\n\n{instruction}".strip()
 

@@ -538,8 +538,23 @@ class WorkflowWorker(QObject):
         history, culture, technology) not already covered in project.world,
         and append them — mirroring how Story Memory already accumulates,
         rather than trying to structurally dedupe free-form world text.
+        After the model writes an outline or chapter, quietly ask it to pull
+        out ONLY hard, stable facts about the WORLD ITSELF — not plot events,
+        not character feelings, not what happened in the scene.
+        Do NOT call this on synopsis text (synopsis is plot summary, not worldbuilding).
+        World & Setting should only contain:
+          ✓ Named places and their physical/geographical properties
+          ✓ How magic / technology / power systems work (rules, limits, costs)
+          ✓ Historical events that happened BEFORE the story begins
+          ✓ Cultural norms, factions, social structures, economies
+          ✓ Climate, terrain, cosmology, languages
 
-        No chat bubble, but does emit step_started for status-bar feedback.
+        It must NEVER contain:
+          ✗ Events that happen during the story (those belong in Story Memory)
+          ✗ Character thoughts, feelings, motivations, secrets
+          ✗ Dialogue or scene descriptions
+          ✗ Plot outcomes or discoveries made by characters
+          ✗ Relationship changes between characters
         """
         if not source_text or not source_text.strip():
             return
@@ -550,8 +565,7 @@ class WorkflowWorker(QObject):
         self.step_started.emit("Checking for new world details...")
         language = self._response_language()
         language_note = f" Write it in {language}." if language else ""
-        # Process text in 6000-char chunks so long outlines/chapters don't
-        # get silently truncated and miss world details from later sections.
+
         CHUNK_SIZE = 6000
         text_chunks = [
             source_text[i:i + CHUNK_SIZE]
@@ -560,25 +574,42 @@ class WorkflowWorker(QObject):
         for chunk_idx, chunk in enumerate(text_chunks):
             if self._cancelled:
                 break
-            # Always use the latest accumulated world notes as the baseline
-            # so each chunk can see what previous chunks already added.
             existing_world = self.project.world.strip() or "(nothing recorded yet)"
             prompt = (
-                "Below are the story's existing world-building notes, followed by "
-                "newly written story text. Extract ONLY genuinely NEW world-building "
-                "details from the new text — locations, rules/systems, history, "
-                "culture, technology — that are NOT already covered in the existing "
-                "notes. Do not repeat anything already listed. Format as a short "
-                f"Markdown bullet list.{language_note} If there is nothing new, "
-                "respond with exactly: NO_NEW_WORLD_DETAILS\n\n"
-                f"## Existing World Notes\n{existing_world}\n\n"
-                f"## New Text\n{chunk}\n\n"
-                "New details (bullet list, or NO_NEW_WORLD_DETAILS):"
+                "You are a strict worldbuilding archivist. Your only job is to extract "
+                "PERMANENT, STABLE facts about the WORLD ITSELF from the text below — "
+                "facts that would still be true even if the story's characters had never "
+                "been born.\n\n"
+                "INCLUDE only:\n"
+                "- Named locations with physical/geographical properties "
+                "(e.g. 'The Ashwood — a petrified forest north of the capital')\n"
+                "- How magic, technology, or power systems work — their rules, "
+                "limits, costs (e.g. 'Blood magic requires a living sacrifice each casting')\n"
+                "- Historical events that occurred BEFORE the story begins "
+                "(e.g. 'The Sundering War ended 300 years ago')\n"
+                "- Cultural norms, factions, economies, social hierarchies\n"
+                "- Climate, terrain, cosmology, calendar, languages\n\n"
+                "EXCLUDE — respond NO_NEW_WORLD_DETAILS if the text only contains:\n"
+                "- Anything that HAPPENS during the story (plot events, discoveries, "
+                "battles, decisions) — those belong in Story Memory, not here\n"
+                "- Character feelings, thoughts, motivations, secrets, dialogue\n"
+                "- Scene descriptions or action sequences\n"
+                "- Relationship changes between characters\n"
+                "- Information already in the existing notes below\n\n"
+                f"Existing World Notes (do not repeat these):\n{existing_world}\n\n"
+                f"New text to scan:\n{chunk}\n\n"
+                f"Respond with a short Markdown bullet list of NEW world facts only, "
+                f"or exactly: NO_NEW_WORLD_DETAILS{language_note}"
             )
             messages = [
                 {
                     "role": "system",
-                    "content": "You extract new worldbuilding details as a concise Markdown bullet list.",
+                    "content": (
+                        "You are a worldbuilding archivist. You extract ONLY permanent, "
+                        "stable facts about the world itself — geography, systems, history, "
+                        "culture. You NEVER include plot events, character emotions, "
+                        "dialogue, or anything that happens during the story."
+                    ),
                 },
                 {"role": "user", "content": prompt},
             ]
@@ -587,10 +618,10 @@ class WorkflowWorker(QObject):
             try:
                 raw = engine.generate(
                     messages=messages,
-                    max_tokens=600,
-                    temperature=0.3,
+                    max_tokens=250,
+                    temperature=0.1,
                     stream=True,
-                    stream_callback=lambda _t: None,  # silent — no chat UI noise
+                    stream_callback=lambda _t: None,
                     cancel_check=lambda: self._cancelled,
                 )
             except Exception as e:
@@ -599,6 +630,27 @@ class WorkflowWorker(QObject):
 
             cleaned = raw.strip()
             if not cleaned or "NO_NEW_WORLD_DETAILS" in cleaned.upper():
+                continue
+
+            # Extra guard: if the model returned a list that looks like plot events
+            # (sentences with past-tense verbs acting on characters) drop it.
+            # This catches models that ignore the EXCLUDE instruction.
+            plot_indicators = (
+                "discovers", "decides", "realizes", "learns", "escapes",
+                "fights", "kills", "defeats", "betrays", "reveals", "arrives",
+                "descubre", "decide", "aprende", "escapa", "lucha", "mata",
+                "derrota", "traiciona", "revela", "llega",
+            )
+            lines = cleaned.split("\n")
+            safe_lines = [
+                ln for ln in lines
+                if not any(ind in ln.lower() for ind in plot_indicators)
+            ]
+            cleaned = "\n".join(safe_lines).strip()
+            if not cleaned:
+                logger.info(
+                    f"[world_info] chunk {chunk_idx + 1}: all lines looked like plot events — discarded."
+                )
                 continue
 
             sep = "\n\n" if self.project.world.strip() else ""
@@ -752,7 +804,7 @@ class WorkflowWorker(QObject):
             self.project.chat_messages.append(assistant_msg)
 
             self._extract_and_merge_characters(result)
-            self._extract_and_merge_world_info(result)
+            self._extract_and_merge_world_info(result, source_type="chapter")
             storage.save_project(self.project)
             self.step_finished.emit(f"Continued Chapter {chapter_num}", result)
 
@@ -781,7 +833,10 @@ class WorkflowWorker(QObject):
         if result:
             self.project.synopsis = result
             self._extract_and_merge_characters(result)
-            self._extract_and_merge_world_info(result)
+            # Deliberately NOT calling _extract_and_merge_world_info here:
+            # a synopsis is a plot summary, not a worldbuilding document.
+            # Running world extraction on it produces false positives (plot
+            # events, character feelings) that pollute World & Setting.
             storage.save_project(self.project)
             self.step_finished.emit("Synopsis", result)
 
@@ -889,7 +944,7 @@ class WorkflowWorker(QObject):
         if outline_text:
             self.project.outline = outline_text
             self._extract_and_merge_characters(outline_text)
-            self._extract_and_merge_world_info(outline_text)
+            self._extract_and_merge_world_info(outline_text, source_type="outline")
 
             # Final sanity check — covers the (rare) case where even
             # MAX_OUTLINE_CONTINUATIONS passes weren't enough, or the model
@@ -1018,7 +1073,7 @@ class WorkflowWorker(QObject):
             )
         )
         result = self._run_inference(
-            TaskType.GENERATE_WORLD, prompt, add_to_chat=True, max_tokens=2000
+            TaskType.GENERATE_WORLD, prompt, add_to_chat=True, max_tokens=800
         )
         if result:
             # Append rather than overwrite — world notes accumulate over time,
@@ -1369,7 +1424,7 @@ class WorkflowWorker(QObject):
                 self.project.chapters.append(ch)
 
             self._extract_and_merge_characters(chapter_text)
-            self._extract_and_merge_world_info(chapter_text)
+            self._extract_and_merge_world_info(chapter_text, source_type="chapter")
             storage.save_project(self.project)
             self.step_finished.emit(f"Chapter {chapter_num}", chapter_text)
 
@@ -1589,90 +1644,77 @@ class WorkflowWorker(QObject):
             for c in self.project.characters
         ) or "(none)"
 
-        prompt = f"""
-    You are updating the STORY MEMORY of a novel.
+        prompt = f"""You are a story-continuity editor updating the STORY MEMORY for a novel.
 
-    IMPORTANT:
+Story Memory is a WORKING NOTES document for the WRITER. Its only purpose is to help write the NEXT chapter without contradicting what already happened.
 
-    Story Memory is NOT a wiki.
+The following are stored SEPARATELY — do NOT copy anything from the chapter into these categories:
+- World & Setting already tracks: geography, locations, how magic/tech works, history, culture, factions
+- Characters already tracks: names, roles, physical appearance, personality
 
-    Story Memory is NOT a character database.
+==================================================
+WORLD & SETTING (already tracked — do not repeat)
+==================================================
+{world}
 
-    Story Memory is NOT worldbuilding.
+==================================================
+CHARACTERS (already tracked — do not repeat)
+==================================================
+{characters}
 
-    Those are stored separately.
+==================================================
+CURRENT STORY MEMORY (update this)
+==================================================
+{existing_memory}
 
-    ==================================================
-    WORLD INFORMATION
-    ==================================================
+==================================================
+NEW CHAPTER TO PROCESS
+==================================================
+Chapter {chapter_num}: {chapter.title}
 
-    {world}
+{chapter.content}
 
-    ==================================================
-    CHARACTERS
-    ==================================================
+==================================================
+INSTRUCTIONS
+==================================================
+Rewrite the Story Memory sections below. Keep ONLY what a writer needs to avoid contradictions in the NEXT chapter.
 
-    {characters}
+INCLUDE:
+- Where characters physically are RIGHT NOW at the end of this chapter
+- What is actively happening or about to happen (current crisis, mission, scene)
+- What each main character is trying to do and why (only if it changed this chapter)
+- Relationship shifts that happened in THIS chapter (conflict, alliance, betrayal)
+- Objects, items, or states that changed hands or status
+- Plot threads that were OPENED but not resolved in this chapter
 
-    ==================================================
-    CURRENT STORY MEMORY
-    ==================================================
+EXCLUDE (these belong in World & Setting or Characters, not here):
+- Descriptions of places (geography, architecture) — already in World & Setting
+- How magic or technology works — already in World & Setting
+- Physical appearance of characters — already in Characters
+- Backstory or history — already in World & Setting
+- Anything that was already resolved and no longer affects the next chapter
 
-    {existing_memory}
+OUTPUT FORMAT — use exactly these section headers, leave a section empty rather than filling it with World/Character data:
 
-    ==================================================
-    NEW CHAPTER
-    ==================================================
+# Current Location
+(where the main characters are right now, one line each)
 
-    Chapter {chapter_num}: {chapter.title}
+# Current Situation
+(what is actively happening at the end of this chapter)
 
-    {chapter.content}
+# Active Goals
+(what each main character is trying to achieve RIGHT NOW)
 
-    ==================================================
-    YOUR JOB
-    ==================================================
+# Relationship Changes This Chapter
+(only changes that happened in this chapter)
 
-    Update ONLY the Story Memory.
+# Item / Status Changes
+(objects, abilities, or conditions that changed)
 
-    DO NOT repeat information already contained in:
-    - World
-    - Characters
+# Open Plot Threads
+(unresolved threads from this and previous chapters)
 
-    Do NOT describe:
-    - physical appearance
-    - locations already documented
-    - permanent abilities
-    - lore
-    - history
-    - personality unless it has changed
-
-    Instead keep only information needed to continue writing the next chapter.
-
-    The Story Memory should contain ONLY:
-
-    # Current Location
-
-    # Current Situation
-
-    # Active Goals
-
-    # Important Relationship Changes
-
-    # Inventory / Status Changes
-
-    # Unresolved Plot Threads
-
-    Remove information that is no longer relevant.
-
-    Keep unresolved information from previous chapters.
-
-    Never delete ongoing plot threads.
-
-    Output ONLY the updated Story Memory.
-
-    Do NOT explain your reasoning.
-    Do NOT use markdown code blocks.
-    """
+Output ONLY the updated Story Memory. No explanation. No markdown code fences."""
 
         result = self._run_inference(
             TaskType.UPDATE_MEMORY,
