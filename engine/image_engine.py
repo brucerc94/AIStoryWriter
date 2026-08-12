@@ -451,9 +451,17 @@ class StableDiffusionCppEngine(ImageEngine):
         ]
 
     def _lora_prompt_tags(self, base_prompt: str) -> str:
-        """Append <lora:stem:weight> tags for every active LoRA."""
+        """
+        Build the effective prompt by:
+          1. Prepending any trigger words required by active LoRAs
+             (some models only activate with specific keywords).
+          2. Appending <lora:stem:weight> tags so stable-diffusion.cpp
+             loads and applies the adapter weights at sampling time.
+        """
         if not self._loras:
             return base_prompt
+
+        triggers = []
         tags = []
         for entry in self._loras:
             path = entry.get("path", "").strip()
@@ -462,9 +470,21 @@ class StableDiffusionCppEngine(ImageEngine):
             stem = os.path.splitext(os.path.basename(path))[0]
             weight = float(entry.get("weight", 0.8))
             tags.append(f"<lora:{stem}:{weight:.2f}>")
+
+            trigger = entry.get("trigger", "").strip()
+            if trigger and trigger not in base_prompt:
+                triggers.append(trigger)
+
         if not tags:
             return base_prompt
-        return base_prompt.rstrip() + " " + " ".join(tags)
+
+        # Build: [triggers, ] base_prompt <lora:…> …
+        parts = []
+        if triggers:
+            parts.append(", ".join(triggers))
+        parts.append(base_prompt.strip())
+        prompt = ", ".join(parts) if triggers else base_prompt.strip()
+        return prompt.rstrip() + " " + " ".join(tags)
 
     def _lora_model_dir(self) -> str:
         """Directory of the first active LoRA, passed as lora_model_dir= to StableDiffusion."""

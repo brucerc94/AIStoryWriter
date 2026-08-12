@@ -434,9 +434,12 @@ class WorkflowWorker(QObject):
                 f"description text should be translated):\n"
                 '  "name": the character\'s name\n'
                 '  "role": one of "protagonist", "antagonist", "supporting", "minor"\n'
-                '  "description": one concise sentence describing only visible appearance and physical traits. '
-                'It must include age, ethnicity or race, overall appearance, notable physical features, scars or facial traits, and clothing/style if relevant. '
-                'Do not include personality, backstory, memory, motivations, secrets, or inner emotions. '
+                '  "description": a single, vivid sentence written specifically for image generation, using this exact visual-only structure: '
+                '"Age: X. [ethnicity or race]. [height/build]. [hair color/length/style]. [eye color]. [skin tone]. [facial features]. [notable marks/scars]. [clothing/style]." '
+                'It must include the character\'s age, ethnicity or race, body build, hair, eyes, skin tone, facial structure, distinct marks, and visible clothing/style. '
+                'Do not include personality, backstory, memory, motivations, secrets, or inner emotions.\n'
+                '  "backstory": a short, factual summary of the character\'s history, upbringing, major past events, and personal context.\n'
+                '  "traits": an array of 3-6 short trait labels such as ["loyal", "guarded", "sharp-witted"].\n\n'
                 f"{language_note}\n\n"
                 f"Characters already tracked (skip these unless the text reveals "
                 f"something significant enough to be worth its own new entry): {existing_names}\n\n"
@@ -507,8 +510,22 @@ class WorkflowWorker(QObject):
             if role not in ("protagonist", "antagonist", "supporting", "minor"):
                 role = "supporting"
             description = str(entry.get("description", "")).strip()
+            backstory = str(entry.get("backstory", "") or "").strip()
+            traits_raw = entry.get("traits", [])
+            if isinstance(traits_raw, str):
+                traits = [t.strip() for t in traits_raw.split(",") if t.strip()]
+            elif isinstance(traits_raw, list):
+                traits = [str(t).strip() for t in traits_raw if str(t).strip()]
+            else:
+                traits = []
             self.project.characters.append(
-                Character(name=name, role=role, description=description)
+                Character(
+                    name=name,
+                    role=role,
+                    description=description,
+                    backstory=backstory,
+                    traits=traits,
+                )
             )
             existing_lower.add(name.lower())
             added += 1

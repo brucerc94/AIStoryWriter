@@ -591,12 +591,13 @@ class AppSettingsWidget(QWidget):
         img_form.addRow(lora_note)
 
         # Table: columns = Enabled | Path | Weight | Remove
-        self.lora_table = QTableWidget(0, 4)
-        self.lora_table.setHorizontalHeaderLabels(["On", "LoRA Path", "Weight", ""])
+        self.lora_table = QTableWidget(0, 5)
+        self.lora_table.setHorizontalHeaderLabels(["On", "LoRA Path", "Weight", "Trigger", ""])
         self.lora_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.lora_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.lora_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.lora_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.lora_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.lora_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
         self.lora_table.verticalHeader().setVisible(False)
         self.lora_table.setSelectionMode(QAbstractItemView.NoSelection)
         self.lora_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -709,7 +710,13 @@ class AppSettingsWidget(QWidget):
         if path:
             self._insert_lora_row(path, weight=0.8, enabled=True)
 
-    def _insert_lora_row(self, path: str, weight: float = 0.8, enabled: bool = True) -> None:
+    def _insert_lora_row(
+        self,
+        path: str,
+        weight: float = 0.8,
+        enabled: bool = True,
+        trigger: str = "",
+    ) -> None:
         row = self.lora_table.rowCount()
         self.lora_table.insertRow(row)
 
@@ -723,7 +730,7 @@ class AppSettingsWidget(QWidget):
         chk_layout.setContentsMargins(0, 0, 0, 0)
         self.lora_table.setCellWidget(row, 0, chk_container)
 
-        # Col 1 — path (read-only label with tooltip)
+        # Col 1 — path (read-only item with tooltip)
         path_item = QTableWidgetItem(path)
         path_item.setToolTip(path)
         self.lora_table.setItem(row, 1, path_item)
@@ -741,13 +748,24 @@ class AppSettingsWidget(QWidget):
         )
         self.lora_table.setCellWidget(row, 2, weight_spin)
 
-        # Col 3 — remove button
+        # Col 3 — trigger prompt (small editable QLineEdit)
+        trigger_edit = QLineEdit()
+        trigger_edit.setText(trigger)
+        trigger_edit.setPlaceholderText("trigger word(s)…")
+        trigger_edit.setToolTip(
+            "Activation keywords required by this LoRA.\n"
+            "These are automatically prepended to every prompt when the LoRA is enabled.\n"
+            "Examples: 'ohwx person', 'in the style of xyz', 'detailed fantasy armor'"
+        )
+        self.lora_table.setCellWidget(row, 3, trigger_edit)
+
+        # Col 4 — remove button
         rm_btn = QPushButton("✕")
         rm_btn.setObjectName("subtle")
         rm_btn.setFixedWidth(28)
         rm_btn.setToolTip("Remove this LoRA")
         rm_btn.clicked.connect(lambda _, r=row: self._remove_lora_row(r))
-        self.lora_table.setCellWidget(row, 3, rm_btn)
+        self.lora_table.setCellWidget(row, 4, rm_btn)
 
         self.lora_table.resizeRowsToContents()
 
@@ -757,12 +775,12 @@ class AppSettingsWidget(QWidget):
         if btn is None:
             return
         for r in range(self.lora_table.rowCount()):
-            widget = self.lora_table.cellWidget(r, 3)
+            widget = self.lora_table.cellWidget(r, 4)
             if widget is btn:
                 self.lora_table.removeRow(r)
                 # Re-wire remaining remove buttons with updated row indices
                 for new_r in range(self.lora_table.rowCount()):
-                    new_btn = self.lora_table.cellWidget(new_r, 3)
+                    new_btn = self.lora_table.cellWidget(new_r, 4)
                     if new_btn:
                         try:
                             new_btn.clicked.disconnect()
@@ -793,7 +811,12 @@ class AppSettingsWidget(QWidget):
             if weight_spin and isinstance(weight_spin, QDoubleSpinBox):
                 weight = weight_spin.value()
 
-            loras.append({"path": path, "weight": weight, "enabled": enabled})
+            trigger_edit = self.lora_table.cellWidget(r, 3)
+            trigger = ""
+            if trigger_edit and isinstance(trigger_edit, QLineEdit):
+                trigger = trigger_edit.text().strip()
+
+            loras.append({"path": path, "weight": weight, "enabled": enabled, "trigger": trigger})
         return loras
 
     def _load_loras(self, loras: list) -> None:
@@ -803,6 +826,7 @@ class AppSettingsWidget(QWidget):
                 entry.get("path", ""),
                 weight=float(entry.get("weight", 0.8)),
                 enabled=bool(entry.get("enabled", True)),
+                trigger=entry.get("trigger", ""),
             )
 
     # ── _save ─────────────────────────────────────────────────────────────
