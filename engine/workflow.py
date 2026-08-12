@@ -531,17 +531,15 @@ class WorkflowWorker(QObject):
             added += 1
         return added
 
-    def _extract_and_merge_world_info(self, source_text: str) -> None:
+    def _extract_and_merge_world_info(self, source_text: str, source_type: str = "chapter") -> None:
         """
-        After the model writes a synopsis/outline/chapter, quietly ask it to
-        pull out any NEW worldbuilding details (locations, rules/systems,
-        history, culture, technology) not already covered in project.world,
-        and append them — mirroring how Story Memory already accumulates,
-        rather than trying to structurally dedupe free-form world text.
         After the model writes an outline or chapter, quietly ask it to pull
         out ONLY hard, stable facts about the WORLD ITSELF — not plot events,
         not character feelings, not what happened in the scene.
+
+        source_type: "outline" or "chapter" — controls how strict the filter is.
         Do NOT call this on synopsis text (synopsis is plot summary, not worldbuilding).
+
         World & Setting should only contain:
           ✓ Named places and their physical/geographical properties
           ✓ How magic / technology / power systems work (rules, limits, costs)
