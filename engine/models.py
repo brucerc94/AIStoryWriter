@@ -628,6 +628,12 @@ class AppSettings:
     # supports the n_batch/n_ubatch kwargs (checked via engine.llama_features).
     moe_n_batch: int = 1024
     moe_n_ubatch: int = 1024
+    # When enabled, every call to the model logs the FULL system+user prompt
+    # content (not just token counts) at INFO level, so it shows up in the
+    # console/log file. Off by default — full prompts can be long and noisy
+    # for normal use; turn this on only when you need to see exactly what's
+    # being sent, e.g. while debugging.
+    log_full_prompts: bool = False
 
     # ── Image generation ──────────────────────────────────────────────────
     # These settings are completely independent of the text-generation
@@ -694,6 +700,7 @@ class AppSettings:
             "allow_nsfw": self.allow_nsfw,
             "moe_n_batch": self.moe_n_batch,
             "moe_n_ubatch": self.moe_n_ubatch,
+            "log_full_prompts": self.log_full_prompts,
             # Image generation
             "image_model_path": self.image_model_path,
             "image_text_encoder_path": self.image_text_encoder_path,

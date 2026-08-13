@@ -137,6 +137,20 @@ class WorkflowWorker(QObject):
         self._approval_event.clear()
         return bool(self._approval_result)
 
+    def _log_prompt_if_enabled(self, label: str, messages: list[dict]) -> None:
+        """
+        When Settings > "Show full prompt sent to the model in the
+        console/log" is on, log the exact system+user content about to be
+        sent — otherwise a no-op. Gated so normal runs stay readable; only
+        the token-count line (already logged elsewhere) shows by default.
+        """
+        if not (self.settings and getattr(self.settings, "log_full_prompts", False)):
+            return
+        parts = [f"[prompt:{label}]"]
+        for m in messages:
+            parts.append(f"--- {m.get('role', '?')} ---\n{m.get('content', '')}")
+        logger.info("\n".join(parts))
+
     def _load_model_for_task(self, task: TaskType) -> bool:
         model_path = self.project.model_assignments.get(task)
         if not model_path:
@@ -368,6 +382,7 @@ class WorkflowWorker(QObject):
             self.token_received.emit(token)
 
         engine = get_engine()
+        self._log_prompt_if_enabled(task.value, messages)
         try:
             with _StepTimer(f"generate({task.value})"):
                 result = engine.generate(
@@ -511,6 +526,7 @@ class WorkflowWorker(QObject):
                 effective_max_tokens = min(1500, max(64, context_limit - prompt_tokens - 32))
 
                 engine = get_engine()
+                self._log_prompt_if_enabled(f"characters chunk {chunk_idx + 1}/{len(text_chunks)}", messages)
                 try:
                     with _StepTimer(f"generate(characters chunk {chunk_idx + 1}/{len(text_chunks)})"):
                         raw = engine.generate(
@@ -797,6 +813,7 @@ class WorkflowWorker(QObject):
         )
 
         engine = get_engine()
+        self._log_prompt_if_enabled(f"lean:{task.value}", messages)
         try:
             with _StepTimer(f"lean_generate({task.value})"):
                 result = engine.generate(

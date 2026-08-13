@@ -36,6 +36,7 @@ from engine import storage
 from engine import export as book_export
 from engine.models import AppSettings, Project, TaskType
 from ui.chat import ChatPanel
+from ui.console import ConsolePanel
 from ui.images import ImagesPanel
 from ui.projects import ProjectsPanel
 from ui.resources import get_app_icon
@@ -185,6 +186,9 @@ class MainWindow(QMainWindow):
 
         self.settings_panel = SettingsPanel()
         self.tabs.addTab(self.settings_panel, "Settings")
+
+        self.console_panel = ConsolePanel()
+        self.tabs.addTab(self.console_panel, "Console")
 
         self.empty_state = EmptyStateWidget()
 

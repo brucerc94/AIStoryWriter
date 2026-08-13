@@ -293,6 +293,16 @@ class AppSettingsWidget(QWidget):
         )
         form.addRow("", self.allow_nsfw_check)
 
+        # Debug: log full prompts to console
+        self.log_full_prompts_check = QCheckBox("Show full prompt sent to the model in the console/log")
+        self.log_full_prompts_check.setToolTip(
+            "When enabled, every call to the model logs the complete system+user "
+            "prompt text at INFO level, not just the token count. Off by default — "
+            "prompts can be long; turn this on only when you need to see exactly "
+            "what's being sent, e.g. while debugging."
+        )
+        form.addRow("", self.log_full_prompts_check)
+
         layout.addWidget(box)
 
         # ── Generation settings ──
@@ -629,6 +639,7 @@ class AppSettingsWidget(QWidget):
         self.autosave_check.setChecked(settings.auto_save)
         self.enable_thinking_check.setChecked(getattr(settings, "enable_thinking", False))
         self.allow_nsfw_check.setChecked(getattr(settings, "allow_nsfw", False))
+        self.log_full_prompts_check.setChecked(getattr(settings, "log_full_prompts", False))
         self.language_input.setText(settings.response_language)
         self.max_tokens_spin.setValue(getattr(settings, "content_max_tokens", 4000))
         self.system_prompt_input.setPlainText(settings.custom_system_prompt)
@@ -842,6 +853,7 @@ class AppSettingsWidget(QWidget):
         self._settings.auto_save = self.autosave_check.isChecked()
         self._settings.enable_thinking = self.enable_thinking_check.isChecked()
         self._settings.allow_nsfw = self.allow_nsfw_check.isChecked()
+        self._settings.log_full_prompts = self.log_full_prompts_check.isChecked()
         self._settings.response_language = self.language_input.text().strip()
         self._settings.content_max_tokens = self.max_tokens_spin.value()
         self._settings.custom_system_prompt = self.system_prompt_input.toPlainText().strip()
