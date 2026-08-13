@@ -428,6 +428,26 @@ def build_context_for_model(
     if trailing_user_msg is not None:
         messages.append(trailing_user_msg)
 
+    # Budget guard: everything above only trims chat HISTORY when over
+    # budget — if `user_message` itself is large enough to blow the budget
+    # on its own (e.g. a full chapter embedded in a hand-built prompt), it
+    # was never truncated and could push prompt_tokens past n_ctx. Trim the
+    # trailing user message from the front, keeping its end, as a last
+    # resort so this can never hard-fail the model call.
+    reserved = reply_reserved if reply_reserved is not None else max(256, min(4096, max_context_tokens // 3))
+    non_user_tokens = _messages_token_count(messages[:-1]) if trailing_user_msg is not None else _messages_token_count(messages)
+    target_msg = messages[-1] if trailing_user_msg is not None else (messages[-1] if messages[-1]["role"] == "user" else None)
+    if target_msg is not None:
+        budget_for_msg = max(200, max_context_tokens - non_user_tokens - reserved - 64)
+        if _estimate_tokens(target_msg["content"]) > budget_for_msg:
+            approx_chars = max(200, budget_for_msg * 4)
+            content = target_msg["content"]
+            if len(content) > approx_chars:
+                target_msg["content"] = (
+                    "[... earlier content truncated to fit context budget ...]\n\n"
+                    + content[-approx_chars:].lstrip()
+                )
+
     return messages
 
 
@@ -498,6 +518,25 @@ def build_review_context_for_model(
     if sections["Author Instructions"]:
         system_content_parts.append(f"\n\n## Additional Author Instructions\n{sections['Author Instructions']}")
     system_content = "\n".join(system_content_parts)
+
+    # Budget guard: `user_message` (typically the full chapter draft) was
+    # previously sent unbudgeted here — only the system sections above go
+    # through _compact_sections. On a long/continued chapter this could push
+    # prompt_tokens past n_ctx and hard-fail the call (seen as "prompt_tokens
+    # exceeds model_n_ctx"). Reserve room for system content + reply, then
+    # truncate user_message to what's left, keeping the END of the text —
+    # for both the completion-check and a real review, the chapter's current
+    # ending matters more than its already-outlined opening.
+    reserved = reply_reserved if reply_reserved is not None else 512
+    system_tokens = _section_tokens(system_content)
+    budget_for_user = max(200, max_context_tokens - system_tokens - reserved - 64)
+    if _estimate_tokens(user_message) > budget_for_user:
+        approx_chars = max(200, budget_for_user * 4)
+        if len(user_message) > approx_chars:
+            user_message = (
+                "[... earlier content truncated to fit context budget ...]\n\n"
+                + user_message[-approx_chars:].lstrip()
+            )
 
     messages: list[dict] = [
         {"role": "system", "content": system_content},

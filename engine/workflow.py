@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 import traceback
 import unicodedata
 from typing import Callable, Optional
@@ -39,8 +40,44 @@ from engine.models import (
     WorkflowStatus,
 )
 from engine import storage
+from engine.patch_engine import (
+    apply_patches,
+    ensure_sections,
+    find_relevant_section,
+    format_errors_for_retry,
+    merge_markdown_document,
+    parse_patches,
+)
 
 logger = logging.getLogger("workflow")
+
+
+class _StepTimer:
+    """
+    Context manager that logs how long a labeled block took. Used
+    throughout the workflow (model load, each inference call, each
+    task) so a slow run shows a clear per-step breakdown in the log
+    instead of one opaque pause — e.g.:
+
+        [timing] model_load(update_memory): 118.42s
+        [timing] generate(update_memory chunk 1/1): 6.10s
+        [timing] extract_and_merge_characters (total): 124.77s
+    """
+    def __init__(self, label: str):
+        self.label = label
+        self._start = 0.0
+
+    def __enter__(self) -> "_StepTimer":
+        self._start = time.monotonic()
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        elapsed = time.monotonic() - self._start
+        if exc_type is None:
+            logger.info(f"[timing] {self.label}: {elapsed:.2f}s")
+        else:
+            logger.info(f"[timing] {self.label}: {elapsed:.2f}s (raised {exc_type.__name__})")
+        return False
 
 MAX_CONTINUATIONS = 3
 MAX_COMPLETION_EVAL_RETRIES = 2
@@ -48,6 +85,12 @@ MAX_COMPLETION_EVAL_RETRIES = 2
 # request won't fit in one 3000-token pass, so allow more continuation rounds
 # than MAX_CONTINUATIONS (which is sized for one chapter's prose).
 MAX_OUTLINE_CONTINUATIONS = 8
+
+# Default section skeleton for World & Setting. ensure_sections()/
+# merge_markdown_document() use these so the document has stable,
+# addressable headings for the PatchEngine to target — created lazily
+# and non-destructively the first time any World update runs.
+DEFAULT_WORLD_SECTIONS = ["Geography", "Kingdoms", "Factions", "Magic", "History"]
 
 
 class WorkflowWorker(QObject):
@@ -136,16 +179,17 @@ class WorkflowWorker(QObject):
             f"n_threads_batch={threads_batch or 'auto'})"
         )
         try:
-            engine.load_model(
-                model_path,
-                n_ctx=ctx,
-                n_gpu_layers=gpu,
-                n_threads=threads,
-                n_threads_batch=threads_batch,
-                moe_n_batch=moe_n_batch,
-                moe_n_ubatch=moe_n_ubatch,
-                progress_callback=lambda msg: self.model_loading.emit(msg),
-            )
+            with _StepTimer(f"model_load({task.value})"):
+                engine.load_model(
+                    model_path,
+                    n_ctx=ctx,
+                    n_gpu_layers=gpu,
+                    n_threads=threads,
+                    n_threads_batch=threads_batch,
+                    moe_n_batch=moe_n_batch,
+                    moe_n_ubatch=moe_n_ubatch,
+                    progress_callback=lambda msg: self.model_loading.emit(msg),
+                )
             return True
         except Exception as e:
             logger.error(f"Failed to load model '{model_path}': {e}")
@@ -325,14 +369,15 @@ class WorkflowWorker(QObject):
 
         engine = get_engine()
         try:
-            result = engine.generate(
-                messages=messages,
-                max_tokens=effective_max_tokens,
-                temperature=temperature,
-                stream=True,
-                stream_callback=on_token,
-                cancel_check=lambda: self._cancelled,
-            )
+            with _StepTimer(f"generate({task.value})"):
+                result = engine.generate(
+                    messages=messages,
+                    max_tokens=effective_max_tokens,
+                    temperature=temperature,
+                    stream=True,
+                    stream_callback=on_token,
+                    cancel_check=lambda: self._cancelled,
+                )
         except Exception as e:
             logger.error(f"[{task.value}] inference error: {e}\n{traceback.format_exc()}")
             self.error_occurred.emit(f"Inference error: {e}\n{traceback.format_exc()}")
@@ -398,83 +443,97 @@ class WorkflowWorker(QObject):
         """
         if not source_text or not source_text.strip():
             return
+        _t_start = time.monotonic()
         if not self._load_model_for_task(TaskType.UPDATE_MEMORY):
             logger.warning("Skipping character extraction: no model assigned for Update Memory.")
             return
 
         self.step_started.emit("Checking for new characters to track...")
-        existing_names = ", ".join(c.name for c in self.project.characters) or "(none yet)"
-        language = self._response_language()
-        language_note = (
-            f' The "description" value should be written in {language}.'
-            if language else ""
-        )
-        # Process text in 6000-char chunks so long outlines (12+ chapters)
-        # are fully scanned instead of being silently truncated at 6000 chars.
-        CHUNK_SIZE = 6000
-        text_chunks = [
-            source_text[i:i + CHUNK_SIZE]
-            for i in range(0, max(1, len(source_text)), CHUNK_SIZE)
-        ]
-        total_added = 0
-        for chunk_idx, chunk in enumerate(text_chunks):
-            if self._cancelled:
-                break
-            if chunk_idx > 0:
-                # Update existing_names so later chunks don't re-add chars
-                # already picked up in earlier chunks.
-                existing_names = ", ".join(c.name for c in self.project.characters) or "(none yet)"
-            prompt = (
-                "Extract every named character mentioned in the text below. "
-                "Respond with ONLY a JSON array — no markdown fences, no commentary, "
-                "nothing before or after it. If there are no named characters, "
-                "respond with exactly: []\n\n"
-                "Each array element must be an object with exactly these keys "
-                "(keep these key names and the role value in English — only the "
-                f"description text should be translated):\n"
-                '  "name": the character\'s name\n'
-                '  "role": one of "protagonist", "antagonist", "supporting", "minor"\n'
-                '  "description": a single, vivid sentence written specifically for image generation, using this exact visual-only structure: '
-                '"Age: X. [ethnicity or race]. [height/build]. [hair color/length/style]. [eye color]. [skin tone]. [facial features]. [notable marks/scars]. [clothing/style]." '
-                'It must include the character\'s age, ethnicity or race, body build, hair, eyes, skin tone, facial structure, distinct marks, and visible clothing/style. '
-                'Do not include personality, backstory, memory, motivations, secrets, or inner emotions.\n'
-                '  "backstory": a short, factual summary of the character\'s history, upbringing, major past events, and personal context.\n'
-                '  "traits": an array of 3-6 short trait labels such as ["loyal", "guarded", "sharp-witted"].\n\n'
-                f"{language_note}\n\n"
-                f"Characters already tracked (skip these unless the text reveals "
-                f"something significant enough to be worth its own new entry): {existing_names}\n\n"
-                f"Text:\n{chunk}\n\n"
-                "JSON array:"
+        try:
+            existing_names = ", ".join(c.name for c in self.project.characters) or "(none yet)"
+            language = self._response_language()
+            language_note = (
+                f' The "description" value should be written in {language}.'
+                if language else ""
             )
-            messages = [
-                {
-                    "role": "system",
-                    "content": "You extract structured character data as strict JSON. Output JSON only.",
-                },
-                {"role": "user", "content": prompt},
+            # Process text in large chunks so a normal chapter/outline fits in a
+            # single extraction call instead of triggering 2-3 chained ones —
+            # only very long text (12+ chapter outlines) needs more than one.
+            CHUNK_SIZE = 16000
+            text_chunks = [
+                source_text[i:i + CHUNK_SIZE]
+                for i in range(0, max(1, len(source_text)), CHUNK_SIZE)
             ]
-
-            engine = get_engine()
-            try:
-                raw = engine.generate(
-                    messages=messages,
-                    max_tokens=800,
-                    temperature=0.2,
-                    stream=True,
-                    stream_callback=lambda _t: None,  # silent — no chat UI noise
-                    cancel_check=lambda: self._cancelled,
+            total_added = 0
+            for chunk_idx, chunk in enumerate(text_chunks):
+                if self._cancelled:
+                    break
+                if chunk_idx > 0:
+                    # Update existing_names so later chunks don't re-add chars
+                    # already picked up in earlier chunks.
+                    existing_names = ", ".join(c.name for c in self.project.characters) or "(none yet)"
+                prompt = (
+                    "Extract every named character mentioned in the text below. "
+                    "Respond with ONLY a JSON array — no markdown fences, no commentary, "
+                    "nothing before or after it. If there are no named characters, "
+                    "respond with exactly: []\n\n"
+                    "Each array element must be an object with exactly these keys "
+                    "(keep these key names and the role value in English — only the "
+                    f"description text should be translated):\n"
+                    '  "name": the character\'s name\n'
+                    '  "role": one of "protagonist", "antagonist", "supporting", "minor"\n'
+                    '  "description": a single, vivid sentence written specifically for image generation, using this exact visual-only structure: '
+                    '"Age: X. [ethnicity or race]. [height/build]. [hair color/length/style]. [eye color]. [skin tone]. [facial features]. [notable marks/scars]. [clothing/style]." '
+                    'It must include the character\'s age, ethnicity or race, body build, hair, eyes, skin tone, facial structure, distinct marks, and visible clothing/style. '
+                    'Do not include personality, backstory, memory, motivations, secrets, or inner emotions.\n'
+                    '  "backstory": a short, factual summary of the character\'s history, upbringing, major past events, and personal context.\n'
+                    '  "traits": an array of 3-6 short trait labels such as ["loyal", "guarded", "sharp-witted"].\n\n'
+                    f"{language_note}\n\n"
+                    f"Characters already tracked (skip these unless the text reveals "
+                    f"something significant enough to be worth its own new entry): {existing_names}\n\n"
+                    f"Text:\n{chunk}\n\n"
+                    "JSON array:"
                 )
-            except Exception as e:
-                logger.warning(f"Character extraction failed (non-fatal) on chunk {chunk_idx + 1}: {e}")
-                continue
+                messages = [
+                    {
+                        "role": "system",
+                        "content": "You extract structured character data as strict JSON. Output JSON only.",
+                    },
+                    {"role": "user", "content": prompt},
+                ]
 
-            added = self._merge_extracted_characters(raw)
-            total_added += added
-            if added:
-                logger.info(f"Auto-added {added} new character(s) from chunk {chunk_idx + 1}/{len(text_chunks)}.")
+                # Budget guard: this bypasses build_context_for_model, so
+                # nothing else caps prompt+reply against n_ctx here — a big
+                # chunk plus a generous max_tokens could overflow context on
+                # a small-n_ctx model the same way review_chapter did.
+                context_limit = self._model_context_limit()
+                prompt_tokens = estimate_messages_tokens(messages)
+                effective_max_tokens = min(1500, max(64, context_limit - prompt_tokens - 32))
 
-        if total_added:
-            logger.info(f"Character extraction complete: {total_added} total new character(s) added.")
+                engine = get_engine()
+                try:
+                    with _StepTimer(f"generate(characters chunk {chunk_idx + 1}/{len(text_chunks)})"):
+                        raw = engine.generate(
+                            messages=messages,
+                            max_tokens=effective_max_tokens,
+                            temperature=0.2,
+                            stream=True,
+                            stream_callback=lambda _t: None,  # silent — no chat UI noise
+                            cancel_check=lambda: self._cancelled,
+                        )
+                except Exception as e:
+                    logger.warning(f"Character extraction failed (non-fatal) on chunk {chunk_idx + 1}: {e}")
+                    continue
+
+                added = self._merge_extracted_characters(raw)
+                total_added += added
+                if added:
+                    logger.info(f"Auto-added {added} new character(s) from chunk {chunk_idx + 1}/{len(text_chunks)}.")
+
+            if total_added:
+                logger.info(f"Character extraction complete: {total_added} total new character(s) added.")
+        finally:
+            logger.info(f"[timing] extract_and_merge_characters (total): {time.monotonic() - _t_start:.2f}s")
 
     def _merge_extracted_characters(self, raw_json: str) -> int:
         text = raw_json.strip()
@@ -531,14 +590,19 @@ class WorkflowWorker(QObject):
             added += 1
         return added
 
-    def _extract_and_merge_world_info(self, source_text: str, source_type: str = "chapter") -> None:
+    def _update_world_incremental(self, source_text: str, source_type: str = "chapter") -> None:
         """
         After the model writes an outline or chapter, quietly ask it to pull
         out ONLY hard, stable facts about the WORLD ITSELF — not plot events,
-        not character feelings, not what happened in the scene.
+        not character feelings, not what happened in the scene — and apply
+        them to World & Setting as PatchEngine ADD/REPLACE operations
+        against the one relevant section, instead of resending (and then
+        re-appending onto) the entire World document.
 
-        source_type: "outline" or "chapter" — controls how strict the filter is.
-        Do NOT call this on synopsis text (synopsis is plot summary, not worldbuilding).
+        source_type: "outline" or "chapter" — kept for call-site clarity;
+        the extraction prompt itself is source-agnostic.
+        Do NOT call this on synopsis text (synopsis is plot summary, not
+        worldbuilding).
 
         World & Setting should only contain:
           ✓ Named places and their physical/geographical properties
@@ -556,104 +620,126 @@ class WorkflowWorker(QObject):
         """
         if not source_text or not source_text.strip():
             return
-        if not self._load_model_for_task(TaskType.UPDATE_MEMORY):
-            logger.warning("Skipping world-info extraction: no model assigned for Update Memory.")
+        _t_start = time.monotonic()
+        if not self._load_model_for_task(TaskType.GENERATE_WORLD):
+            logger.warning("Skipping world update: no model assigned for World generation.")
             return
 
         self.step_started.emit("Checking for new world details...")
-        language = self._response_language()
-        language_note = f" Write it in {language}." if language else ""
+        try:
+            language = self._response_language()
+            language_note = f" Write it in {language}." if language else ""
 
-        CHUNK_SIZE = 6000
-        text_chunks = [
-            source_text[i:i + CHUNK_SIZE]
-            for i in range(0, max(1, len(source_text)), CHUNK_SIZE)
-        ]
-        for chunk_idx, chunk in enumerate(text_chunks):
-            if self._cancelled:
-                break
-            existing_world = self.project.world.strip() or "(nothing recorded yet)"
-            prompt = (
-                "You are a strict worldbuilding archivist. Your only job is to extract "
-                "PERMANENT, STABLE facts about the WORLD ITSELF from the text below — "
-                "facts that would still be true even if the story's characters had never "
-                "been born.\n\n"
-                "INCLUDE only:\n"
-                "- Named locations with physical/geographical properties "
-                "(e.g. 'The Ashwood — a petrified forest north of the capital')\n"
-                "- How magic, technology, or power systems work — their rules, "
-                "limits, costs (e.g. 'Blood magic requires a living sacrifice each casting')\n"
-                "- Historical events that occurred BEFORE the story begins "
-                "(e.g. 'The Sundering War ended 300 years ago')\n"
+            # Non-destructive: only adds missing section headings, never touches
+            # existing content. Gives the PatchEngine stable targets to ADD into.
+            self.project.world = ensure_sections(self.project.world, DEFAULT_WORLD_SECTIONS)
+
+            system_content = (
+                "You are a strict worldbuilding archivist maintaining a Markdown "
+                "reference document (World & Setting) for a novel. You work "
+                "EXCLUSIVELY through SEARCH/REPLACE-style patch blocks — you "
+                "never rewrite or re-output the document.\n\n"
+                "Extract ONLY permanent, stable facts about the WORLD ITSELF — "
+                "facts that would still be true even if the story's characters "
+                "had never been born:\n"
+                "- Named locations with physical/geographical properties\n"
+                "- How magic, technology, or power systems work — rules, limits, costs\n"
+                "- Historical events that occurred BEFORE the story begins\n"
                 "- Cultural norms, factions, economies, social hierarchies\n"
                 "- Climate, terrain, cosmology, calendar, languages\n\n"
-                "EXCLUDE — respond NO_NEW_WORLD_DETAILS if the text only contains:\n"
-                "- Anything that HAPPENS during the story (plot events, discoveries, "
-                "battles, decisions) — those belong in Story Memory, not here\n"
-                "- Character feelings, thoughts, motivations, secrets, dialogue\n"
-                "- Scene descriptions or action sequences\n"
-                "- Relationship changes between characters\n"
-                "- Information already in the existing notes below\n\n"
-                f"Existing World Notes (do not repeat these):\n{existing_world}\n\n"
-                f"New text to scan:\n{chunk}\n\n"
-                f"Respond with a short Markdown bullet list of NEW world facts only, "
-                f"or exactly: NO_NEW_WORLD_DETAILS{language_note}"
+                "NEVER include: plot events/discoveries/battles/decisions (those "
+                "belong in Story Memory, not here), character feelings/thoughts/"
+                "secrets/dialogue, scene descriptions, relationship changes, or "
+                "anything already present in the section shown below.\n\n"
+                "If there is nothing new and permanent to record, respond with "
+                "EXACTLY: NO_NEW_WORLD_DETAILS\n\n"
+                "Otherwise respond with ONLY one or more patch blocks — no other "
+                "commentary, no restated document:\n\n"
+                "<<<<<<< ADD\n"
+                "SECTION: <one of the existing section names shown below, or a "
+                "new one if truly none fit>\n"
+                "=======\n"
+                "- new fact as a single concise bullet\n"
+                ">>>>>>> ADD\n\n"
+                "Use REPLACE only to correct/refine a bullet that's already "
+                "there (SEARCH must match it exactly, verbatim):\n\n"
+                "<<<<<<< REPLACE\n"
+                "old exact bullet\n"
+                "=======\n"
+                "new bullet\n"
+                ">>>>>>> REPLACE"
+                f"{language_note}"
             )
-            messages = [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a worldbuilding archivist. You extract ONLY permanent, "
-                        "stable facts about the world itself — geography, systems, history, "
-                        "culture. You NEVER include plot events, character emotions, "
-                        "dialogue, or anything that happens during the story."
-                    ),
-                },
-                {"role": "user", "content": prompt},
+
+            # Same reasoning as _extract_and_merge_characters: a bigger chunk
+            # means a normal chapter/outline needs only one patch call instead
+            # of 2-3 chained ones.
+            CHUNK_SIZE = 16000
+            text_chunks = [
+                source_text[i:i + CHUNK_SIZE]
+                for i in range(0, max(1, len(source_text)), CHUNK_SIZE)
             ]
+            for chunk_idx, chunk in enumerate(text_chunks):
+                if self._cancelled:
+                    break
 
-            engine = get_engine()
-            try:
-                raw = engine.generate(
-                    messages=messages,
-                    max_tokens=250,
-                    temperature=0.1,
-                    stream=True,
-                    stream_callback=lambda _t: None,
-                    cancel_check=lambda: self._cancelled,
-                )
-            except Exception as e:
-                logger.warning(f"World-info extraction failed (non-fatal) on chunk {chunk_idx + 1}: {e}")
-                continue
+                with _StepTimer(f"world_patch chunk {chunk_idx + 1}/{len(text_chunks)} (total, incl. retry)"):
+                    relevant_section = find_relevant_section(self.project.world, chunk)
+                    section_context = relevant_section or (
+                        "(no closely related section found — ADD a new SECTION for this)"
+                    )
+                    all_sections = ", ".join(DEFAULT_WORLD_SECTIONS)
+                    user_content = (
+                        f"Existing section names: {all_sections} (plus any custom ones "
+                        f"already in the document).\n\n"
+                        f"Current relevant section of World & Setting:\n{section_context}\n\n"
+                        f"New text to scan for permanent world facts:\n{chunk}"
+                    )
 
-            cleaned = raw.strip()
-            if not cleaned or "NO_NEW_WORLD_DETAILS" in cleaned.upper():
-                continue
+                    raw = self._run_lean_inference(
+                        TaskType.GENERATE_WORLD, system_content, user_content, max_tokens=350,
+                    )
+                    if not raw:
+                        continue
+                    cleaned = raw.strip()
+                    if not cleaned or "NO_NEW_WORLD_DETAILS" in cleaned.upper():
+                        continue
 
-            # Extra guard: if the model returned a list that looks like plot events
-            # (sentences with past-tense verbs acting on characters) drop it.
-            # This catches models that ignore the EXCLUDE instruction.
-            plot_indicators = (
-                "discovers", "decides", "realizes", "learns", "escapes",
-                "fights", "kills", "defeats", "betrays", "reveals", "arrives",
-                "descubre", "decide", "aprende", "escapa", "lucha", "mata",
-                "derrota", "traiciona", "revela", "llega",
-            )
-            lines = cleaned.split("\n")
-            safe_lines = [
-                ln for ln in lines
-                if not any(ind in ln.lower() for ind in plot_indicators)
-            ]
-            cleaned = "\n".join(safe_lines).strip()
-            if not cleaned:
-                logger.info(
-                    f"[world_info] chunk {chunk_idx + 1}: all lines looked like plot events — discarded."
-                )
-                continue
+                    patches, parse_warnings = parse_patches(cleaned)
+                    if not patches:
+                        logger.info(
+                            f"[world_patch] chunk {chunk_idx + 1}: no valid patch blocks "
+                            f"({parse_warnings}) — skipping."
+                        )
+                        continue
 
-            sep = "\n\n" if self.project.world.strip() else ""
-            self.project.world = (self.project.world.rstrip() + sep + cleaned).strip()
-            logger.info(f"Added new world-building details from chunk {chunk_idx + 1}/{len(text_chunks)}.")
+                    result = apply_patches(self.project.world, patches)
+                    if not result.success:
+                        # One retry with the validation errors fed back — never
+                        # silently apply to the wrong text, never fall back to a
+                        # full rewrite.
+                        retry_user = user_content + "\n\n" + format_errors_for_retry(result.errors)
+                        raw_retry = self._run_lean_inference(
+                            TaskType.GENERATE_WORLD, system_content, retry_user, max_tokens=350,
+                        )
+                        if raw_retry:
+                            retry_patches, _ = parse_patches(raw_retry.strip())
+                            if retry_patches:
+                                result = apply_patches(self.project.world, retry_patches)
+
+                    if result.success:
+                        self.project.world = result.document
+                        logger.info(
+                            f"[world_patch] chunk {chunk_idx + 1}/{len(text_chunks)}: "
+                            f"applied {result.applied} patch(es)."
+                        )
+                    else:
+                        logger.warning(
+                            f"[world_patch] chunk {chunk_idx + 1}: failed to apply after "
+                            f"retry — left unchanged ({[e.reason for e in result.errors]})."
+                        )
+        finally:
+            logger.info(f"[timing] update_world_incremental (total): {time.monotonic() - _t_start:.2f}s")
 
     def _run_inference(
         self,
@@ -663,6 +749,68 @@ class WorkflowWorker(QObject):
         max_tokens: int = 2048,
     ) -> str:
         return self._run_inference_v2(task, user_message, add_to_chat=add_to_chat, max_tokens=max_tokens)
+
+    def _run_lean_inference(
+        self,
+        task: TaskType,
+        system_content: str,
+        user_content: str,
+        max_tokens: int = 500,
+    ) -> str:
+        """
+        Minimal-context inference call used by the PatchEngine round-trip
+        (World incremental updates, Chapter patch generation).
+
+        Unlike `_run_inference_v2`, this does NOT pull in Synopsis,
+        Outline, full Characters, Memory, or chat history via
+        `build_context_for_model` — it sends only the exact
+        system/user content the caller built (typically: the task
+        instructions + the one relevant excerpt of the document being
+        edited). That's the actual token reduction this feature is
+        for: the full document stays on disk, only the fragment needed
+        for this one edit goes to the model.
+        """
+        if self._cancelled:
+            logger.info(f"[{task.value}] lean inference cancelled before start.")
+            return ""
+        if not self._load_model_for_task(task):
+            return ""
+
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": user_content},
+        ]
+        context_limit = self._model_context_limit()
+        prompt_tokens = estimate_messages_tokens(messages)
+        effective_max_tokens = min(max_tokens, max(0, context_limit - prompt_tokens))
+        if effective_max_tokens <= 0:
+            logger.warning(
+                f"[{task.value}] lean inference: prompt ({prompt_tokens} tokens) "
+                f"leaves no room for a reply within context_limit={context_limit}."
+            )
+            return ""
+
+        temperature = self._task_temperature(task)
+        logger.info(
+            f"[{task.value}] lean inference: prompt_tokens={prompt_tokens}, "
+            f"max_tokens={effective_max_tokens}, temperature={temperature}"
+        )
+
+        engine = get_engine()
+        try:
+            with _StepTimer(f"lean_generate({task.value})"):
+                result = engine.generate(
+                    messages=messages,
+                    max_tokens=effective_max_tokens,
+                    temperature=temperature,
+                    stream=True,
+                    stream_callback=lambda _t: None,
+                    cancel_check=lambda: self._cancelled,
+                )
+        except Exception as e:
+            logger.warning(f"[{task.value}] lean inference failed: {e}")
+            return ""
+        return result
 
     def run(self) -> None:
         logger.info(f"[workflow] Task started: {self.task.value} (project='{self.project.title}')")
@@ -677,28 +825,29 @@ class WorkflowWorker(QObject):
 
     def _dispatch(self) -> None:
         task = self.task
-        if task == TaskType.CHAT:
-            self._run_chat()
-        elif task == TaskType.WRITE_SYNOPSIS:
-            self._run_write_synopsis()
-        elif task == TaskType.GENERATE_OUTLINE:
-            self._run_generate_outline()
-        elif task == TaskType.REVIEW_OUTLINE:
-            self._run_review_outline()
-        elif task == TaskType.GENERATE_WORLD:
-            self._run_generate_world()
-        elif task == TaskType.WRITE_CHAPTER:
-            self._run_write_chapter()
-        elif task == TaskType.WRITE_BOOK:
-            self._run_write_book()
-        elif task == TaskType.REVIEW_CHAPTER:
-            self._run_review_chapter()
-        elif task == TaskType.REWRITE_CHAPTER:
-            self._run_rewrite_chapter()
-        elif task == TaskType.UPDATE_MEMORY:
-            self._run_update_memory()
-        elif task == TaskType.CONVERSATION_SUMMARY:
-            self._run_conversation_summary()
+        with _StepTimer(f"dispatch({task.value})"):
+            if task == TaskType.CHAT:
+                self._run_chat()
+            elif task == TaskType.WRITE_SYNOPSIS:
+                self._run_write_synopsis()
+            elif task == TaskType.GENERATE_OUTLINE:
+                self._run_generate_outline()
+            elif task == TaskType.REVIEW_OUTLINE:
+                self._run_review_outline()
+            elif task == TaskType.GENERATE_WORLD:
+                self._run_generate_world()
+            elif task == TaskType.WRITE_CHAPTER:
+                self._run_write_chapter()
+            elif task == TaskType.WRITE_BOOK:
+                self._run_write_book()
+            elif task == TaskType.REVIEW_CHAPTER:
+                self._run_review_chapter()
+            elif task == TaskType.REWRITE_CHAPTER:
+                self._run_rewrite_chapter()
+            elif task == TaskType.UPDATE_MEMORY:
+                self._run_update_memory()
+            elif task == TaskType.CONVERSATION_SUMMARY:
+                self._run_conversation_summary()
 
     # ──────────────────────────────────────────────
     # Task implementations
@@ -802,7 +951,7 @@ class WorkflowWorker(QObject):
             self.project.chat_messages.append(assistant_msg)
 
             self._extract_and_merge_characters(result)
-            self._extract_and_merge_world_info(result, source_type="chapter")
+            self._update_world_incremental(result, source_type="chapter")
             storage.save_project(self.project)
             self.step_finished.emit(f"Continued Chapter {chapter_num}", result)
 
@@ -831,7 +980,7 @@ class WorkflowWorker(QObject):
         if result:
             self.project.synopsis = result
             self._extract_and_merge_characters(result)
-            # Deliberately NOT calling _extract_and_merge_world_info here:
+            # Deliberately NOT calling _update_world_incremental here:
             # a synopsis is a plot summary, not a worldbuilding document.
             # Running world extraction on it produces false positives (plot
             # events, character feelings) that pollute World & Setting.
@@ -942,7 +1091,7 @@ class WorkflowWorker(QObject):
         if outline_text:
             self.project.outline = outline_text
             self._extract_and_merge_characters(outline_text)
-            self._extract_and_merge_world_info(outline_text, source_type="outline")
+            self._update_world_incremental(outline_text, source_type="outline")
 
             # Final sanity check — covers the (rare) case where even
             # MAX_OUTLINE_CONTINUATIONS passes weren't enough, or the model
@@ -1074,11 +1223,12 @@ class WorkflowWorker(QObject):
             TaskType.GENERATE_WORLD, prompt, add_to_chat=True, max_tokens=800
         )
         if result:
-            # Append rather than overwrite — world notes accumulate over time,
-            # same as Story Memory, instead of replacing manual notes the
-            # author already wrote.
-            sep = "\n\n---\n\n" if self.project.world.strip() else ""
-            self.project.world = (self.project.world.rstrip() + sep + result).strip()
+            # Fold the new text into the existing document by section
+            # instead of concatenating a growing "---"-separated blob —
+            # matching headings are merged, new ones become new sections.
+            self.project.world = merge_markdown_document(
+                self.project.world, result, DEFAULT_WORLD_SECTIONS
+            )
             self._extract_and_merge_characters(result)
             storage.save_project(self.project)
             self.step_finished.emit("World & Setting", result)
@@ -1253,12 +1403,26 @@ class WorkflowWorker(QObject):
         chapter_text: str,
         chapter_goal: str,
     ) -> dict:
-        prompt = self._build_chapter_evaluation_prompt(chapter_num, chapter_text, chapter_goal)
+        # _build_chapter_evaluation_prompt is fully self-contained (goal +
+        # outline entry + draft) — it needs no Synopsis/Characters/World/
+        # Style. Routing it through _run_inference(REVIEW_CHAPTER) would
+        # build and send that full context anyway for a single true/false
+        # token, and this runs up to MAX_COMPLETION_EVAL_RETRIES times per
+        # generation pass (up to 3 passes per chapter) — so lean_inference
+        # here removes a real, repeated chunk of wasted prompt tokens/time.
+        system_content = (
+            "You decide whether a novel chapter draft is complete relative to "
+            "its stated goal. Respond with exactly one token: true or false. "
+            "No punctuation, quotes, markdown, JSON, or explanation.\n"
+            "true  → the chapter is complete and should stop.\n"
+            "false → the chapter is not complete and must continue."
+        )
+        user_content = self._build_chapter_evaluation_prompt(chapter_num, chapter_text, chapter_goal)
         for attempt in range(1, MAX_COMPLETION_EVAL_RETRIES + 1):
-            evaluation = self._run_inference(
+            evaluation = self._run_lean_inference(
                 TaskType.REVIEW_CHAPTER,
-                prompt,
-                add_to_chat=False,
+                system_content,
+                user_content,
                 max_tokens=8,
             )
             parsed = self._parse_completion_evaluation(evaluation)
@@ -1422,7 +1586,7 @@ class WorkflowWorker(QObject):
                 self.project.chapters.append(ch)
 
             self._extract_and_merge_characters(chapter_text)
-            self._extract_and_merge_world_info(chapter_text, source_type="chapter")
+            self._update_world_incremental(chapter_text, source_type="chapter")
             storage.save_project(self.project)
             self.step_finished.emit(f"Chapter {chapter_num}", chapter_text)
 
@@ -1464,7 +1628,8 @@ class WorkflowWorker(QObject):
             self.project.current_chapter = pending - 1
             logger.info(f"[write_book] Writing Chapter {pending}/{total}.")
             self.step_started.emit(f"Writing Chapter {pending}/{total}...")
-            self._run_write_chapter()
+            with _StepTimer(f"write_book chapter {pending}/{total} (total)"):
+                self._run_write_chapter()
             written += 1
 
             if self._cancelled:
@@ -1565,6 +1730,16 @@ class WorkflowWorker(QObject):
             self.step_finished.emit(f"Review of Chapter {chapter_num}", result)
 
     def _run_rewrite_chapter(self) -> None:
+        """
+        Turns Review feedback into a chapter fix WITHOUT asking the model
+        to re-output the chapter. The model receives the chapter text (it
+        needs it to write exact SEARCH text) but is instructed to respond
+        with ONLY PatchEngine SEARCH/REPLACE/DELETE blocks; those are
+        validated and applied to `chapter.content` in place. If validation
+        or application fails (even after one retry with the error fed
+        back), `chapter.content` is left completely untouched — there is
+        no silent partial edit and no fallback to a full rewrite.
+        """
         chapter_num = self.project.current_chapter
         if chapter_num == 0:
             chapter_num = len(self.project.chapters)
@@ -1581,41 +1756,114 @@ class WorkflowWorker(QObject):
             )
             return
 
-        self.step_started.emit(f"Rewriting Chapter {chapter_num} with review feedback...")
+        self.step_started.emit(f"Patching Chapter {chapter_num} from review feedback...")
 
-        if self.extra_input:
-            prompt = self.extra_input
-        else:
-            rewrite_parts = [
-                f"Chapter {chapter_num}: '{chapter.title}'\n\n"
-                f"Current content:\n{chapter.content}\n\n"
-                f"Review feedback to address:\n{chapter.last_review}"
-            ]
-            style_frag = self.project.writing_style.to_prompt_fragment()
-            if style_frag:
-                rewrite_parts.append(f"Style to preserve:\n{style_frag}")
+        style_frag = self.project.writing_style.to_prompt_fragment()
+        intent = self.project.author_intent
+        intent_lines = []
+        if intent.emotional_journey:
+            intent_lines.append(f"Emotional tone to sustain: {intent.emotional_journey}")
+        if intent.avoid:
+            intent_lines.append(f"Avoid entirely: {intent.avoid}")
 
-            intent = self.project.author_intent
-            intent_lines = []
-            if intent.emotional_journey:
-                intent_lines.append(f"Emotional tone to sustain: {intent.emotional_journey}")
-            if intent.avoid:
-                intent_lines.append(f"Avoid entirely: {intent.avoid}")
-            if intent_lines:
-                rewrite_parts.append("\n".join(intent_lines))
+        language = self._response_language()
+        language_note = f" Write any new/changed text in {language}." if language else ""
 
-            prompt = "\n\n".join(rewrite_parts)
-
-        result = self._run_inference(
-            TaskType.REWRITE_CHAPTER, prompt, add_to_chat=True, max_tokens=self._content_max_tokens()
+        system_content = (
+            "You are a precise novel line-editor. You fix a chapter by "
+            "emitting SEARCH/REPLACE (or DELETE) patch blocks against its "
+            "EXACT existing text. You NEVER rewrite or re-output the "
+            "chapter, even for a single-word fix — only the blocks below.\n\n"
+            "Respond with ONLY patch blocks, one per issue, no other text:\n\n"
+            "<<<<<<< REPLACE\n"
+            "exact text to change, copied verbatim from the chapter "
+            "(whitespace and punctuation must match exactly)\n"
+            "=======\n"
+            "corrected text\n"
+            ">>>>>>> REPLACE\n\n"
+            "For a pure deletion:\n"
+            "<<<<<<< DELETE\n"
+            "exact text to remove\n"
+            ">>>>>>> DELETE\n\n"
+            "SEARCH must match the chapter text exactly and uniquely — keep "
+            "each SEARCH block as short as possible while staying "
+            "unambiguous. Do not include untouched surrounding paragraphs."
+            f"{language_note}"
+            + (f"\n\nStyle to preserve:\n{style_frag}" if style_frag else "")
+            + (("\n\n" + "\n".join(intent_lines)) if intent_lines else "")
         )
-        if result:
-            chapter.content = result
-            chapter.reviewed = False  # it changed — worth another look before moving on
-            chapter.last_review = ""
-            self._extract_and_merge_characters(result)
-            storage.save_project(self.project)
-            self.step_finished.emit(f"Rewrite of Chapter {chapter_num}", result)
+
+        user_content = (
+            f"Chapter {chapter_num}: '{chapter.title}'\n\n"
+            f"Current content:\n{chapter.content}\n\n"
+            f"Review feedback to address:\n{chapter.last_review}"
+        )
+        if self.extra_input:
+            user_content += f"\n\nAdditional author note: {self.extra_input}"
+
+        raw = self._run_lean_inference(
+            TaskType.REWRITE_CHAPTER, system_content, user_content,
+            max_tokens=self._content_max_tokens(),
+        )
+        if not raw:
+            self.error_occurred.emit("The model returned no patch for this chapter.")
+            return
+
+        patches, parse_warnings = parse_patches(raw)
+        if not patches:
+            logger.warning(f"[chapter_patch] no valid patch blocks ({parse_warnings}).")
+            self.error_occurred.emit(
+                "The model's response didn't contain any valid patch blocks. "
+                "Try \"Rewrite with Feedback\" again."
+            )
+            return
+
+        original_content = chapter.content
+        result = apply_patches(original_content, patches)
+
+        if not result.success:
+            retry_user = user_content + "\n\n" + format_errors_for_retry(result.errors)
+            raw_retry = self._run_lean_inference(
+                TaskType.REWRITE_CHAPTER, system_content, retry_user,
+                max_tokens=self._content_max_tokens(),
+            )
+            if raw_retry:
+                retry_patches, _ = parse_patches(raw_retry)
+                if retry_patches:
+                    result = apply_patches(original_content, retry_patches)
+
+        if not result.success:
+            reasons = "; ".join(e.reason for e in result.errors) or "unknown error"
+            logger.warning(f"[chapter_patch] Chapter {chapter_num}: patch failed after retry ({reasons}).")
+            self.error_occurred.emit(
+                f"Could not apply the model's patch to Chapter {chapter_num} even after "
+                f"a retry ({reasons}). The chapter was left unchanged — try Review again."
+            )
+            return
+
+        chapter.content = result.document
+        chapter.reviewed = False  # it changed — worth another look before moving on
+        chapter.last_review = ""
+        self._extract_and_merge_characters(result.document)
+
+        # _run_lean_inference deliberately doesn't touch chat (raw
+        # SEARCH/REPLACE blocks aren't something the author needs to see) —
+        # add a short human-readable summary instead, same pattern used by
+        # chapter continuation.
+        self.project.chat_messages.append(ChatMessage(
+            role=MessageRole.USER,
+            content=self.extra_input or f"Rewrite Chapter {chapter_num} with review feedback",
+        ))
+        self.project.chat_messages.append(ChatMessage(
+            role=MessageRole.ASSISTANT,
+            content=f"*(Applied {result.applied} patch(es) to Chapter {chapter_num} based on the review feedback.)*",
+        ))
+
+        storage.save_project(self.project)
+        self.step_finished.emit(
+            f"Patched Chapter {chapter_num} ({result.applied} change(s) applied)",
+            result.document,
+        )
 
     def _run_update_memory(self) -> None:
         self.step_started.emit("Updating story memory...")
@@ -1634,91 +1882,97 @@ class WorkflowWorker(QObject):
             return
 
         existing_memory = self.project.memory.strip() or "(empty)"
-
         world = self.project.world.strip() or "(none)"
-
         characters = "\n".join(
             f"- {c.name}: {c.description}"
             for c in self.project.characters
         ) or "(none)"
+        chapter_content = chapter.content
 
-        prompt = f"""You are a story-continuity editor updating the STORY MEMORY for a novel.
+        # This call goes through _run_lean_inference (system+user only, no
+        # build_context_for_model) specifically because World/Characters/
+        # Memory are already embedded below by hand — running it through the
+        # normal context builder would inject those same three sections a
+        # second time into the system prompt, wasting tokens and, on a full
+        # chapter, risking a context overflow (this used to happen here).
+        #
+        # Cap each embedded section defensively too, keeping the END of the
+        # chapter — Story Memory only cares about where things stand as of
+        # the chapter's ending, not its opening, which is what's most likely
+        # to already be covered by World/Characters/the previous Memory.
+        WORLD_CAP, CHAR_CAP, MEMORY_CAP, CHAPTER_CAP = 2000, 1500, 2500, 14000
+        if len(world) > WORLD_CAP:
+            world = "[...]\n" + world[-WORLD_CAP:]
+        if len(characters) > CHAR_CAP:
+            characters = "[...]\n" + characters[-CHAR_CAP:]
+        if len(existing_memory) > MEMORY_CAP:
+            existing_memory = "[...]\n" + existing_memory[-MEMORY_CAP:]
+        if len(chapter_content) > CHAPTER_CAP:
+            chapter_content = "[... earlier part of the chapter omitted for length ...]\n\n" + chapter_content[-CHAPTER_CAP:]
 
-Story Memory is a WORKING NOTES document for the WRITER. Its only purpose is to help write the NEXT chapter without contradicting what already happened.
+        system_content = (
+            "You are a story-continuity editor updating the STORY MEMORY for a novel.\n\n"
+            "Story Memory is a WORKING NOTES document for the WRITER. Its only purpose "
+            "is to help write the NEXT chapter without contradicting what already happened.\n\n"
+            "The following are stored SEPARATELY — do NOT copy anything from the chapter "
+            "into these categories:\n"
+            "- World & Setting already tracks: geography, locations, how magic/tech "
+            "works, history, culture, factions\n"
+            "- Characters already tracks: names, roles, physical appearance, personality\n\n"
+            "Rewrite the Story Memory sections below. Keep ONLY what a writer needs to "
+            "avoid contradictions in the NEXT chapter.\n\n"
+            "INCLUDE:\n"
+            "- Where characters physically are RIGHT NOW at the end of this chapter\n"
+            "- What is actively happening or about to happen (current crisis, mission, scene)\n"
+            "- What each main character is trying to do and why (only if it changed this chapter)\n"
+            "- Relationship shifts that happened in THIS chapter (conflict, alliance, betrayal)\n"
+            "- Objects, items, or states that changed hands or status\n"
+            "- Plot threads that were OPENED but not resolved in this chapter\n\n"
+            "EXCLUDE (these belong in World & Setting or Characters, not here):\n"
+            "- Descriptions of places (geography, architecture) — already in World & Setting\n"
+            "- How magic or technology works — already in World & Setting\n"
+            "- Physical appearance of characters — already in Characters\n"
+            "- Backstory or history — already in World & Setting\n"
+            "- Anything that was already resolved and no longer affects the next chapter\n\n"
+            "OUTPUT FORMAT — use exactly these section headers, leave a section empty "
+            "rather than filling it with World/Character data:\n\n"
+            "# Current Location\n"
+            "(where the main characters are right now, one line each)\n\n"
+            "# Current Situation\n"
+            "(what is actively happening at the end of this chapter)\n\n"
+            "# Active Goals\n"
+            "(what each main character is trying to achieve RIGHT NOW)\n\n"
+            "# Relationship Changes This Chapter\n"
+            "(only changes that happened in this chapter)\n\n"
+            "# Item / Status Changes\n"
+            "(objects, abilities, or conditions that changed)\n\n"
+            "# Open Plot Threads\n"
+            "(unresolved threads from this and previous chapters)\n\n"
+            "Output ONLY the updated Story Memory. No explanation. No markdown code fences."
+        )
 
-The following are stored SEPARATELY — do NOT copy anything from the chapter into these categories:
-- World & Setting already tracks: geography, locations, how magic/tech works, history, culture, factions
-- Characters already tracks: names, roles, physical appearance, personality
+        user_content = (
+            "==================================================\n"
+            "WORLD & SETTING (already tracked — do not repeat)\n"
+            "==================================================\n"
+            f"{world}\n\n"
+            "==================================================\n"
+            "CHARACTERS (already tracked — do not repeat)\n"
+            "==================================================\n"
+            f"{characters}\n\n"
+            "==================================================\n"
+            "CURRENT STORY MEMORY (update this)\n"
+            "==================================================\n"
+            f"{existing_memory}\n\n"
+            "==================================================\n"
+            "NEW CHAPTER TO PROCESS\n"
+            "==================================================\n"
+            f"Chapter {chapter_num}: {chapter.title}\n\n"
+            f"{chapter_content}"
+        )
 
-==================================================
-WORLD & SETTING (already tracked — do not repeat)
-==================================================
-{world}
-
-==================================================
-CHARACTERS (already tracked — do not repeat)
-==================================================
-{characters}
-
-==================================================
-CURRENT STORY MEMORY (update this)
-==================================================
-{existing_memory}
-
-==================================================
-NEW CHAPTER TO PROCESS
-==================================================
-Chapter {chapter_num}: {chapter.title}
-
-{chapter.content}
-
-==================================================
-INSTRUCTIONS
-==================================================
-Rewrite the Story Memory sections below. Keep ONLY what a writer needs to avoid contradictions in the NEXT chapter.
-
-INCLUDE:
-- Where characters physically are RIGHT NOW at the end of this chapter
-- What is actively happening or about to happen (current crisis, mission, scene)
-- What each main character is trying to do and why (only if it changed this chapter)
-- Relationship shifts that happened in THIS chapter (conflict, alliance, betrayal)
-- Objects, items, or states that changed hands or status
-- Plot threads that were OPENED but not resolved in this chapter
-
-EXCLUDE (these belong in World & Setting or Characters, not here):
-- Descriptions of places (geography, architecture) — already in World & Setting
-- How magic or technology works — already in World & Setting
-- Physical appearance of characters — already in Characters
-- Backstory or history — already in World & Setting
-- Anything that was already resolved and no longer affects the next chapter
-
-OUTPUT FORMAT — use exactly these section headers, leave a section empty rather than filling it with World/Character data:
-
-# Current Location
-(where the main characters are right now, one line each)
-
-# Current Situation
-(what is actively happening at the end of this chapter)
-
-# Active Goals
-(what each main character is trying to achieve RIGHT NOW)
-
-# Relationship Changes This Chapter
-(only changes that happened in this chapter)
-
-# Item / Status Changes
-(objects, abilities, or conditions that changed)
-
-# Open Plot Threads
-(unresolved threads from this and previous chapters)
-
-Output ONLY the updated Story Memory. No explanation. No markdown code fences."""
-
-        result = self._run_inference(
-            TaskType.UPDATE_MEMORY,
-            prompt,
-            add_to_chat=False,
-            max_tokens=1500,
+        result = self._run_lean_inference(
+            TaskType.UPDATE_MEMORY, system_content, user_content, max_tokens=1500,
         )
 
         if result:
