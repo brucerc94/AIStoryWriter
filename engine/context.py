@@ -282,13 +282,16 @@ def _compact_sections(
         "Author Instructions": max(80, max_context_tokens // 40),
     }
     if task == TaskType.WRITE_CHAPTER:
-        budgets["Outline"] = max(budgets["Outline"], max_context_tokens // 5)
         budgets["Memory"] = max(budgets["Memory"], max_context_tokens // 10)
         budgets["Chat Summary"] = max(budgets["Chat Summary"], max_context_tokens // 20)
-        chapter_num = project.current_chapter + 1 if project.current_chapter else max(1, len(project.chapters) + 1)
-        specific = _extract_outline_section(project.outline, chapter_num)
-        if specific:
-            sections["Outline"] = specific
+        # _run_write_chapter (workflow.py) already embeds this chapter's
+        # outline entry directly in the user message — with a "binding,
+        # follow exactly" framing — and falls back to the full outline
+        # there too if no matching "## Chapter N" heading is found. Either
+        # way it's guaranteed to already be in-band, so injecting it again
+        # here would just double it in the same request. Drop it from the
+        # system side for this task only.
+        sections["Outline"] = ""
     if task in (TaskType.CHAT, TaskType.REVIEW_CHAPTER):
         budgets["Chat Summary"] = max(budgets["Chat Summary"], max_context_tokens // 12)
         budgets["Memory"] = max(budgets["Memory"], max_context_tokens // 12)
