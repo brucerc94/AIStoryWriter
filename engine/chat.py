@@ -51,6 +51,8 @@ import threading
 from pathlib import Path
 from typing import Callable, Iterator, Optional
 
+from sympy import true
+
 from engine import gguf_meta, llama_features
 
 _llama_available = False
@@ -320,7 +322,7 @@ class LLMEngine:
                 n_ctx=n_ctx,
                 n_gpu_layers=n_gpu_layers,
                 n_threads=n_threads,
-                verbose=False,
+                verbose=true,
                 **extra_kwargs,
             )
             self._current_path = model_path

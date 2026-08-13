@@ -78,6 +78,10 @@ def _estimate_task_instruction(task: TaskType) -> str:
         TaskType.WRITE_SYNOPSIS: (
             "Write a compelling 5-10 paragraph synopsis for this novel. "
             "Cover the main premise, central conflict, and emotional core. "
+            "Every character mentioned must have a proper name — if none was "
+            "given by the author, invent one yourself that fits the story's "
+            "setting and tone, rather than referring to them generically "
+            "(\"the protagonist\", \"the hero\", etc.). "
             "Write only the synopsis text."
         ),
         TaskType.GENERATE_OUTLINE: (
@@ -96,6 +100,11 @@ def _estimate_task_instruction(task: TaskType) -> str:
             "produce precisely that many, numbered sequentially starting at 1 "
             "— do not stop early or pad with extra chapters. If no number is "
             "given, use enough chapters to tell the full story. "
+            "Every character who appears must have a proper name. If the "
+            "synopsis or author notes don't name a character, invent a "
+            "fitting name yourself based on the story's setting, culture, "
+            "and tone — never refer to a character as \"the protagonist\", "
+            "\"the hero\", \"[Name]\", or any other placeholder. "
             "When you mention or generate characters, their description must stay purely visual: "
             "age, overall appearance, visible physical traits, notable scars/features, and clothing/style. "
             "Do not include personality, backstory, secrets, memory, or motivations in the description."
