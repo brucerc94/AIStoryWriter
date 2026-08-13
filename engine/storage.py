@@ -216,8 +216,8 @@ def load_project(project_id: str) -> Optional[Project]:
                 except Exception:
                     pass
 
-        logger.info(f"Loaded project '{project.title}' ({project_id}), "
-                    f"{len(project.chapters)} chapter(s), {len(project.chat_messages)} chat message(s).")
+        logger.debug(f"Loaded project '{project.title}' ({project_id}), "
+                     f"{len(project.chapters)} chapter(s), {len(project.chat_messages)} chat message(s).")
         return project
     except Exception as e:
         logger.error(f"Error loading project {project_id}: {e}")
@@ -293,7 +293,7 @@ def save_project(project: Project) -> None:
         md_f = chdir / f"chapter_{ch.number:03d}.md"
         _write_text_encrypted(md_f, content)
 
-    logger.info(f"Saved project '{project.title}' ({project.id}).")
+    logger.debug(f"Saved project '{project.title}' ({project.id}).")
 
 
 def delete_project(project_id: str) -> None:
