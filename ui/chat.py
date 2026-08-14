@@ -237,12 +237,16 @@ class StreamingBubble(QFrame):
         QTimer.singleShot(0, self.content_edit._update_height)
 
     def append_token(self, token: str) -> None:
-        cursor = self.content_edit.textCursor()
-        cursor.movePosition(QTextCursor.End)
-        cursor.insertText(token)
-        self.content_edit.setTextCursor(cursor)
-        # No manual height math needed here anymore — AutoResizeTextEdit
-        # recomputes its own height via document().contentsChanged.
+        try:
+            cursor = self.content_edit.textCursor()
+            cursor.movePosition(QTextCursor.End)
+            cursor.insertText(token)
+            self.content_edit.setTextCursor(cursor)
+        except RuntimeError:
+            # content_edit's C++ object was already destroyed — swallow silently.
+            # The parent MessagesWidget.append_streaming_token() will null its
+            # reference on the next call so future tokens skip the dead object.
+            pass
 
     def get_text(self) -> str:
         return self.content_edit.toPlainText()
@@ -260,9 +264,21 @@ class ChatMessagesArea(QWidget):
         self._streaming_bubble: Optional[StreamingBubble] = None
 
     def load_messages(self, messages: list[ChatMessage]) -> None:
-        """Render all messages. Called when opening a project."""
-        # Clear existing
-        while self._layout.count() > 1:  # keep the stretch
+        """Render all messages. Called when opening a project.
+
+        If a streaming bubble is currently live (a thread is actively writing
+        into it), we NULL our reference BEFORE clearing the layout so that
+        the layout's deleteLater() call destroys the C++ widget but we no
+        longer hold a Python pointer that future append_streaming_token() calls
+        could dereference into an already-dead C++ object (libshiboken crash).
+        Those calls become no-ops for the rest of the generation — text is
+        still accumulated in the thread and saved to disk correctly.
+        """
+        # Disown the streaming bubble BEFORE clearing so deleteLater() on
+        # the layout items doesn't leave us with a dangling C++ pointer.
+        self._streaming_bubble = None
+
+        while self._layout.count() > 1:  # keep the trailing stretch
             item = self._layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
@@ -300,8 +316,15 @@ class ChatMessagesArea(QWidget):
         self._layout.insertWidget(self._layout.count() - 1, self._streaming_bubble)
 
     def append_streaming_token(self, token: str) -> None:
-        if self._streaming_bubble:
+        if self._streaming_bubble is None:
+            return
+        try:
             self._streaming_bubble.append_token(token)
+        except RuntimeError:
+            # The C++ object was destroyed (e.g. by a concurrent load_messages
+            # deleteLater() flush) between the None check and the call.
+            # Null our reference so subsequent tokens skip immediately.
+            self._streaming_bubble = None
 
     def finalize_streaming(self) -> Optional[str]:
         """Remove streaming bubble, return accumulated text."""
@@ -353,6 +376,9 @@ class ChatPanel(QWidget):
     # Emitted when the workflow thread starts/stops, so other panels can disable their generate buttons
     # Args: (is_busy: bool, project_name: str)
     busy_changed = Signal(bool, str)
+    # Emitted every time the status text changes (task step description, model loading, idle)
+    # Args: (message: str)  — empty string means idle
+    status_changed = Signal(str)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -401,35 +427,9 @@ class ChatPanel(QWidget):
 
         layout.addWidget(header)
 
-        # Status bar for model loading / task progress — a small card that
-        # reads as "the AI is actively working", not a frozen app.
-        self.status_bar = QFrame()
-        self.status_bar.setObjectName("aiStatusBar")
-        self.status_bar.setFixedHeight(36)
-        status_layout = QVBoxLayout(self.status_bar)
-        status_layout.setContentsMargins(16, 4, 16, 4)
-        status_layout.setSpacing(2)
-
-        status_top = QHBoxLayout()
-        status_top.setSpacing(8)
-        self.status_icon = QLabel("⠋")
-        self.status_icon.setObjectName("aiStatusIcon")
-        self.status_icon.setFixedWidth(14)
-        status_top.addWidget(self.status_icon)
-        self.status_label = QLabel("")
-        self.status_label.setObjectName("aiStatusLabel")
-        status_top.addWidget(self.status_label, 1)
-        status_layout.addLayout(status_top)
-
-        self.status_progress = QProgressBar()
-        self.status_progress.setObjectName("aiProgress")
-        self.status_progress.setRange(0, 0)  # indeterminate — busy, not stalled
-        self.status_progress.setTextVisible(False)
-        self.status_progress.setFixedHeight(3)
-        status_layout.addWidget(self.status_progress)
-
-        self.status_bar.hide()
-        layout.addWidget(self.status_bar)
+        # Status is now shown in the global Activity Bar in MainWindow.
+        # We keep dummy references so existing _show_status/_hide_status
+        # calls don't crash while we redirect them to status_changed.
 
         # Banner shown when the user switches to another project while a
         # thread is still running for the previous one.
@@ -778,17 +778,24 @@ class ChatPanel(QWidget):
         self._bg_banner.hide()
 
     def _show_status(self, msg: str) -> None:
-        self.status_label.setText(msg)
-        self.status_icon.setText(self._spinner_frames[self._spinner_index])
-        self.status_bar.show()
+        self._status_msg_cache = msg
+        self.status_changed.emit(msg)
         if not self._spinner_timer.isActive():
             self._spinner_timer.start()
 
     def _hide_status(self) -> None:
         self._spinner_timer.stop()
-        self.status_bar.hide()
-        self.status_label.setText("")
+        self._status_msg_cache = ""
+        self.status_changed.emit("")
 
     def _advance_spinner(self) -> None:
         self._spinner_index = (self._spinner_index + 1) % len(self._spinner_frames)
-        self.status_icon.setText(self._spinner_frames[self._spinner_index])
+        # Re-emit so the global Activity Bar updates its spinner character
+        # without needing to know the spinner state internally.
+        # We emit the last known message (empty = idle, skip the re-emit).
+        if self._last_status_msg:
+            self.status_changed.emit(self._last_status_msg)
+
+    @property
+    def _last_status_msg(self) -> str:
+        return getattr(self, "_status_msg_cache", "")

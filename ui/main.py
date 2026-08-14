@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QSplitter,
     QStatusBar,
@@ -47,8 +48,12 @@ from ui.styles import (
     COLOR_ACCENT_DIM,
     COLOR_ACCENT_HOVER,
     COLOR_BORDER,
+    COLOR_SUCCESS,
     COLOR_SURFACE,
+    COLOR_SURFACE_RAISED,
     COLOR_TEXT,
+    COLOR_TEXT_DIM,
+    COLOR_TEXT_MUTED,
 )
 from ui.widgets import EmptyStateCard, SizeAdjustingTabWidget
 
@@ -169,6 +174,66 @@ class MainWindow(QMainWindow):
 
         right_layout.addWidget(title_bar)
 
+        # ── Activity Bar ──────────────────────────────────────────────────────
+        # Always-visible stripe showing exactly what the AI is doing right now.
+        # Idle: dim dot + "Listo". Active: animated spinner + step description.
+        self._activity_bar = QFrame()
+        self._activity_bar.setFixedHeight(38)
+        self._activity_bar.setStyleSheet(
+            f"QFrame {{ background: {COLOR_SURFACE_RAISED}; "
+            f"border-bottom: 1px solid {COLOR_BORDER}; }}"
+        )
+        ab_layout = QHBoxLayout(self._activity_bar)
+        ab_layout.setContentsMargins(20, 0, 20, 0)
+        ab_layout.setSpacing(10)
+
+        # Phase dot — filled circle whose color flips idle↔active
+        self._ab_dot = QLabel("●")
+        self._ab_dot.setFixedWidth(14)
+        self._ab_dot.setStyleSheet(
+            f"color: {COLOR_TEXT_MUTED}; font-size: 10px; background: transparent;"
+        )
+        ab_layout.addWidget(self._ab_dot)
+
+        # Spinner character (braille frames) — only visible while busy
+        self._ab_spinner_lbl = QLabel("")
+        self._ab_spinner_lbl.setFixedWidth(14)
+        self._ab_spinner_lbl.setStyleSheet(
+            f"color: {COLOR_ACCENT}; font-size: 13px; font-weight: 700; "
+            "font-family: Consolas, monospace; background: transparent;"
+        )
+        self._ab_spinner_lbl.hide()
+        ab_layout.addWidget(self._ab_spinner_lbl)
+
+        # Main status label
+        self._ab_label = QLabel("Listo")
+        self._ab_label.setStyleSheet(
+            f"color: {COLOR_TEXT_DIM}; font-size: 12px; background: transparent;"
+        )
+        ab_layout.addWidget(self._ab_label, 1)
+
+        # Thin progress bar — indeterminate pulse while active, hidden at idle
+        self._ab_progress = QProgressBar()
+        self._ab_progress.setRange(0, 0)
+        self._ab_progress.setTextVisible(False)
+        self._ab_progress.setFixedSize(120, 3)
+        self._ab_progress.setStyleSheet(
+            f"QProgressBar {{ background: {COLOR_SURFACE}; border: none; border-radius: 1px; }}"
+            f"QProgressBar::chunk {{ background: {COLOR_ACCENT}; border-radius: 1px; }}"
+        )
+        self._ab_progress.hide()
+        ab_layout.addWidget(self._ab_progress)
+
+        # Spinner timer (shared — chat.py's own timer drives text updates via signal)
+        self._ab_spinner_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+        self._ab_spinner_idx = 0
+        self._ab_timer = QTimer(self)
+        self._ab_timer.setInterval(90)
+        self._ab_timer.timeout.connect(self._ab_tick)
+
+        right_layout.addWidget(self._activity_bar)
+        # ─────────────────────────────────────────────────────────────────────
+
         self.tabs = SizeAdjustingTabWidget()
         self.tabs.setDocumentMode(True)
 
@@ -224,6 +289,7 @@ class MainWindow(QMainWindow):
 
         self.chat_panel.project_updated.connect(self._on_ai_task_finished)
         self.chat_panel.busy_changed.connect(self._on_chat_busy_changed)
+        self.chat_panel.status_changed.connect(self._on_status_changed)
 
         self.models_panel.assignments_changed.connect(self._on_project_edited)
 
@@ -236,14 +302,46 @@ class MainWindow(QMainWindow):
     def _on_chat_busy_changed(self, busy: bool, project_name: str) -> None:
         """Propagate thread busy state to panels that have AI-trigger buttons."""
         self.story_panel.set_busy(busy, project_name)
-        # ImagesPanel has its own thread management and is unaffected by
-        # the chat/story workflow thread — leave it alone.
-        if busy:
-            self.status.showMessage(
-                f"Generating in \"{project_name}\"…  (you can browse other projects)"
-            )
+        if not busy:
+            self._set_activity(busy=False, msg="Listo")
+
+    def _on_status_changed(self, msg: str) -> None:
+        """Receive step-level status text from ChatPanel and show in the Activity Bar."""
+        if msg:
+            self._set_activity(busy=True, msg=msg)
         else:
-            self.status.showMessage("Ready", 3000)
+            self._set_activity(busy=False, msg="Listo")
+
+    def _set_activity(self, busy: bool, msg: str) -> None:
+        """Update the Activity Bar between idle and active states."""
+        if busy:
+            self._ab_dot.setStyleSheet(
+                f"color: {COLOR_ACCENT}; font-size: 10px; background: transparent;"
+            )
+            self._ab_label.setStyleSheet(
+                f"color: {COLOR_TEXT}; font-size: 12px; font-weight: 600; background: transparent;"
+            )
+            self._ab_label.setText(msg)
+            self._ab_spinner_lbl.show()
+            self._ab_progress.show()
+            if not self._ab_timer.isActive():
+                self._ab_timer.start()
+        else:
+            self._ab_dot.setStyleSheet(
+                f"color: {COLOR_TEXT_MUTED}; font-size: 10px; background: transparent;"
+            )
+            self._ab_label.setStyleSheet(
+                f"color: {COLOR_TEXT_DIM}; font-size: 12px; background: transparent;"
+            )
+            self._ab_label.setText(msg)
+            self._ab_spinner_lbl.hide()
+            self._ab_spinner_lbl.setText("")
+            self._ab_progress.hide()
+            self._ab_timer.stop()
+
+    def _ab_tick(self) -> None:
+        self._ab_spinner_idx = (self._ab_spinner_idx + 1) % len(self._ab_spinner_frames)
+        self._ab_spinner_lbl.setText(self._ab_spinner_frames[self._ab_spinner_idx])
 
     def _open_project(self, project_id: str) -> None:
         project = storage.load_project(project_id)
