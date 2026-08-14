@@ -44,6 +44,25 @@ _TOK_RE = re.compile(
     r" — (?P<toks>[\d.]+) tok/s \(TTFT (?P<ttft>[\d.]+) ms\)"
 )
 
+# Evaluation log lines emitted by _evaluate_chapter_completion:
+#   [eval] ── Chapter 3 completion check (after pass 2) ──  847 words written so far
+_EVAL_START_RE = re.compile(
+    r"\[eval\] ── Chapter (?P<ch>\d+) completion check \(after pass (?P<pass>\d+)\)"
+    r" ──\s+(?P<words>\d+) words"
+)
+#   [eval] Attempt 1/2 — sending to model…
+_EVAL_ATTEMPT_RE = re.compile(r"\[eval\] Attempt (?P<n>\d+)/(?P<total>\d+)")
+#   [eval] Attempt 1: model said 'false' → verdict: FALSE →
+_EVAL_VERDICT_RE = re.compile(
+    r"\[eval\] Attempt \d+: model said (?P<raw>[^\s→]+).*?verdict: (?P<verdict>TRUE|FALSE)"
+)
+#   [eval] Attempt 1: model returned unparseable output: '...'
+_EVAL_UNPARSEABLE_RE = re.compile(r"\[eval\] Attempt \d+:.*unparseable.*: (?P<raw>.+)")
+#   [eval] All N attempts failed … treating as FALSE
+_EVAL_ALLFAILED_RE = re.compile(r"\[eval\] All \d+ attempts failed")
+#   [eval] ── Result for Chapter 3: STOP — chapter complete. ──
+_EVAL_RESULT_RE = re.compile(r"\[eval\] ── Result for Chapter (?P<ch>\d+): (?P<action>.+?) ──")
+
 # Hard cap on retained lines so a long run (especially with "Show full
 # prompt" enabled in Settings) can't grow this widget's document — and the
 # app's memory — without bound. Oldest lines are dropped first.
@@ -144,6 +163,57 @@ class ConsolePanel(QWidget):
         _, self._stat_status = _stat_pair("estado")
         stats_layout.addStretch()
         layout.addWidget(stats_bar)
+
+        # ── Completion-evaluator panel ────────────────────────────────────────
+        # Shows every step of the true/false evaluator in real time:
+        # which chapter + pass triggered it, each model attempt and what it
+        # returned, and the final verdict. Collapsed when nothing is running.
+        eval_bar = QFrame()
+        eval_bar.setStyleSheet(
+            f"QFrame {{ background: {COLOR_SURFACE_RAISED}; "
+            f"border: 1px solid {COLOR_BORDER}; border-radius: 6px; }}"
+        )
+        eval_layout = QVBoxLayout(eval_bar)
+        eval_layout.setContentsMargins(12, 6, 12, 6)
+        eval_layout.setSpacing(4)
+
+        eval_title_row = QHBoxLayout()
+        eval_title_lbl = QLabel("Evaluador de capítulo")
+        eval_title_lbl.setStyleSheet(
+            f"color: {COLOR_TEXT_MUTED}; font-size: 10px; font-weight: 600; "
+            "text-transform: uppercase; letter-spacing: 0.05em; background: transparent;"
+        )
+        eval_title_row.addWidget(eval_title_lbl)
+        eval_title_row.addStretch()
+        self._eval_chapter_lbl = QLabel("")
+        self._eval_chapter_lbl.setStyleSheet(
+            f"color: {COLOR_TEXT_DIM}; font-size: 11px; font-family: Consolas, monospace; "
+            "background: transparent;"
+        )
+        eval_title_row.addWidget(self._eval_chapter_lbl)
+        eval_layout.addLayout(eval_title_row)
+
+        # Attempt rows — up to MAX_COMPLETION_EVAL_RETRIES (2) shown
+        self._eval_attempt_rows: list[QLabel] = []
+        for _ in range(3):   # 3 slots to be safe regardless of constant value
+            row_lbl = QLabel("")
+            row_lbl.setStyleSheet(
+                f"color: {COLOR_TEXT}; font-size: 12px; font-family: Consolas, monospace; "
+                "background: transparent; padding-left: 8px;"
+            )
+            eval_layout.addWidget(row_lbl)
+            self._eval_attempt_rows.append(row_lbl)
+
+        # Final verdict row
+        self._eval_verdict_lbl = QLabel("")
+        self._eval_verdict_lbl.setStyleSheet(
+            f"font-size: 13px; font-weight: 700; font-family: Consolas, monospace; "
+            "background: transparent; padding-left: 8px;"
+        )
+        eval_layout.addWidget(self._eval_verdict_lbl)
+
+        self._eval_bar = eval_bar
+        layout.addWidget(eval_bar)
         # ─────────────────────────────────────────────────────────────────────
 
         header = QHBoxLayout()
@@ -223,11 +293,12 @@ class ConsolePanel(QWidget):
                 self._scroll_to_bottom()
 
     def _append_line(self, line: str) -> None:
-        # Always try to update the stats bar, even while paused — the user
-        # can see the numbers without looking at the scrolling log.
+        # Always update stat/eval panels even while paused — numbers are
+        # useful to glance at without having to unpause the log.
         m = _TOK_RE.search(line)
         if m:
             self._update_stats(m)
+        self._check_eval_line(line)
 
         if self._paused:
             self._pending_while_paused.append(line)
@@ -240,6 +311,83 @@ class ConsolePanel(QWidget):
         self._trim_if_needed()
         if self.autoscroll_check.isChecked():
             self._scroll_to_bottom()
+
+    def _check_eval_line(self, line: str) -> None:
+        """Parse a single log line and update the eval panel if it's relevant."""
+        m = _EVAL_START_RE.search(line)
+        if m:
+            self._eval_chapter_lbl.setText(
+                f"Cap. {m.group('ch')}  pass {m.group('pass')}  "
+                f"({m.group('words')} palabras)"
+            )
+            # Reset attempt rows for a new evaluation round
+            for row in self._eval_attempt_rows:
+                row.setText("")
+            self._eval_verdict_lbl.setText("")
+            return
+
+        m = _EVAL_ATTEMPT_RE.search(line)
+        if m:
+            idx = int(m.group("n")) - 1
+            if 0 <= idx < len(self._eval_attempt_rows):
+                self._eval_attempt_rows[idx].setText(
+                    f"  Intento {m.group('n')}/{m.group('total')}  →  consultando modelo…"
+                )
+            return
+
+        m = _EVAL_VERDICT_RE.search(line)
+        if m:
+            raw     = m.group("raw").strip("'\"")
+            verdict = m.group("verdict")
+            is_true = verdict == "TRUE"
+            color   = "#4ec97b" if is_true else COLOR_WARNING
+            # Find which attempt slot to update (most recent non-empty or last)
+            slot = 0
+            for i, row in enumerate(self._eval_attempt_rows):
+                if row.text():
+                    slot = i
+            self._eval_attempt_rows[slot].setStyleSheet(
+                f"color: {color}; font-size: 12px; font-family: Consolas, monospace; "
+                "background: transparent; padding-left: 8px;"
+            )
+            self._eval_attempt_rows[slot].setText(
+                f"  → modelo: {raw!r}  ({'✓ true' if is_true else '✗ false'})"
+            )
+            return
+
+        m = _EVAL_UNPARSEABLE_RE.search(line)
+        if m:
+            raw = m.group("raw").strip()
+            slot = 0
+            for i, row in enumerate(self._eval_attempt_rows):
+                if row.text():
+                    slot = i
+            self._eval_attempt_rows[slot].setStyleSheet(
+                f"color: #e05c5c; font-size: 12px; font-family: Consolas, monospace; "
+                "background: transparent; padding-left: 8px;"
+            )
+            self._eval_attempt_rows[slot].setText(f"  → ⚠ imparseable: {raw}")
+            return
+
+        if _EVAL_ALLFAILED_RE.search(line):
+            self._eval_verdict_lbl.setStyleSheet(
+                "color: #e05c5c; font-size: 13px; font-weight: 700; "
+                "font-family: Consolas, monospace; background: transparent; padding-left: 8px;"
+            )
+            self._eval_verdict_lbl.setText("⚠ Todos los intentos fallaron → FALSE (continuará)")
+            return
+
+        m = _EVAL_RESULT_RE.search(line)
+        if m:
+            action   = m.group("action")
+            is_stop  = "STOP" in action or "complete" in action.lower()
+            color    = "#4ec97b" if is_stop else COLOR_WARNING
+            icon     = "✓" if is_stop else "→"
+            self._eval_verdict_lbl.setStyleSheet(
+                f"color: {color}; font-size: 13px; font-weight: 700; "
+                "font-family: Consolas, monospace; background: transparent; padding-left: 8px;"
+            )
+            self._eval_verdict_lbl.setText(f"{icon}  {action}")
 
     def _update_stats(self, m: re.Match) -> None:
         status   = m.group("status")

@@ -1407,26 +1407,51 @@ class WorkflowWorker(QObject):
         return "\n\n".join(parts).strip()
 
     def _parse_completion_evaluation(self, text: str) -> dict:
-        normalized = text.strip().lower()
-        if normalized == "true":
-            return {"valid": True, "completed": True}
-        if normalized == "false":
-            return {"valid": True, "completed": False}
-        return {"valid": False, "completed": False}
+        """
+        Robust true/false parser. Accepts any response that unambiguously
+        contains 'true' or 'false' — handles trailing punctuation, leading
+        spaces, markdown backticks, and sentence-cased output that some models
+        emit despite the prompt instructions.
+
+        Returns {"valid": True/False, "completed": True/False, "raw": text}.
+        "valid" is True whenever the response is unambiguous. It is False only
+        when the response contains neither keyword or contains both (contradictory).
+        """
+        raw = text.strip()
+        normalized = raw.lower()
+        # Strip common noise characters the model may wrap the token in
+        cleaned = normalized.strip("` \t\n.,;:\"'")
+        has_true  = "true"  in cleaned
+        has_false = "false" in cleaned
+        if has_true and not has_false:
+            return {"valid": True, "completed": True,  "raw": raw}
+        if has_false and not has_true:
+            return {"valid": True, "completed": False, "raw": raw}
+        # Ambiguous or empty
+        return {"valid": False, "completed": False, "raw": raw}
 
     def _evaluate_chapter_completion(
         self,
         chapter_num: int,
         chapter_text: str,
         chapter_goal: str,
+        generation_pass: int = 0,
     ) -> dict:
-        # _build_chapter_evaluation_prompt is fully self-contained (goal +
-        # outline entry + draft) — it needs no Synopsis/Characters/World/
-        # Style. Routing it through _run_inference(REVIEW_CHAPTER) would
-        # build and send that full context anyway for a single true/false
-        # token, and this runs up to MAX_COMPLETION_EVAL_RETRIES times per
-        # generation pass (up to 3 passes per chapter) — so lean_inference
-        # here removes a real, repeated chunk of wasted prompt tokens/time.
+        """
+        Ask the model whether the chapter draft is complete.
+
+        Logs every attempt verbosely so the Console panel can show the
+        full evaluation flow in real time. Never falls back silently —
+        if all retries return an unparseable response the final result is
+        still logged as INVALID so the user can see what the model said.
+        """
+        word_count = len(chapter_text.split())
+        logger.info(
+            "[eval] ── Chapter %d completion check (after pass %d) ──  "
+            "%d words written so far",
+            chapter_num, generation_pass, word_count,
+        )
+
         system_content = (
             "You decide whether a novel chapter draft is complete relative to "
             "its stated goal. Respond with exactly one token: true or false. "
@@ -1435,25 +1460,48 @@ class WorkflowWorker(QObject):
             "false → the chapter is not complete and must continue."
         )
         user_content = self._build_chapter_evaluation_prompt(chapter_num, chapter_text, chapter_goal)
+
+        final = {"valid": False, "completed": False, "raw": ""}
         for attempt in range(1, MAX_COMPLETION_EVAL_RETRIES + 1):
-            evaluation = self._run_lean_inference(
+            logger.info("[eval] Attempt %d/%d — sending to model…", attempt, MAX_COMPLETION_EVAL_RETRIES)
+            raw_output = self._run_lean_inference(
                 TaskType.REVIEW_CHAPTER,
                 system_content,
                 user_content,
-                max_tokens=8,
+                max_tokens=16,   # slightly more room so noise doesn't eat the token
             )
-            parsed = self._parse_completion_evaluation(evaluation)
+            parsed = self._parse_completion_evaluation(raw_output)
+            verdict = "TRUE ✓" if parsed["completed"] else "FALSE →"
             if parsed["valid"]:
                 logger.info(
-                    f"[write_chapter] evaluation: {evaluation.strip().lower()}"
+                    "[eval] Attempt %d: model said %r → verdict: %s",
+                    attempt, raw_output.strip(), verdict,
                 )
-                return parsed
+                final = parsed
+                break
+            else:
+                logger.warning(
+                    "[eval] Attempt %d: model returned unparseable output: %r  "
+                    "(expected 'true' or 'false')",
+                    attempt, raw_output.strip(),
+                )
+                final = parsed  # keep last attempt's raw for the log below
+
+        if not final["valid"]:
+            # All retries exhausted without a clean answer.
+            # Treat as "not complete" so the loop tries one more continuation
+            # rather than truncating silently — but log it loudly so the user
+            # can see what happened.
             logger.warning(
-                f"[write_chapter] invalid completion evaluation output on attempt {attempt}: "
-                f"{evaluation.strip()!r}"
+                "[eval] All %d attempts failed to get a clean true/false. "
+                "Last raw output: %r  — treating as FALSE (will continue).",
+                MAX_COMPLETION_EVAL_RETRIES, final.get("raw", ""),
             )
-        logger.warning("[write_chapter] completion evaluator failed; defaulting to false.")
-        return {"valid": False, "completed": False}
+            final["completed"] = False
+
+        action = "STOP — chapter complete." if final["completed"] else "CONTINUE — more text needed."
+        logger.info("[eval] ── Result for Chapter %d: %s ──", chapter_num, action)
+        return final
 
     def _run_write_chapter(self) -> None:
         # Never trust project.current_chapter alone — if it's stale (e.g.
@@ -1570,6 +1618,7 @@ class WorkflowWorker(QObject):
                 chapter_num,
                 chapter_text,
                 chapter_goal,
+                generation_pass=generation_pass,
             )
 
             if evaluation["completed"]:
