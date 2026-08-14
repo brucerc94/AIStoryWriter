@@ -436,7 +436,13 @@ class LLMEngine:
         stream_callback: Callable[[str], None],
         cancel_check: Optional[Callable[[], bool]] = None,
     ) -> str:
-        chunks = []
+        import time
+
+        chunks: list[str] = []
+        token_count = 0
+        t_first: Optional[float] = None   # timestamp of first content token
+        t_start = time.perf_counter()
+
         response_iter = self._create_chat_completion(
             messages=messages,
             max_tokens=max_tokens,
@@ -457,8 +463,29 @@ class LLMEngine:
             delta = chunk["choices"][0]["delta"]
             token = delta.get("content", "")
             if token:
+                now = time.perf_counter()
+                if t_first is None:
+                    t_first = now   # first real content token — ends the TTFT window
                 chunks.append(token)
+                token_count += 1
                 stream_callback(token)
+
+        t_end = time.perf_counter()
+        total_elapsed = t_end - t_start
+        # Decode speed = tokens produced / time spent actually decoding
+        # (excludes prompt-eval / TTFT, which is dominated by the prefill pass).
+        if t_first is not None and token_count > 0:
+            decode_elapsed = max(t_end - t_first, 1e-6)
+            tok_per_sec = token_count / decode_elapsed
+            cancelled = cancel_check is not None and cancel_check()
+            status = "cancelado" if cancelled else "completo"
+            logger.info(
+                "[llm_engine] Generacion %s: %d tokens en %.1fs — "
+                "%.1f tok/s (TTFT %.0f ms)",
+                status, token_count, total_elapsed,
+                tok_per_sec, (t_first - t_start) * 1000,
+            )
+
         return "".join(chunks)
 
 

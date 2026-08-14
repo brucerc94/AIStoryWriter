@@ -350,6 +350,9 @@ class ChatPanel(QWidget):
 
     # Emitted when the project's data changes (so other panels can refresh)
     project_updated = Signal()
+    # Emitted when the workflow thread starts/stops, so other panels can disable their generate buttons
+    # Args: (is_busy: bool, project_name: str)
+    busy_changed = Signal(bool, str)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -357,6 +360,9 @@ class ChatPanel(QWidget):
         self._thread: Optional[WorkflowThread] = None
         self._current_task: Optional[TaskType] = None
         self._settings = None
+        # Tracks which project the currently-running thread belongs to,
+        # independently of self._project (what the user is *viewing* now).
+        self._active_project: Optional[Project] = None
         self._build_ui()
 
     def set_settings(self, settings) -> None:
@@ -424,6 +430,24 @@ class ChatPanel(QWidget):
 
         self.status_bar.hide()
         layout.addWidget(self.status_bar)
+
+        # Banner shown when the user switches to another project while a
+        # thread is still running for the previous one.
+        self._bg_banner = QFrame()
+        self._bg_banner.setObjectName("bgBanner")
+        self._bg_banner.setFixedHeight(30)
+        self._bg_banner.setStyleSheet(
+            f"QFrame#bgBanner {{ background: {COLOR_ACCENT_DIM}; border-bottom: 1px solid {COLOR_ACCENT}; }}"
+        )
+        bg_layout = QHBoxLayout(self._bg_banner)
+        bg_layout.setContentsMargins(14, 0, 14, 0)
+        self._bg_label = QLabel("")
+        self._bg_label.setStyleSheet(
+            f"color: {COLOR_ACCENT}; font-size: 12px; background: transparent;"
+        )
+        bg_layout.addWidget(self._bg_label)
+        self._bg_banner.hide()
+        layout.addWidget(self._bg_banner)
 
         # Cycles the small spinner glyph while a task is running, so the
         # status bar visibly animates instead of just holding static text.
@@ -517,15 +541,20 @@ class ChatPanel(QWidget):
     def load_project(self, project: Project) -> None:
         self._project = project
         if self._thread and self._thread.isRunning():
-            # A task is actively streaming into a live bubble right now.
-            # Rebuilding the message list here would delete that bubble
-            # out from under the running WorkflowThread and crash when it
-            # tries to finalize — e.g. from clicking the same project
-            # again in the sidebar mid-generation. Just update which
-            # project we're pointed at; _on_step_finished() will refresh
-            # the message list safely once the task actually completes.
-            logger.info("load_project: task in progress, deferring message list refresh.")
+            # A thread is still running for _active_project (the old project).
+            # Don't touch the message list (the streaming bubble lives there),
+            # and don't reassign _active_project — the thread still owns that.
+            # Show a banner so the user knows background work is continuing.
+            logger.info(
+                "load_project: thread running for '%s', switching view to '%s'.",
+                self._active_project.title if self._active_project else "?",
+                project.title,
+            )
+            self._update_bg_banner()
+            self.messages_widget.load_messages(project.chat_messages)
+            QTimer.singleShot(100, self._scroll_to_bottom)
             return
+        self._active_project = project
         self.messages_widget.load_messages(project.chat_messages)
         QTimer.singleShot(100, self._scroll_to_bottom)
 
@@ -541,6 +570,9 @@ class ChatPanel(QWidget):
         never rebuilds any widgets.
         """
         self._project = project
+        # If no thread is running, keep _active_project in sync too.
+        if not (self._thread and self._thread.isRunning()):
+            self._active_project = project
 
     def _scroll_to_bottom(self) -> None:
         sb = self.scroll_area.verticalScrollBar()
@@ -573,9 +605,10 @@ class ChatPanel(QWidget):
         self.messages_widget.begin_streaming()
         self._scroll_to_bottom()
 
+        self._active_project = self._project  # lock in the project for this run
         self._set_busy(True)
         self._thread = WorkflowThread(
-            project=self._project,
+            project=self._active_project,
             task=TaskType.CHAT,
             extra_input=text,
             settings=self._settings,
@@ -595,12 +628,13 @@ class ChatPanel(QWidget):
         if self._thread and self._thread.isRunning():
             return
 
+        self._active_project = self._project  # lock in the project for this run
         self.messages_widget.begin_streaming()
         self._scroll_to_bottom()
         self._set_busy(True)
 
         self._thread = WorkflowThread(
-            project=self._project,
+            project=self._active_project,
             task=task,
             extra_input=extra_input,
             settings=self._settings,
@@ -637,10 +671,14 @@ class ChatPanel(QWidget):
 
     def _on_step_finished(self, step: str, result: str) -> None:
         self.messages_widget.finalize_streaming()
-        # The worker already added the messages to project.chat_messages
-        # Reload to show them properly
-        if self._project:
-            self.messages_widget.load_messages(self._project.chat_messages)
+        # The worker already added the messages to _active_project.chat_messages.
+        # Always reload from _active_project (the project the thread belongs to),
+        # NOT self._project (the one the user might currently be viewing).
+        if self._active_project:
+            # Only update the visible message list if the user is still
+            # looking at the same project the thread is working on.
+            if self._project and self._project.id == self._active_project.id:
+                self.messages_widget.load_messages(self._active_project.chat_messages)
         self._scroll_to_bottom()
         self.project_updated.emit()
 
@@ -652,8 +690,17 @@ class ChatPanel(QWidget):
     def _on_finished(self) -> None:
         self._set_busy(False)
         self._hide_status()
+        self._bg_banner.hide()
         self._scroll_to_bottom()
         self._current_task = None
+        # After the thread finishes, _active_project and _project should
+        # agree on which project the user is viewing.
+        if self._project and self._active_project and self._project.id != self._active_project.id:
+            # User was viewing a different project while the thread ran.
+            # Now that the thread is done, keep _active_project pointed at
+            # whatever the user is currently viewing.
+            self._active_project = self._project
+        self.busy_changed.emit(False, "")
 
     def _stop_generation(self) -> None:
         if self._thread:
@@ -712,6 +759,23 @@ class ChatPanel(QWidget):
         self.stop_btn.setEnabled(True)
         self.stop_btn.setText("Stop")
         self.input_edit.setEnabled(not busy)
+        project_name = self._active_project.title if self._active_project else ""
+        self.busy_changed.emit(busy, project_name)
+
+    def _update_bg_banner(self) -> None:
+        """Show/hide the background-generation banner based on thread state."""
+        if self._thread and self._thread.isRunning() and self._active_project:
+            viewing_different = (
+                self._project is None
+                or self._project.id != self._active_project.id
+            )
+            if viewing_different:
+                self._bg_label.setText(
+                    f"⟳ Generating in background: \"{self._active_project.title}\"…"
+                )
+                self._bg_banner.show()
+                return
+        self._bg_banner.hide()
 
     def _show_status(self, msg: str) -> None:
         self.status_label.setText(msg)

@@ -223,6 +223,7 @@ class MainWindow(QMainWindow):
         self.story_panel.project_changed.connect(self._on_project_edited)
 
         self.chat_panel.project_updated.connect(self._on_ai_task_finished)
+        self.chat_panel.busy_changed.connect(self._on_chat_busy_changed)
 
         self.models_panel.assignments_changed.connect(self._on_project_edited)
 
@@ -231,6 +232,18 @@ class MainWindow(QMainWindow):
     # ──────────────────────────────────────────────
     # Project lifecycle
     # ──────────────────────────────────────────────
+
+    def _on_chat_busy_changed(self, busy: bool, project_name: str) -> None:
+        """Propagate thread busy state to panels that have AI-trigger buttons."""
+        self.story_panel.set_busy(busy, project_name)
+        # ImagesPanel has its own thread management and is unaffected by
+        # the chat/story workflow thread — leave it alone.
+        if busy:
+            self.status.showMessage(
+                f"Generating in \"{project_name}\"…  (you can browse other projects)"
+            )
+        else:
+            self.status.showMessage("Ready", 3000)
 
     def _open_project(self, project_id: str) -> None:
         project = storage.load_project(project_id)
@@ -241,6 +254,9 @@ class MainWindow(QMainWindow):
 
         self._current_project = project
         self.story_panel.load_project(project)
+        # ChatPanel handles mid-generation project switches internally:
+        # it keeps _active_project pointed at the running thread's project
+        # and shows the bg-gen banner when the user switches away.
         self.chat_panel.load_project(project)
         self.models_panel.load_project(project)
         self.images_panel.load_project(project)
@@ -272,6 +288,11 @@ class MainWindow(QMainWindow):
         """An AI workflow task finished and persisted its own changes."""
         if not self._current_project:
             return
+        # The finished task may have been for a project the user navigated
+        # away from (the user browsed to project B while project A generated).
+        # In that case, _active_project inside ChatPanel still points at A.
+        # We always reload the *currently viewed* project so the UI is fresh,
+        # but we also sync ChatPanel's reference regardless.
         refreshed = storage.load_project(self._current_project.id)
         if refreshed is None:
             return

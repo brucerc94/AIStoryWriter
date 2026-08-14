@@ -208,7 +208,8 @@ class SynopsisTab(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
 
-        header = SectionHeader("Synopsis", "✨ Generate Synopsis")
+        self._gen_header = SectionHeader("Synopsis", "✨ Generate Synopsis")
+        header = self._gen_header
         if header.action_btn:
             header.action_btn.clicked.connect(
                 lambda: self.task_requested.emit(TaskType.WRITE_SYNOPSIS, "")
@@ -239,6 +240,18 @@ class SynopsisTab(QWidget):
 
     def save_to(self, project: Project) -> None:
         project.synopsis = self.editor.get_text()
+
+    def set_busy(self, busy: bool, project_name: str = "") -> None:
+        """Disable/enable the Generate button while a task is running."""
+        if self._gen_header.action_btn:
+            self._gen_header.action_btn.setEnabled(not busy)
+            if busy and project_name:
+                self._gen_header.action_btn.setToolTip(
+                    f"Generating content for \"{project_name}\"…"
+                )
+            else:
+                self._gen_header.action_btn.setToolTip("")
+        self.editor.save_btn.setEnabled(not busy)
 
 
 
@@ -629,13 +642,15 @@ class OutlineTab(QWidget):
         header_row.addWidget(self.count_lbl)
         header_row.addStretch()
 
-        gen_btn = QPushButton("✨ Generate Outline")
+        self._gen_btn = QPushButton("✨ Generate Outline")
+        gen_btn = self._gen_btn
         gen_btn.setObjectName("accent")
         gen_btn.setToolTip("Opens the outline wizard, then generates the full outline.")
         gen_btn.clicked.connect(self._on_generate_clicked)
         header_row.addWidget(gen_btn)
 
-        review_btn = QPushButton("Review Outline")
+        self._review_btn = QPushButton("Review Outline")
+        review_btn = self._review_btn
         review_btn.setToolTip("Ask the AI to critique this outline's structure and pacing.")
         review_btn.clicked.connect(lambda: self.task_requested.emit(TaskType.REVIEW_OUTLINE, ""))
         header_row.addWidget(review_btn)
@@ -717,6 +732,17 @@ class OutlineTab(QWidget):
         self._project = project
         self.editor.set_text(project.outline)
         self._update_count_label()
+
+    def set_busy(self, busy: bool, project_name: str = "") -> None:
+        tip = f"Generating content for \"{project_name}\"…" if busy and project_name else ""
+        self._gen_btn.setEnabled(not busy)
+        self._review_btn.setEnabled(not busy)
+        if busy:
+            self._gen_btn.setToolTip(tip)
+            self._review_btn.setToolTip(tip)
+        else:
+            self._gen_btn.setToolTip("Opens the outline wizard, then generates the full outline.")
+            self._review_btn.setToolTip("Ask the AI to critique this outline's structure and pacing.")
 
     def save_to(self, project: Project) -> None:
         project.outline = self.editor.get_text()
@@ -1387,6 +1413,24 @@ class ChaptersTab(QWidget):
             self._update_empty_state()
             self.project_changed.emit()
 
+    def set_busy(self, busy: bool, project_name: str = "") -> None:
+        tip = f"Generating content for \"{project_name}\"…" if busy and project_name else ""
+        for btn in (self.write_btn, self.write_book_btn, self.review_btn,
+                    self.rewrite_btn, self.memory_btn):
+            btn.setEnabled(not busy)
+            if busy:
+                btn.setToolTip(tip)
+        if not busy:
+            self.write_btn.setToolTip("Writes the next chapter in the story.")
+            self.write_book_btn.setToolTip(
+                "Writes every remaining chapter in the outline, one after another."
+            )
+            self.review_btn.setToolTip("Ask the AI to critique the selected chapter.")
+            self.rewrite_btn.setToolTip(
+                "Rewrites this chapter using the feedback from the last Review. "
+                "Run Review first."
+            )
+
     def _update_word_count(self) -> None:
         text = self.chapter_editor.toPlainText()
         words = len(text.split()) if text.strip() else 0
@@ -1558,7 +1602,8 @@ class WorldTab(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
 
-        header = SectionHeader("World & Setting", "✨ Generate World")
+        self._gen_header = SectionHeader("World & Setting", "✨ Generate World")
+        header = self._gen_header
         if header.action_btn:
             header.action_btn.setToolTip(
                 "Adds to your existing world notes — doesn't overwrite them."
@@ -1594,6 +1639,18 @@ class WorldTab(QWidget):
 
     def load(self, project: Project) -> None:
         self.editor.set_text(project.world)
+
+    def set_busy(self, busy: bool, project_name: str = "") -> None:
+        if self._gen_header.action_btn:
+            self._gen_header.action_btn.setEnabled(not busy)
+            if busy and project_name:
+                self._gen_header.action_btn.setToolTip(
+                    f"Generating content for \"{project_name}\"…"
+                )
+            else:
+                self._gen_header.action_btn.setToolTip(
+                    "Adds to your existing world notes — doesn't overwrite them."
+                )
 
     def save_to(self, project: Project) -> None:
         project.world = self.editor.get_text()
@@ -2039,6 +2096,13 @@ class StoryPanel(QWidget):
         self.author_profile_tab.load(project)
         self.stats_tab.load(project)
         self.search_tab.load(project)
+
+    def set_busy(self, busy: bool, project_name: str = "") -> None:
+        """Disable/enable all AI-trigger buttons across every story sub-tab."""
+        self.synopsis_tab.set_busy(busy, project_name)
+        self.outline_tab.set_busy(busy, project_name)
+        self.world_tab.set_busy(busy, project_name)
+        self.chapters_tab.set_busy(busy, project_name)
 
     def _save_project(self) -> None:
         if self._project:

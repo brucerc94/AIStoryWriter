@@ -11,11 +11,13 @@ just to avoid alt-tabbing out to check progress on a long "Write Book" run.
 from __future__ import annotations
 
 import logging
+import re
 
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QFont, QTextCursor
 from PySide6.QtWidgets import (
     QCheckBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
@@ -24,7 +26,23 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ui.styles import COLOR_BORDER, COLOR_SURFACE, COLOR_TEXT, COLOR_TEXT_DIM
+from ui.styles import (
+    COLOR_ACCENT,
+    COLOR_BORDER,
+    COLOR_SURFACE,
+    COLOR_SURFACE_RAISED,
+    COLOR_TEXT,
+    COLOR_TEXT_DIM,
+    COLOR_TEXT_MUTED,
+    COLOR_WARNING,
+)
+
+# Matches the line emitted by LLMEngine._stream_generate:
+# "[llm_engine] Generacion completo: 312 tokens en 18.4s — 16.9 tok/s (TTFT 842 ms)"
+_TOK_RE = re.compile(
+    r"Generacion (?P<status>\w+): (?P<tokens>\d+) tokens en (?P<elapsed>[\d.]+)s"
+    r" — (?P<toks>[\d.]+) tok/s \(TTFT (?P<ttft>[\d.]+) ms\)"
+)
 
 # Hard cap on retained lines so a long run (especially with "Show full
 # prompt" enabled in Settings) can't grow this widget's document — and the
@@ -86,6 +104,47 @@ class ConsolePanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(8)
+
+        # ── Stats bar ─────────────────────────────────────────────────────────
+        # Shows tok/s, token count, elapsed time, and TTFT from the last
+        # completed generation. Updated automatically by parsing the log line
+        # that LLMEngine emits after each streaming call.
+        stats_bar = QFrame()
+        stats_bar.setStyleSheet(
+            f"QFrame {{ background: {COLOR_SURFACE_RAISED}; "
+            f"border: 1px solid {COLOR_BORDER}; border-radius: 6px; padding: 0; }}"
+        )
+        stats_layout = QHBoxLayout(stats_bar)
+        stats_layout.setContentsMargins(12, 6, 12, 6)
+        stats_layout.setSpacing(20)
+
+        def _stat_pair(label_text: str) -> tuple[QLabel, QLabel]:
+            lbl = QLabel(label_text)
+            lbl.setStyleSheet(
+                f"color: {COLOR_TEXT_MUTED}; font-size: 10px; font-weight: 600; "
+                "text-transform: uppercase; letter-spacing: 0.05em; background: transparent;"
+            )
+            val = QLabel("—")
+            val.setStyleSheet(
+                f"color: {COLOR_TEXT}; font-size: 13px; font-weight: 700; "
+                f"font-family: Consolas, monospace; background: transparent;"
+            )
+            col = QVBoxLayout()
+            col.setSpacing(1)
+            col.setContentsMargins(0, 0, 0, 0)
+            col.addWidget(lbl)
+            col.addWidget(val)
+            stats_layout.addLayout(col)
+            return lbl, val
+
+        _, self._stat_toks   = _stat_pair("tok/s")
+        _, self._stat_tokens = _stat_pair("tokens")
+        _, self._stat_time   = _stat_pair("elapsed")
+        _, self._stat_ttft   = _stat_pair("TTFT")
+        _, self._stat_status = _stat_pair("estado")
+        stats_layout.addStretch()
+        layout.addWidget(stats_bar)
+        # ─────────────────────────────────────────────────────────────────────
 
         header = QHBoxLayout()
         title = QLabel("Console")
@@ -164,6 +223,12 @@ class ConsolePanel(QWidget):
                 self._scroll_to_bottom()
 
     def _append_line(self, line: str) -> None:
+        # Always try to update the stats bar, even while paused — the user
+        # can see the numbers without looking at the scrolling log.
+        m = _TOK_RE.search(line)
+        if m:
+            self._update_stats(m)
+
         if self._paused:
             self._pending_while_paused.append(line)
             # Still cap the pending buffer so leaving it paused for a long
@@ -175,6 +240,31 @@ class ConsolePanel(QWidget):
         self._trim_if_needed()
         if self.autoscroll_check.isChecked():
             self._scroll_to_bottom()
+
+    def _update_stats(self, m: re.Match) -> None:
+        status   = m.group("status")
+        tokens   = int(m.group("tokens"))
+        elapsed  = float(m.group("elapsed"))
+        toks     = float(m.group("toks"))
+        ttft_ms  = float(m.group("ttft"))
+
+        # Colour the tok/s reading: green ≥ 10, amber 5–10, red < 5
+        if toks >= 10:
+            color = "#4ec97b"   # green-ish
+        elif toks >= 5:
+            color = COLOR_WARNING
+        else:
+            color = "#e05c5c"   # red
+
+        self._stat_toks.setText(f"{toks:.1f}")
+        self._stat_toks.setStyleSheet(
+            f"color: {color}; font-size: 13px; font-weight: 700; "
+            "font-family: Consolas, monospace; background: transparent;"
+        )
+        self._stat_tokens.setText(str(tokens))
+        self._stat_time.setText(f"{elapsed:.1f}s")
+        self._stat_ttft.setText(f"{ttft_ms:.0f} ms")
+        self._stat_status.setText(status)
 
     def _trim_if_needed(self) -> None:
         doc = self.text.document()
