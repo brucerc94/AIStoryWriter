@@ -40,6 +40,7 @@ logger = logging.getLogger("main")
 from PySide6.QtWidgets import QApplication
 
 from engine import storage
+from engine.outline_suggestion import install as install_outline_suggestion
 from ui.main import MainWindow
 from ui.resources import get_app_icon
 from ui.styles import MAIN_STYLESHEET
@@ -74,6 +75,11 @@ def main() -> int:
     app.setApplicationName("AI Story Studio")
     app.setStyleSheet(MAIN_STYLESHEET)
     app.setWindowIcon(get_app_icon())
+
+    # Install the targeted Outline "Regenerate with suggestion" extension
+    # after the normal UI/workflow modules are available, leaving the existing
+    # Generate Outline and Review Outline behavior untouched.
+    install_outline_suggestion()
 
     window = MainWindow()
     window.show()
