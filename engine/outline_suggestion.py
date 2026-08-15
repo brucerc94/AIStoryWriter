@@ -66,9 +66,6 @@ def _regenerate_outline(self) -> None:
 
     updated = result.strip()
     self.project.outline = updated
-
-    # Keep the chat transcript concise: record the author's actual suggestion,
-    # not the large internal prompt containing the whole outline.
     self.project.chat_messages.append(
         ChatMessage(
             role=MessageRole.USER,
@@ -79,11 +76,9 @@ def _regenerate_outline(self) -> None:
         ChatMessage(role=MessageRole.ASSISTANT, content=updated)
     )
 
-    # Keep the same post-processing used by normal outline generation.
     self._extract_and_merge_characters(updated)
     self._update_world_incremental(updated, source_type="outline")
     storage.save_project(self.project)
-
     self.step_finished.emit("Outline Regenerated", updated)
 
 
@@ -104,7 +99,6 @@ def _install_workflow_patch() -> None:
 
     if getattr(WorkflowWorker, "_outline_suggestion_patch", False):
         return
-
     original = WorkflowWorker._dispatch
     WorkflowWorker._dispatch = _dispatch_wrapper(original)
     WorkflowWorker._outline_suggestion_patch = True
@@ -122,21 +116,30 @@ def _install_outline_ui_patch() -> None:
     def patched_init(self, parent=None):
         original_init(self, parent)
 
-        header = self.layout().itemAt(0).widget()
+        # OutlineTab builds the header as a QHBoxLayout directly inside the
+        # root QVBoxLayout. itemAt(0) is therefore a layout, not a QWidget.
+        header = self.layout().itemAt(0).layout()
         if header is None:
             return
 
         self._suggestion_btn = QPushButton("✨ Regenerate with suggestion")
+        self._suggestion_btn.setObjectName("subtle")
         self._suggestion_btn.setToolTip(
             "Describe a change and regenerate the existing outline around that suggestion."
         )
         self._suggestion_btn.clicked.connect(lambda: _request_suggestion(self))
-        header.layout().insertWidget(3, self._suggestion_btn)
+        header.insertWidget(header.count(), self._suggestion_btn)
 
     def patched_set_busy(self, busy: bool, project_name: str = ""):
         original_set_busy(self, busy, project_name)
         if hasattr(self, "_suggestion_btn"):
             self._suggestion_btn.setEnabled(not busy)
+            if busy and project_name:
+                self._suggestion_btn.setToolTip(f"Generating content for \"{project_name}\"…")
+            else:
+                self._suggestion_btn.setToolTip(
+                    "Describe a change and regenerate the existing outline around that suggestion."
+                )
 
     def _request_suggestion(tab) -> None:
         if not tab._project or not tab.editor.get_text().strip():
