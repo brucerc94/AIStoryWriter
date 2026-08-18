@@ -81,6 +81,7 @@ class TaskType(str, Enum):
     WRITE_BOOK = "write_book"
     REVIEW_CHAPTER = "review_chapter"
     REWRITE_CHAPTER = "rewrite_chapter"
+    CHANGE_CHAPTER = "change_chapter"
     UPDATE_MEMORY = "update_memory"
     CONVERSATION_SUMMARY = "conversation_summary"
     CHAT = "chat"

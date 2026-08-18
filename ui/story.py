@@ -1166,6 +1166,67 @@ class ChapterListItem(QListWidgetItem):
         self.setData(Qt.UserRole, chapter.number)
 
 
+class ChangeChapterDialog(QDialog):
+    """
+    Modal dialog that collects the author's change instructions for a chapter.
+    Shows the chapter title for context and provides a multi-line text area
+    for the user to describe what they want the AI to change.
+    """
+
+    def __init__(self, chapter: Chapter, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(f"Change Chapter {chapter.number}")
+        self.setMinimumWidth(480)
+        self.setMinimumHeight(300)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Header label
+        header = QLabel(
+            f"<b>Chapter {chapter.number}: {chapter.title}</b><br>"
+            "<span style='color:#aaa;font-size:13px;'>"
+            "Describe what you want the AI to change in this chapter."
+            "</span>"
+        )
+        header.setTextFormat(Qt.RichText)
+        header.setWordWrap(True)
+        layout.addWidget(header)
+
+        # Instructions text area
+        self._text = QTextEdit()
+        self._text.setPlaceholderText(
+            "Examples:\n"
+            "• Make the dialogue between Ana and Carlos more tense and confrontational.\n"
+            "• Add a brief description of the setting at the start of the chapter.\n"
+            "• Remove the flashback in the middle — it slows the pacing.\n"
+            "• Change the ending so Elena decides to leave instead of stay."
+        )
+        self._text.setMinimumHeight(160)
+        layout.addWidget(self._text)
+
+        # Buttons
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("Apply Changes")
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def instructions(self) -> str:
+        return self._text.toPlainText().strip()
+
+    def _on_accept(self) -> None:
+        if not self.instructions():
+            QMessageBox.warning(
+                self,
+                "No Instructions",
+                "Please describe what you want to change before clicking Apply.",
+            )
+            return
+        self.accept()
+
+
 class ChaptersTab(QWidget):
     task_requested = Signal(TaskType, str)
     project_changed = Signal()
@@ -1323,6 +1384,13 @@ class ChaptersTab(QWidget):
         self.rewrite_btn.clicked.connect(self._rewrite_chapter)
         action_row.addWidget(self.rewrite_btn)
 
+        self.change_btn = QPushButton("✏ Change Chapter")
+        self.change_btn.setToolTip(
+            "Tell the AI what you want to change in this chapter and it will apply your instructions."
+        )
+        self.change_btn.clicked.connect(self._change_chapter)
+        action_row.addWidget(self.change_btn)
+
         self.memory_btn = QPushButton("Update Memory")
         self.memory_btn.clicked.connect(self._update_memory)
         action_row.addWidget(self.memory_btn)
@@ -1416,7 +1484,7 @@ class ChaptersTab(QWidget):
     def set_busy(self, busy: bool, project_name: str = "") -> None:
         tip = f"Generating content for \"{project_name}\"…" if busy and project_name else ""
         for btn in (self.write_btn, self.write_book_btn, self.review_btn,
-                    self.rewrite_btn, self.memory_btn):
+                    self.rewrite_btn, self.change_btn, self.memory_btn):
             btn.setEnabled(not busy)
             if busy:
                 btn.setToolTip(tip)
@@ -1429,6 +1497,9 @@ class ChaptersTab(QWidget):
             self.rewrite_btn.setToolTip(
                 "Rewrites this chapter using the feedback from the last Review. "
                 "Run Review first."
+            )
+            self.change_btn.setToolTip(
+                "Tell the AI what you want to change in this chapter and it will apply your instructions."
             )
 
     def _update_word_count(self) -> None:
@@ -1527,6 +1598,24 @@ class ChaptersTab(QWidget):
             return
         self._project.current_chapter = self._current_chapter.number
         self.task_requested.emit(TaskType.REWRITE_CHAPTER, "")
+
+    def _change_chapter(self) -> None:
+        if not self._current_chapter or not self._project:
+            return
+        if not self._current_chapter.content.strip():
+            QMessageBox.information(
+                self,
+                "No Chapter Content",
+                "This chapter has no content yet. Generate or write it first, "
+                "then use \"Change Chapter\" to modify it.",
+            )
+            return
+        dialog = ChangeChapterDialog(self._current_chapter, self)
+        if dialog.exec() == QDialog.Accepted:
+            instructions = dialog.instructions()
+            if instructions.strip():
+                self._project.current_chapter = self._current_chapter.number
+                self.task_requested.emit(TaskType.CHANGE_CHAPTER, instructions)
 
     def _update_memory(self) -> None:
         if not self._current_chapter or not self._project:

@@ -861,6 +861,8 @@ class WorkflowWorker(QObject):
                 self._run_review_chapter()
             elif task == TaskType.REWRITE_CHAPTER:
                 self._run_rewrite_chapter()
+            elif task == TaskType.CHANGE_CHAPTER:
+                self._run_change_chapter()
             elif task == TaskType.UPDATE_MEMORY:
                 self._run_update_memory()
             elif task == TaskType.CONVERSATION_SUMMARY:
@@ -1877,11 +1879,36 @@ class WorkflowWorker(QObject):
 
         patches, parse_warnings = parse_patches(raw)
         if not patches:
-            logger.warning(f"[chapter_patch] no valid patch blocks ({parse_warnings}).")
-            self.error_occurred.emit(
-                "The model's response didn't contain any valid patch blocks. "
-                "Try \"Rewrite with Feedback\" again."
+            logger.warning(f"[chapter_patch] no valid patch blocks ({parse_warnings}). Trying full-rewrite fallback.")
+            review_instruction = chapter.last_review
+            if self.extra_input:
+                review_instruction += f"\n\nAdditional author note: {self.extra_input}"
+            fallback_text = self._full_rewrite_fallback(
+                TaskType.REWRITE_CHAPTER,
+                chapter_num, chapter.title, chapter.content,
+                review_instruction,
+                "chapter_patch",
             )
+            if not fallback_text or not fallback_text.strip():
+                self.error_occurred.emit(
+                    "The model didn't return valid patches or a rewrite. "
+                    "Try \"Rewrite with Feedback\" again."
+                )
+                return
+            chapter.content = fallback_text.strip()
+            chapter.reviewed = False
+            chapter.last_review = ""
+            self._extract_and_merge_characters(chapter.content)
+            self.project.chat_messages.append(ChatMessage(
+                role=MessageRole.USER,
+                content=self.extra_input or f"Rewrite Chapter {chapter_num} with review feedback",
+            ))
+            self.project.chat_messages.append(ChatMessage(
+                role=MessageRole.ASSISTANT,
+                content=f"*(Rewrote Chapter {chapter_num} based on the review feedback.)*",
+            ))
+            storage.save_project(self.project)
+            self.step_finished.emit(f"Rewrote Chapter {chapter_num}", chapter.content)
             return
 
         original_content = chapter.content
@@ -1900,11 +1927,36 @@ class WorkflowWorker(QObject):
 
         if not result.success:
             reasons = "; ".join(e.reason for e in result.errors) or "unknown error"
-            logger.warning(f"[chapter_patch] Chapter {chapter_num}: patch failed after retry ({reasons}).")
-            self.error_occurred.emit(
-                f"Could not apply the model's patch to Chapter {chapter_num} even after "
-                f"a retry ({reasons}). The chapter was left unchanged — try Review again."
+            logger.warning(f"[chapter_patch] Chapter {chapter_num}: patch failed after retry ({reasons}). Trying full-rewrite fallback.")
+            review_instruction = chapter.last_review
+            if self.extra_input:
+                review_instruction += f"\n\nAdditional author note: {self.extra_input}"
+            fallback_text = self._full_rewrite_fallback(
+                TaskType.REWRITE_CHAPTER,
+                chapter_num, chapter.content, chapter.title,
+                review_instruction,
+                "chapter_patch",
             )
+            if not fallback_text or not fallback_text.strip():
+                self.error_occurred.emit(
+                    f"Could not apply or rewrite Chapter {chapter_num} ({reasons}). "
+                    "The chapter was left unchanged — try Review again."
+                )
+                return
+            chapter.content = fallback_text.strip()
+            chapter.reviewed = False
+            chapter.last_review = ""
+            self._extract_and_merge_characters(chapter.content)
+            self.project.chat_messages.append(ChatMessage(
+                role=MessageRole.USER,
+                content=self.extra_input or f"Rewrite Chapter {chapter_num} with review feedback",
+            ))
+            self.project.chat_messages.append(ChatMessage(
+                role=MessageRole.ASSISTANT,
+                content=f"*(Rewrote Chapter {chapter_num} based on the review feedback.)*",
+            ))
+            storage.save_project(self.project)
+            self.step_finished.emit(f"Rewrote Chapter {chapter_num}", chapter.content)
             return
 
         chapter.content = result.document
@@ -1929,6 +1981,221 @@ class WorkflowWorker(QObject):
         self.step_finished.emit(
             f"Patched Chapter {chapter_num} ({result.applied} change(s) applied)",
             result.document,
+        )
+
+    def _run_change_chapter(self) -> None:
+        """
+        Applies author-directed changes to a chapter using SEARCH/REPLACE patch
+        blocks. The author's instructions arrive via self.extra_input. The model
+        receives the full chapter text and must emit only patch blocks — never a
+        full rewrite — which are validated and applied in place. If validation
+        fails after one retry, the chapter is left untouched.
+        """
+        chapter_num = self.project.current_chapter
+        if chapter_num == 0:
+            chapter_num = len(self.project.chapters)
+
+        chapter = next((c for c in self.project.chapters if c.number == chapter_num), None)
+        if not chapter:
+            self.error_occurred.emit(f"Chapter {chapter_num} not found.")
+            return
+
+        if not chapter.content.strip():
+            self.error_occurred.emit(
+                f"Chapter {chapter_num} has no content yet. Write it first."
+            )
+            return
+
+        if not self.extra_input.strip():
+            self.error_occurred.emit("No change instructions provided.")
+            return
+
+        self.step_started.emit(f"Applying changes to Chapter {chapter_num}...")
+
+        style_frag = self.project.writing_style.to_prompt_fragment()
+        intent = self.project.author_intent
+        intent_lines = []
+        if intent.emotional_journey:
+            intent_lines.append(f"Emotional tone to sustain: {intent.emotional_journey}")
+        if intent.avoid:
+            intent_lines.append(f"Avoid entirely: {intent.avoid}")
+
+        language = self._response_language()
+        language_note = f" Write any new/changed text in {language}." if language else ""
+
+        system_content = (
+            "You are a precise novel line-editor. You modify a chapter by "
+            "emitting SEARCH/REPLACE (or DELETE) patch blocks against its "
+            "EXACT existing text. You NEVER rewrite or re-output the "
+            "chapter — only emit the minimal patch blocks needed to apply "
+            "the author's requested changes.\n\n"
+            "Respond with ONLY patch blocks, no other text:\n\n"
+            "<<<<<<< REPLACE\n"
+            "exact text to change, copied verbatim from the chapter "
+            "(whitespace and punctuation must match exactly)\n"
+            "=======\n"
+            "corrected text\n"
+            ">>>>>>> REPLACE\n\n"
+            "For a pure deletion:\n"
+            "<<<<<<< DELETE\n"
+            "exact text to remove\n"
+            ">>>>>>> DELETE\n\n"
+            "SEARCH must match the chapter text exactly and uniquely — keep "
+            "each SEARCH block as short as possible while staying "
+            "unambiguous. Only touch what the author asked to change."
+            f"{language_note}"
+            + (f"\n\nStyle to preserve:\n{style_frag}" if style_frag else "")
+            + (("\n\n" + "\n".join(intent_lines)) if intent_lines else "")
+        )
+
+        user_content = (
+            f"Chapter {chapter_num}: '{chapter.title}'\n\n"
+            f"Current content:\n{chapter.content}\n\n"
+            f"Author's change instructions:\n{self.extra_input.strip()}"
+        )
+
+        raw = self._run_lean_inference(
+            TaskType.CHANGE_CHAPTER, system_content, user_content,
+            max_tokens=self._content_max_tokens(),
+        )
+        if not raw:
+            self.error_occurred.emit("The model returned no patch for this chapter.")
+            return
+
+        patches, parse_warnings = parse_patches(raw)
+        if not patches:
+            logger.warning(f"[chapter_change] no valid patch blocks ({parse_warnings}). Trying full-rewrite fallback.")
+            fallback_text = self._full_rewrite_fallback(
+                TaskType.CHANGE_CHAPTER,
+                chapter_num, chapter.title, chapter.content,
+                self.extra_input.strip(),
+                "chapter_change",
+            )
+            if not fallback_text or not fallback_text.strip():
+                self.error_occurred.emit(
+                    "The model didn't return valid patches or a rewrite. "
+                    "Try \"Change Chapter\" again."
+                )
+                return
+            chapter.content = fallback_text.strip()
+            chapter.reviewed = False
+            self._extract_and_merge_characters(chapter.content)
+            self.project.chat_messages.append(ChatMessage(
+                role=MessageRole.USER,
+                content=self.extra_input.strip(),
+            ))
+            self.project.chat_messages.append(ChatMessage(
+                role=MessageRole.ASSISTANT,
+                content=f"*(Rewrote Chapter {chapter_num} applying your instructions.)*",
+            ))
+            storage.save_project(self.project)
+            self.step_finished.emit(f"Updated Chapter {chapter_num}", chapter.content)
+            return
+
+        original_content = chapter.content
+        result = apply_patches(original_content, patches)
+
+        if not result.success:
+            retry_user = user_content + "\n\n" + format_errors_for_retry(result.errors)
+            raw_retry = self._run_lean_inference(
+                TaskType.CHANGE_CHAPTER, system_content, retry_user,
+                max_tokens=self._content_max_tokens(),
+            )
+            if raw_retry:
+                retry_patches, _ = parse_patches(raw_retry)
+                if retry_patches:
+                    result = apply_patches(original_content, retry_patches)
+
+        if not result.success:
+            reasons = "; ".join(e.reason for e in result.errors) or "unknown error"
+            logger.warning(f"[chapter_change] Chapter {chapter_num}: patch failed after retry ({reasons}). Trying full-rewrite fallback.")
+            fallback_text = self._full_rewrite_fallback(
+                TaskType.CHANGE_CHAPTER,
+                chapter_num, chapter.title, chapter.content,
+                self.extra_input.strip(),
+                "chapter_change",
+            )
+            if not fallback_text or not fallback_text.strip():
+                self.error_occurred.emit(
+                    f"Could not apply the changes to Chapter {chapter_num} ({reasons}). "
+                    "The chapter was left unchanged — try again."
+                )
+                return
+            chapter.content = fallback_text.strip()
+            chapter.reviewed = False
+            self._extract_and_merge_characters(chapter.content)
+            self.project.chat_messages.append(ChatMessage(
+                role=MessageRole.USER,
+                content=self.extra_input.strip(),
+            ))
+            self.project.chat_messages.append(ChatMessage(
+                role=MessageRole.ASSISTANT,
+                content=f"*(Rewrote Chapter {chapter_num} applying your instructions.)*",
+            ))
+            storage.save_project(self.project)
+            self.step_finished.emit(f"Updated Chapter {chapter_num}", chapter.content)
+            return
+
+        chapter.content = result.document
+        chapter.reviewed = False
+        self._extract_and_merge_characters(result.document)
+
+        self.project.chat_messages.append(ChatMessage(
+            role=MessageRole.USER,
+            content=self.extra_input.strip(),
+        ))
+        self.project.chat_messages.append(ChatMessage(
+            role=MessageRole.ASSISTANT,
+            content=f"*(Applied {result.applied} change(s) to Chapter {chapter_num} based on your instructions.)*",
+        ))
+
+        storage.save_project(self.project)
+        self.step_finished.emit(
+            f"Updated Chapter {chapter_num} ({result.applied} change(s) applied)",
+            result.document,
+        )
+
+    def _full_rewrite_fallback(
+        self,
+        task: TaskType,
+        chapter_num: int,
+        chapter_title: str,
+        chapter_content: str,
+        instruction: str,
+        label: str,
+    ) -> str:
+        """
+        Fallback used by _run_rewrite_chapter and _run_change_chapter when the
+        model fails to produce valid SEARCH/REPLACE patch blocks.
+
+        Sends a simpler system+user prompt that asks the model to rewrite the
+        full chapter applying the given instruction, then returns the raw text.
+        Returns an empty string on failure.
+        """
+        language = self._response_language()
+        language_note = f" Write in {language}." if language else ""
+        style_frag = self.project.writing_style.to_prompt_fragment()
+
+        system_content = (
+            "You are an expert novel editor. "
+            "Rewrite the chapter below, applying only the author's instructions. "
+            "Preserve the overall voice, tone, and style. "
+            "Output ONLY the full rewritten chapter text — no commentary, no headers, "
+            f"no explanations.{language_note}"
+            + (f"\n\nStyle to preserve:\n{style_frag}" if style_frag else "")
+        )
+        user_content = (
+            f"Chapter {chapter_num}: '{chapter_title}'\n\n"
+            f"Current content:\n{chapter_content}\n\n"
+            f"Instructions:\n{instruction}"
+        )
+
+        logger.info(f"[{label}] patch failed — falling back to full-chapter rewrite.")
+        self.step_started.emit(f"Retrying Chapter {chapter_num} as full rewrite...")
+
+        return self._run_lean_inference(
+            task, system_content, user_content,
+            max_tokens=self._content_max_tokens(),
         )
 
     def _run_update_memory(self) -> None:

@@ -141,6 +141,13 @@ def _estimate_task_instruction(task: TaskType) -> str:
             "content. Do not summarize the changes or add commentary — output "
             "only the rewritten chapter text."
         ),
+        TaskType.CHANGE_CHAPTER: (
+            "Modify the chapter below according to the author's specific instructions. "
+            "Preserve the chapter's overall voice, tone, and style. Apply only the "
+            "requested changes — do not alter anything the author did not ask to change. "
+            "Write the full revised chapter content. "
+            "Do not summarize the changes or add commentary — output only the rewritten chapter text."
+        ),
         TaskType.UPDATE_MEMORY: (
             "Update the story memory file based on the latest chapter. "
             "Extract and record:\n"
@@ -223,7 +230,7 @@ def _section_payloads(
         if style_frag:
             parts.append(style_frag)
         creative_direction = "\n".join(parts)
-    elif task in (TaskType.WRITE_CHAPTER, TaskType.REWRITE_CHAPTER):
+    elif task in (TaskType.WRITE_CHAPTER, TaskType.REWRITE_CHAPTER, TaskType.CHANGE_CHAPTER):
         # For chapter writing: style always useful; from intent only the
         # emotional target and "avoid" list (themes/inspirations are outline-time).
         parts = []
@@ -729,6 +736,7 @@ def build_system_prompt(
         TaskType.GENERATE_OUTLINE,
         TaskType.WRITE_CHAPTER,
         TaskType.REWRITE_CHAPTER,
+        TaskType.CHANGE_CHAPTER,
         TaskType.GENERATE_WORLD,
         TaskType.UPDATE_MEMORY,
     }
@@ -818,6 +826,13 @@ def build_system_prompt(
             "continuity, prose issues, etc.). Write the full revised chapter "
             "content. Do not summarize the changes or add commentary — output "
             "only the rewritten chapter text."
+        ),
+        TaskType.CHANGE_CHAPTER: (
+            "Modify the chapter below according to the author's specific instructions. "
+            "Preserve the chapter's overall voice, tone, and style. Apply only the "
+            "requested changes — do not alter anything the author did not ask to change. "
+            "Write the full revised chapter content. "
+            "Do not summarize the changes or add commentary — output only the rewritten chapter text."
         ),
         TaskType.UPDATE_MEMORY: (
             "Update the story memory file based on the latest chapter. "
