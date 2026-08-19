@@ -1,0 +1,64 @@
+name: Apply Change Chapter context
+
+on:
+  push:
+    branches:
+      - agent/change-chapter-context
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: "!contains(github.event.head_commit.message, 'Apply Change Chapter context')"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply targeted workflow change
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("engine/workflow.py")
+          text = path.read_text(encoding="utf-8")
+
+          old_user = '''        user_content = (\n            f"Chapter {chapter_num}: '{chapter.title}'\\n\\n"\n            f"Current content:\\n{chapter.content}\\n\\n"\n            f"Author's change instructions:\\n{self.extra_input.strip()}"\n        )'''
+
+          new_user = '''        # Change Chapter intentionally receives only the continuity context\n        # needed for a safe edit: World, Story Memory, and the tail of the\n        # immediately previous chapter. The Outline is deliberately excluded.\n        world = self.project.world.strip() or "(none)"\n        memory = self.project.memory.strip() or "(none)"\n        previous_tail = "(none)"\n        if chapter_num > 1:\n            previous = next(\n                (c for c in self.project.chapters if c.number == chapter_num - 1),\n                None,\n            )\n            if previous and previous.content:\n                previous_tail = previous.content[-800:].strip()\n\n        continuity_context = (\n            f"World & Setting:\\n{world}\\n\\n"\n            f"Story Memory:\\n{memory}\\n\\n"\n            f"End of previous chapter for continuity only:\\n{previous_tail}"\n        )\n\n        user_content = (\n            f"{continuity_context}\\n\\n"\n            f"Chapter {chapter_num}: '{chapter.title}'\\n\\n"\n            f"Current content:\\n{chapter.content}\\n\\n"\n            f"Author's change instructions:\\n{self.extra_input.strip()}"\n        )'''
+
+          if text.count(old_user) != 1:
+              raise SystemExit(f"Expected exactly one Change Chapter user_content block, found {text.count(old_user)}")
+          text = text.replace(old_user, new_user, 1)
+
+          old_fallback_call_1 = '''                "chapter_change",\n            )'''
+          new_fallback_call_1 = '''                "chapter_change",\n                continuity_context,\n            )'''
+          if text.count(old_fallback_call_1) != 2:
+              raise SystemExit(f"Expected exactly two Change Chapter fallback calls, found {text.count(old_fallback_call_1)}")
+          text = text.replace(old_fallback_call_1, new_fallback_call_1, 2)
+
+          old_signature = '''        instruction: str,\n        label: str,\n    ) -> str:'''
+          new_signature = '''        instruction: str,\n        label: str,\n        context: str = "",\n    ) -> str:'''
+          if text.count(old_signature) != 1:
+              raise SystemExit(f"Expected exactly one fallback signature, found {text.count(old_signature)}")
+          text = text.replace(old_signature, new_signature, 1)
+
+          old_fallback_user = '''        user_content = (\n            f"Chapter {chapter_num}: '{chapter_title}'\\n\\n"\n            f"Current content:\\n{chapter_content}\\n\\n"\n            f"Instructions:\\n{instruction}"\n        )'''
+          new_fallback_user = '''        user_content = (\n            f"{context + chr(10) + chr(10) if context else ''}"\n            f"Chapter {chapter_num}: '{chapter_title}'\\n\\n"\n            f"Current content:\\n{chapter_content}\\n\\n"\n            f"Instructions:\\n{instruction}"\n        )'''
+          if text.count(old_fallback_user) != 1:
+              raise SystemExit(f"Expected exactly one fallback user_content block, found {text.count(old_fallback_user)}")
+          text = text.replace(old_fallback_user, new_fallback_user, 1)
+
+          path.write_text(text, encoding="utf-8")
+
+      - name: Validate Python
+        run: python -m py_compile engine/workflow.py
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add engine/workflow.py .github/workflows/apply-change-chapter-context.yml
+          git commit -m "Apply Change Chapter context" \
+            && git push origin HEAD:agent/change-chapter-context
