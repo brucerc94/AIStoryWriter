@@ -16,8 +16,10 @@
   </p>
 
   <p>
+    <a href="#demo">Demo</a> ·
     <a href="#screenshots">Screenshots</a> ·
     <a href="#how-it-works">How it works</a> ·
+    <a href="#using-the-ui">Using the UI</a> ·
     <a href="#recommended-models">Recommended models</a> ·
     <a href="#quick-start">Quick Start</a>
   </p>
@@ -25,7 +27,7 @@
 
 > **Status: In Development** — AI Story Studio is already usable, but it is **not a final or stable release yet**. The interface, workflows, model support, and behavior may continue to change while development progresses.
 
-> **Documentation policy:** this README describes the **current graphical interface only**. Internal classes, backend APIs, development scaffolding, prompt files, unexposed workflow tasks, and planned features are intentionally omitted.
+> **Documentation policy:** this README describes the **current graphical interface**. Internal classes, backend APIs, development scaffolding, prompt files, unexposed workflow tasks, and planned features are intentionally omitted.
 
 ---
 
@@ -39,29 +41,27 @@ The idea is deliberately simple: **you follow the workflow, and the AI helps at 
 
 ## How it works
 
-You do not need to learn a complicated system of agents, APIs, pipelines, or prompt files to use the application.
-
-The user-facing workflow is essentially:
+The main writing process is intentionally straightforward:
 
 ```text
 Create Project
       ↓
-Write / Generate Synopsis
+Synopsis
       ↓
-Write / Generate Outline
+Outline
       ↓
 Characters + World + Author
       ↓
-Generate Chapters
+Chapters
       ↓
-Edit / Change / Continue
+Edit / Review / Continue
       ↓
 Finish the Book
       ↓
 Export
 ```
 
-The application handles the underlying AI context and generation process for you. From the UI, the experience is intentionally centered on **what to do next**, not on how the backend works.
+You do not need to understand agents, APIs, pipelines, or prompt files to use the application. The UI handles the underlying context and model calls for you.
 
 ---
 
@@ -110,7 +110,7 @@ The application handles the underlying AI context and generation process for you
 | 🧠 **Memory** | Maintain story memory automatically during chapter generation while keeping manual editing available. |
 | 🎨 **Author** | Define creative intent and writing-style preferences. |
 | 💬 **Chat** | Ask questions, brainstorm, request writing help, attach a chapter, and control story context. |
-| 🖼️ **Images** | Generate book covers, scenes, locations, objects/items, and character portraits. |
+| 🖼️ **Images** | Generate book covers, scenes, locations, objects/items, and character portraits. Image generation currently operates as a separate tool from the main writing workflow. |
 | 📊 **Stats** | Track words, chapters, reading time, review status, progress, and chapter breakdowns. |
 | 🔎 **Search** | Search the project with normal text, case-sensitive mode, or regex. |
 | ⚙️ **Models & Settings** | Configure local GGUF models and generation/image settings. |
@@ -119,15 +119,169 @@ The application handles the underlying AI context and generation process for you
 
 ---
 
+## Using the UI
+
+This section is the easiest way to understand what to do when you first open the application.
+
+### 1. Create or open a project
+
+The **Projects** panel is on the left side of the window.
+
+Click **+ New** to create a project, enter a title, and optionally provide an initial synopsis. You can later open an existing project by clicking it in the list.
+
+Once a project is open, the main workspace appears on the right.
+
+### 2. Configure your local model
+
+Before asking the application to generate text, make sure a GGUF model is configured.
+
+Open **Settings** and choose your **Models Directory**. Then open **Models** and assign the appropriate GGUF model to the tasks you plan to use, such as Synopsis, Outline, Chapter, Book, Chat, Review, or Rewrite.
+
+You can also adjust generation and hardware settings in **Settings**, including context size, GPU layers, CPU threads, response language, maximum tokens per pass, and other exposed options.
+
+### 3. Start in the Story tab
+
+The **Story** tab contains the main writing workflow. Its internal tabs are:
+
+```text
+Synopsis → Outline → Characters → World → Chapters → Memory → Author → Stats → Search
+```
+
+You do not have to fill every field manually before generating content. The application is designed so you can write what you know and let the AI help with the next stage.
+
+### 4. Write or generate the Synopsis
+
+Open **Story → Synopsis**.
+
+You can type the synopsis yourself or click **Generate Synopsis**. A synopsis should establish the premise, main characters, central conflict, and stakes.
+
+After generation, read through it and edit anything you want before continuing.
+
+### 5. Build the Outline
+
+Open **Story → Outline**.
+
+Click **Generate Outline** to open the outline setup dialog. There you can choose the number of chapters and optionally define the author's creative intent and writing-style preferences used for the generation.
+
+The outline is then shown in the editor and can still be edited manually.
+
+You can also use **Extend Outline** when you want to append additional chapters to an existing outline.
+
+The outline uses chapter headings such as:
+
+```markdown
+## Chapter 1: Title
+## Chapter 2: Title
+## Chapter 3: Title
+```
+
+### 6. Add Characters
+
+Open **Story → Characters**.
+
+Click **+ Add Character** to create a character. You can provide:
+
+- Name
+- Role
+- Physical description
+- Backstory
+- Traits
+- Relationships with other characters
+
+Characters can later be edited or deleted. A character can also have an AI-generated portrait.
+
+### 7. Add World & Setting information
+
+Open **Story → World**.
+
+Use this space for the information the story needs to remain consistent: locations, rules, history, politics, culture, technology, magic systems, or other setting details.
+
+This section is intentionally manual in the current UI.
+
+### 8. Define the Author profile
+
+Open **Story → Author**.
+
+The **Author Profile** is where you can establish long-term creative preferences such as themes, emotional goals, inspirations, point of view, pacing, dialogue style, description density, violence, romance, genre tags, and target chapter length.
+
+These settings are stored in the project and can also be used by the outline-generation workflow.
+
+### 9. Generate Chapters
+
+Open **Story → Chapters**.
+
+After an outline exists, select a chapter from the chapter list.
+
+There are three different generation actions:
+
+| Action | What it does |
+|---|---|
+| **Generate Chapter** | Generates the **currently selected chapter**. |
+| **Generate Next Chapter** | Finds the first chapter in the outline that still has no content and generates it. |
+| **Generate Full Book** | Generates all remaining chapters from the outline in order. |
+
+This distinction is important. **Generate Chapter** works on the chapter you selected; it does not mean “create the next chapter.”
+
+Once a chapter has content, you can switch between **Read** and **Edit** mode, save changes, use **Change Chapter**, mark it ready, or delete it.
+
+The book-style reader lets you move between chapters and pages without modifying the stored chapter text.
+
+### 10. Use Story Memory
+
+Open **Story → Memory** to inspect the story memory maintained by the application.
+
+During chapter generation, the application can update memory automatically. The memory page also allows manual editing when needed.
+
+### 11. Use Chat when you want assistance
+
+The top-level **Chat** tab is a general-purpose writing assistant.
+
+You can send questions, brainstorm ideas, ask for writing help, enable or disable project context, and attach a chapter to the conversation.
+
+With context enabled, the chat can use information from the current project such as the synopsis, outline, characters and relationships, world notes, memory, and conversation summary.
+
+### 12. Generate images separately
+
+The top-level **Images** tab provides local image generation for:
+
+- Book Cover
+- Scene Illustration
+- Location
+- Object / Item
+- Character portraits through the character workflow
+
+Image generation **works**, but it is currently a **separate tool and is not yet integrated into the main synopsis → outline → characters/world → chapters workflow**. Generated images are saved inside the active project.
+
+Open **Images**, enter a prompt, optionally set a negative prompt, seed, dimensions, steps, and CFG, then click **Generate**.
+
+### 13. Check progress and find text
+
+Use **Stats** to see project progress, chapter counts, word counts, reading-time information, and review status.
+
+Use **Search** to find text across the project.
+
+### 14. Export the finished book
+
+Use **Export Book** from the top-right of the application window.
+
+The current UI supports:
+
+- Word (`.docx`)
+- PDF (`.pdf`)
+- Markdown (`.md`)
+- Plain text (`.txt`)
+
+---
+
 ## Recommended models
 
-AI Story Studio uses local **GGUF** language models. You can choose the model that matches your hardware.
+AI Story Studio uses local **GGUF** language models. Choose the model that matches your hardware.
 
 ### 🟢 Around 6 GB VRAM
 
 **Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M**
 
-This is the recommended starting point for GPUs in the **6 GB VRAM class**. The Q4_K_M GGUF is about **5.0 GB**, so actual usable context and GPU offloading depend on the rest of your VRAM/RAM configuration.
+Recommended as a starting point for GPUs in the **6 GB VRAM class**. The Q4_K_M file is about **5.0 GB**, so actual usable context and GPU offloading depend on the rest of your VRAM/RAM configuration.
 
 [Hugging Face — Gemma-4-E4B-Uncensored-HauhauCS-Aggressive](https://huggingface.co/HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive)
 
@@ -135,7 +289,7 @@ This is the recommended starting point for GPUs in the **6 GB VRAM class**. The 
 
 **Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-IQ4_XS**
 
-For a system with substantially more memory, this is the higher-capability option. The IQ4_XS file is about **18.7 GB**. Qwen3.6-35B-A3B is a **Mixture-of-Experts (MoE)** model with 35B total parameters and an A3B configuration.
+For systems with substantially more memory, this is the higher-capability option. The IQ4_XS file is about **18.7 GB**. Qwen3.6-35B-A3B is a **Mixture-of-Experts (MoE)** model with 35B total parameters and an A3B configuration.
 
 [Hugging Face — Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive](https://huggingface.co/HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive)
 
@@ -143,47 +297,41 @@ For a system with substantially more memory, this is the higher-capability optio
 
 ### MoE support
 
-AI Story Studio can also be used with **MoE models**. The application exposes MoE-related performance settings in **Settings → MoE Performance**, so users with compatible hardware can tune this class of model without changing the workflow itself.
+AI Story Studio can also be used with **MoE models**. The application exposes MoE-related performance settings in **Settings → MoE Performance**, so users with compatible hardware can tune this class of model without changing the writing workflow.
 
-The model choice is the only part that really needs to change: the workflow remains the same.
+The model choice is the part that changes. The writing workflow remains the same.
 
 ---
 
-## The writing workspace
-
-### Projects
-
-Create a project from the left sidebar, give it a title, and optionally start with a synopsis.
-
-The project list shows whether a project is a **Draft**, **In Progress**, or **Complete**, together with chapter progress when an outline exists.
+## Story workspace reference
 
 ### Synopsis
 
-Write the synopsis yourself or use **Generate Synopsis** to create a draft that you can refine.
+Write manually or use **Generate Synopsis** to create a draft that you can refine.
 
 ### Outline
 
-Build the structure of the book manually, generate it with AI, or use **Extend Outline** to add more chapters.
+Edit the outline directly, generate it from the outline wizard, or use **Extend Outline** to append more chapters.
 
 ### Characters
 
-Create characters with their role, appearance, backstory, traits, and relationships. Character cards can also generate or regenerate portraits.
+Create and edit characters, relationships, and optional portraits.
 
 ### World & Setting
 
-Keep the important setting information in one place: locations, rules, history, politics, culture, technology, and anything else that the story needs.
+Store setting information manually so the story has a stable reference for later generations.
 
 ### Author
 
-Use **Author Intent** and **Writing Style** to define the creative direction of the book, including themes, emotional goals, point of view, pacing, dialogue, description density, content levels, and target chapter length.
+Maintain the project's creative intent and writing-style preferences.
 
 ### Chapters
 
-Generate one chapter at a time or generate the remaining chapters from the outline with **Generate Full Book**. You can read chapters in the book-style reader, edit them, use **Change Chapter** for targeted revisions, mark them ready, and export when the manuscript is finished.
+Generate individual chapters, generate the next unfinished chapter, or generate the remaining book. Read, edit, review, change, save, mark ready, and delete chapters from the chapter workspace.
 
 ### Memory, Stats & Search
 
-Memory keeps important story information available as the manuscript grows. Stats provides a project overview, while Search gives you a fast way to find text across the story.
+Use Memory for accumulated story state, Stats for project progress, and Search for text lookup.
 
 ---
 
@@ -205,7 +353,9 @@ With context enabled, the conversation can include the project's synopsis, outli
 
 ## Image generation
 
-The **Images** area provides four standalone image types:
+The **Images** area is currently independent from the main writing workflow.
+
+It provides:
 
 | Type | Purpose |
 |---|---|
@@ -214,40 +364,23 @@ The **Images** area provides four standalone image types:
 | **Location** | Visualize a place or setting. |
 | **Object / Item** | Visualize an important prop, artifact, weapon, object, or item. |
 
-Character portraits can also be generated from the character workflow.
+Character portraits can also be generated from the Characters workflow or in batches from the Images tab.
 
-Depending on the image type, the interface exposes controls such as `Prompt`, `Negative Prompt`, `Seed`, `Width`, `Height`, `Steps`, and `CFG`.
+All generated images are saved encrypted inside the active project.
 
 ---
 
 ## Models & Settings
 
-The **Models** tab is where you assign local GGUF language models to the task rows displayed by the application.
+The **Models** tab is where you assign local GGUF models to the task types exposed by the application.
 
-The **Settings** tab contains the controls exposed by the UI for:
-
-- Models Directory
-- Context Size
-- GPU Layers
-- CPU Threads
-- CPU Threads (Batch)
-- Auto-save after AI responses
-- Enable Thinking
-- Mature / unrestricted content
-- Prompt diagnostics in the console
-- Response Language
-- Max Tokens per Pass
-- Custom System Prompt
-- MoE Performance
-- Image-generation configuration and LoRA adapters
+The **Settings** tab contains the current UI controls for model and hardware configuration, generation behavior, response language, maximum tokens per pass, mature/unrestricted content, diagnostics, MoE performance, and image-generation configuration.
 
 ---
 
 ## Console
 
-The Console is an advanced diagnostics view showing runtime output and generation information such as token count, speed, elapsed time, time to first token, current state, and completion-evaluation information when applicable.
-
-It also provides auto-scroll, pause/resume, and clear controls.
+The Console is an advanced diagnostics view for runtime output and generation information such as token count, speed, elapsed time, time to first token, current state, and other runtime details.
 
 ---
 
@@ -270,7 +403,7 @@ Use **Export Book** to save the current book as:
 - PySide6
 - cryptography
 - A compatible local **GGUF** model with `llama-cpp-python` for AI text generation
-- The image-generation binding and model configuration when using **Images**
+- The image-generation backend and model configuration when using **Images**
 - `python-docx` and `reportlab` when Word/PDF export support is needed
 
 ### Install
@@ -317,21 +450,28 @@ On Windows, `run.bat` is also available as a convenience launcher.
 ### First setup in the app
 
 1. Open **Settings** and choose the **Models Directory**.
-2. Configure the hardware and generation settings for your machine.
-3. Open **Models** and assign your GGUF model.
-4. Create a project.
-5. Write or generate the synopsis.
-6. Write or generate the outline.
-7. Configure characters, world notes, and the Author profile.
-8. Generate and edit chapters.
-9. Use Chat and Images as needed.
-10. Export the finished book.
+2. Open **Models** and assign a GGUF model to the tasks you plan to use.
+3. Create a project from **Projects → + New**.
+4. Open **Story → Synopsis** and write or generate the synopsis.
+5. Open **Story → Outline** and generate or write the outline.
+6. Add **Characters**, **World**, and an **Author Profile** as needed.
+7. Open **Story → Chapters** and generate chapters from the outline.
+8. Use **Chat**, **Images**, **Stats**, **Search**, and **Console** as needed.
+9. Export the finished manuscript with **Export Book**.
 
 ---
 
-## Screenshot directory
+## Current scope
 
-For the final product page, keep screenshots organized here:
+AI Story Studio is a local desktop application. Language and image models are **not bundled** with the repository and must be provided by the user.
+
+The main writing workflow is the **Story** workspace. Image generation is functional, but it is currently a standalone companion tool rather than part of the automatic story-generation pipeline.
+
+This README intentionally follows the **UI currently shipped**. New user-facing features should be added here when they are actually visible and usable in the application.
+
+Because the project is still in development, behavior, UI details, and supported models may change before a stable release.
+
+## Screenshot directory
 
 ```text
 docs/
@@ -341,18 +481,6 @@ docs/
     ├── chat.jpg
     └── book.jpg
 ```
-
-Use consistent crops and dimensions so the README looks like a product page instead of a debug gallery.
-
----
-
-## Current scope
-
-AI Story Studio is a local desktop application. The interface depends on user-provided local language and image models; models are not bundled with the repository.
-
-This README intentionally follows the **UI currently shipped**. New user-facing features should be added here when they are actually visible and usable in the application.
-
-Because the project is still in development, behavior, UI details, and supported models may change before a stable release.
 
 ## License
 
