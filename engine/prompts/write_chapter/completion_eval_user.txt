@@ -1,0 +1,14 @@
+Decide whether Chapter {{chapter_number}} of '{{title}}' is complete.
+
+You are evaluating ONLY Chapter {{chapter_number}} — not the whole book, not Chapter 1, not any other chapter.
+
+Respond with exactly one token: true or false.
+No punctuation. No quotes. No markdown. No JSON. No explanation. No extra text.
+true  → Chapter is complete and should stop.
+false → Chapter is not complete and must continue.
+
+Chapter {{chapter_number}} Goal:
+{{chapter_goal}}
+{{outline_block}}
+Chapter {{chapter_number}} Draft:
+{{chapter_text}}

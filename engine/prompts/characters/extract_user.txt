@@ -1,0 +1,17 @@
+Extract every named character mentioned in the text below. Respond with ONLY a JSON array — no markdown fences, no commentary, nothing before or after it. If there are no named characters, respond with exactly: []
+
+Each array element must be an object with exactly these keys (keep these key names and the role value in English — only the description text should be translated):
+  "name": the character's name
+  "role": one of "protagonist", "antagonist", "supporting", "minor"
+  "description": a single, vivid sentence written specifically for image generation, using this exact visual-only structure: "Age: X. [ethnicity or race]. [height/build]. [hair color/length/style]. [eye color]. [skin tone]. [facial features]. [notable marks/scars]. [clothing/style]." It must include the character's age, ethnicity or race, body build, hair, eyes, skin tone, facial structure, distinct marks, and visible clothing/style. Do not include personality, backstory, memory, motivations, secrets, or inner emotions.
+  "backstory": a short, factual summary of the character's history, upbringing, major past events, and personal context.
+  "traits": an array of at most 4 short trait labels such as ["loyal", "guarded", "sharp-witted"]. Never include more than 4 traits. Pick only the most defining ones.
+
+{{language_note}}
+
+Characters already tracked (skip these unless the text reveals something significant enough to be worth its own new entry): {{existing_names}}
+
+Text:
+{{chunk}}
+
+JSON array:

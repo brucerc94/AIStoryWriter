@@ -1,0 +1,12 @@
+Chapter {{chapter_number}}: '{{chapter_title}}'
+
+CHAPTER OUTLINE ENTRY — FOR CONTEXT:
+{{outline_entry}}
+
+CHECKLIST — PRIMARY CONTRACT; EVERY ITEM IS MANDATORY:
+{{checklist_items}}
+
+CURRENT CHAPTER DRAFT:
+{{chapter_content}}
+
+Evaluate every checklist item one by one. Do not return complete=true unless EVERY ID in [{{id_list}}] is in done and missing is empty.

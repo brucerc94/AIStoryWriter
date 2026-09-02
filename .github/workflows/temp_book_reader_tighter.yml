@@ -1,0 +1,42 @@
+name: temp book reader tighter
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/temp_book_reader_tighter.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tighten book page metrics
+        env:
+          WORKFLOW: .github/workflows/temp_book_reader_tighter.yml
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('ui/story.py')
+          text = path.read_text(encoding='utf-8')
+          replacements = [
+              ('PAGE_PADDING_V = 16', 'PAGE_PADDING_V = 8'),
+              ('PAGE_NUMBER_RESERVE = 18', 'PAGE_NUMBER_RESERVE = 14'),
+          ]
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f'Missing expected text: {old}')
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+          python -m py_compile ui/story.py
+          rm -f "$WORKFLOW"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ui/story.py "$WORKFLOW"
+          git commit -m 'fix: tighten book page spacing' || exit 0
+          git push origin main

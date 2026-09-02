@@ -1,0 +1,4 @@
+Chapter {{chapter_number}}: '{{chapter_title}}'
+
+CHAPTER OUTLINE ENTRY — SOURCE OF REQUIREMENTS; DO NOT OMIT ANY PART:
+{{outline_entry}}
