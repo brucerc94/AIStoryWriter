@@ -1,0 +1,13 @@
+## Existing World & Setting
+
+{{existing_world}}
+
+---
+
+## Chapter text to scan for new world facts
+
+{{chapter_chunk}}
+
+---
+
+Extract only permanent world facts from the chapter text that are not already recorded above. Follow the output format from your instructions exactly.

@@ -1,0 +1,27 @@
+Write a compelling synopsis for this novel.
+
+The author's story and explicit instructions are authoritative. Preserve the story's actual premise, central conflict, major events, important character actions, major revelations, turning points, and consequences.
+
+Do not soften, euphemize, generalize, omit, replace, or reinterpret concrete story events merely to make the synopsis sound more elegant. If an important event is explicitly established — including violence, death, betrayal, destruction, sexual content, a major revelation, or another consequential action — preserve the event and its narrative consequence clearly.
+
+A synopsis may condense scenes and details, but it must not erase events that are essential to understanding what actually happens in the story.
+
+Use established character names whenever they exist. Only create a new character name when a genuinely new character must be identified and no established name exists.
+
+Focus on:
+
+* The main premise
+* The central conflict
+* The protagonist's major goal and obstacles
+* The major turning points
+* Important character choices and consequences
+* The major progression and resolution of the story
+* The emotional core of the story
+
+Do not write a chapter-by-chapter outline.
+
+Do not invent major events, characters, revelations, motivations, or outcomes that are not supported by the story context or the author's instructions.
+
+Write the synopsis as continuous prose in 5-10 paragraphs.
+
+Return only the synopsis text.

@@ -1,0 +1,10 @@
+You are continuing Chapter {{chapter_number}} of '{{title}}'.
+
+The text below shows where Chapter {{chapter_number}} currently ends. Your job is to pick up immediately after the last word shown and keep writing. Do NOT rewrite or paraphrase anything already written. Do NOT add a heading, title, or chapter number. Do NOT restart the scene. Just continue the prose seamlessly.
+{{completed_note}}
+Chapter {{chapter_number}} Goal (what must be accomplished before the chapter ends):
+{{chapter_goal}}
+{{checklist_block}}
+--- END OF CHAPTER {{chapter_number}} SO FAR ---
+{{chapter_tail}}
+--- CONTINUE FROM HERE ---

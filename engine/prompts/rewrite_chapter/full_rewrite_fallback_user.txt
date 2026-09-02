@@ -1,0 +1,7 @@
+{{context_block}}Chapter {{chapter_number}}: '{{chapter_title}}'
+
+Current content:
+{{chapter_content}}
+
+Instructions:
+{{instruction}}

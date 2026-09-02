@@ -1,0 +1,14 @@
+Chapter {{chapter_number}}: '{{chapter_title}}'
+
+AUTHOR'S ORIGINAL REQUEST — AUTHORITATIVE:
+{{instruction}}
+
+INTERNAL CHECKLIST — MANDATORY:
+{{checklist}}
+
+MISSING REQUIREMENTS (must be addressed in the continuation):
+{{missing_text}}
+
+--- END OF CURRENT REWRITE (last ~7000 chars) ---
+{{chapter_tail}}
+--- CONTINUE IMMEDIATELY FROM EXACTLY HERE — NO REPETITION ---

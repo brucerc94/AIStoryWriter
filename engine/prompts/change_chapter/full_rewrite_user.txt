@@ -1,0 +1,14 @@
+Chapter {{chapter_number}}: '{{chapter_title}}'
+
+AUTHOR'S ORIGINAL REQUEST — AUTHORITATIVE:
+{{instruction}}
+
+INTERNAL CHECKLIST — ALL ITEMS ARE MANDATORY:
+{{checklist}}
+
+{{context_sections}}
+
+=== CURRENT CHAPTER — REWRITE THIS ENTIRE CHAPTER ===
+{{chapter_content}}
+
+IMPORTANT: Return the entire rewritten chapter from its beginning to a complete ending. Do not add material that was not requested merely to make the chapter longer.

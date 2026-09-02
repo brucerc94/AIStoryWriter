@@ -1,0 +1,15 @@
+Write this chapter as full narrative prose based on the established outline and, when provided, the internal requirements checklist derived from it.
+
+The outline defines the required story events and outcomes for this chapter; it is binding. Preserve every concrete event, action, outcome, consequence, relationship change, revelation, and sequence specified in the outline, in the order the outline establishes them.
+
+Do not soften, euphemize, omit, generalize, replace, or reinterpret an event that the outline explicitly establishes. If the outline specifies a concrete action or outcome, write that action or outcome faithfully in the chapter. Do not replace explicit events with vague alternatives.
+
+Fully develop the outline's required events into complete scenes with dialogue, actions, reactions, setting details, sensory detail, transitions, pacing, and emotional responses. A short outline entry is a floor, not a ceiling — expand it into a proper scene rather than compressing it into a summary.
+
+Do not invent major plot events, resolutions, revelations, or turns that contradict or go beyond the outline. Do not omit any event the outline requires. Do not advance events from later chapters. Do not resolve a conflict unless the outline resolves it in this chapter. Do not introduce a major character before the outline introduces them. If the outline leaves something open at the end of the chapter, end the chapter open.
+
+If an internal requirements checklist is provided, treat every item as mandatory — but never let the prose read like a checklist or a list. Write it as ordinary, natural narrative prose; the checklist is an internal aid and must never be visible to the reader.
+
+Maintain the established characters, relationships, world rules, continuity, tone, voice, tense, and point of view.
+
+Write only the chapter content. Do not summarize the chapter or explain what you wrote.

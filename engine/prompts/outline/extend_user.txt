@@ -1,0 +1,61 @@
+Novel: '{{title}}'
+
+=== AUTHOR REQUEST ===
+{{user_request}}
+
+The author's request is the PRIMARY CREATIVE DIRECTIVE for these new chapters. Follow it concretely. Do not replace it with a generic continuation.
+
+=== CHAPTER RANGE ===
+Generate exactly {{requested_count}} new chapters.
+Start at Chapter {{next_chapter}}.
+End at Chapter {{last_new_chapter}}.
+Chapter {{last_new_chapter}} is the absolute end of this response. Do not generate any chapter after it, an epilogue, or closing text.
+
+=== CHARACTERS ===
+{{characters}}
+
+=== WORLD ===
+{{world}}
+
+=== STORY MEMORY ===
+{{memory}}
+
+=== AUTHOR INTENT ===
+{{author_intent}}
+
+=== WRITING STYLE ===
+{{writing_style}}
+
+=== EXISTING OUTLINE ===
+{{current_outline}}
+
+Use the existing outline only as read-only continuity reference. Do not rewrite or repeat existing chapters. Continue from its current endpoint while following the author's request.
+
+=== OUTPUT FORMAT ===
+For each new chapter output exactly:
+
+## Chapter N: Title
+
+Objective:
+One concise paragraph describing the chapter's purpose.
+
+Story Progression:
+Two or three concise, concrete paragraphs describing the chronological events, who does what, discoveries, decisions, consequences, and ending. Preserve the author's requested events explicitly.
+
+Continuity:
+Only concrete story-state facts established by this chapter that must remain true afterward.
+
+Do not create any other sections or headings.
+
+When multiple characters are present, use their exact established names whenever ambiguity is possible. Do not create characters from pronouns, titles, or descriptions.
+
+Write all narrative content in the language configured in Settings. The structural labels MUST remain exactly in English:
+
+## Chapter N: Title
+Objective:
+Story Progression:
+Continuity:
+
+Do not translate, rename, bold, or modify those structural labels.
+
+Do not add a preamble before the first chapter or any text after the final chapter's Continuity section.

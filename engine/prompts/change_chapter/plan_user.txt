@@ -1,0 +1,7 @@
+Chapter {{chapter_number}}: '{{chapter_title}}'
+
+AUTHOR'S ORIGINAL REQUEST — AUTHORITATIVE; DO NOT OMIT ANY PART:
+{{instruction}}
+
+CURRENT CHAPTER (for context only — do not evaluate completeness):
+{{chapter_content}}

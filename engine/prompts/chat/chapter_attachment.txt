@@ -1,0 +1,8 @@
+The author explicitly attached the following chapter for this message. Read it as reference material and answer the author's request using its content. Do not assume any other chapter is attached.
+
+===== INSERTED CHAPTER {{chapter_number}}: {{chapter_title}} =====
+{{chapter_content}}
+===== END INSERTED CHAPTER {{chapter_number}} =====
+
+AUTHOR'S MESSAGE:
+{{user_request}}

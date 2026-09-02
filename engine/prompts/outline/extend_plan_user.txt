@@ -1,0 +1,40 @@
+Novel: '{{title}}'
+
+=== AUTHOR REQUEST ===
+{{user_request}}
+
+This is the PRIMARY CREATIVE DIRECTIVE. Distribute these events across the chapters below.
+
+=== CHAPTER RANGE ===
+Distribute into exactly {{requested_count}} new chapters.
+Start at Chapter {{next_chapter}}.
+End at Chapter {{last_new_chapter}}.
+
+=== CHARACTERS ===
+{{characters}}
+
+=== WORLD ===
+{{world}}
+
+=== STORY MEMORY ===
+{{memory}}
+
+=== AUTHOR INTENT ===
+{{author_intent}}
+
+=== WRITING STYLE ===
+{{writing_style}}
+
+=== EXISTING OUTLINE ===
+{{current_outline}}
+
+Use the existing outline only as read-only continuity reference. Continue from its current endpoint.
+
+=== OUTPUT ===
+Write exactly {{requested_count}} plan lines in this format:
+
+Chapter N → [what happens in this chapter, one or two sentences]
+
+Start at Chapter {{next_chapter}} and end at Chapter {{last_new_chapter}}.
+Every concrete event from the author's request must appear in exactly one chapter line.
+Do not add any text outside the plan lines.

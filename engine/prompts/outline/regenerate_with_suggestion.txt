@@ -1,0 +1,22 @@
+Modify the existing chapter-by-chapter outline for '{{title}}' according to the author's suggestion below.
+
+IMPORTANT RULES:
+1. The existing outline is the source of truth. Do not regenerate it from scratch.
+2. Apply the author's suggestion precisely and intelligently.
+3. Preserve every part that does not need to change.
+4. If the requested change creates consequences, update only the affected chapters and the minimum necessary downstream chapters for continuity.
+5. Preserve the existing chapter count unless the author explicitly asks to change it.
+6. Preserve chapter numbering, established character names, world rules, and continuity.
+7. Do not introduce unrelated plot changes, new arcs, or stylistic rewrites.
+8. Return the COMPLETE updated outline, not a diff, explanation, or commentary.
+9. Keep the same Markdown chapter structure used by the existing outline.
+
+AUTHOR'S SUGGESTION:
+{{suggestion}}
+
+EXISTING OUTLINE:
+-----
+{{current_outline}}
+-----
+
+Return only the complete updated outline.

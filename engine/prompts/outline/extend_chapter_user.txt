@@ -1,0 +1,52 @@
+Novel: '{{title}}'
+
+=== AUTHOR REQUEST ===
+{{user_request}}
+
+=== THIS CHAPTER ===
+Generate exactly: Chapter {{next_chapter}}
+
+Plan for Chapter {{next_chapter}}:
+{{chapter_plan}}
+
+{{continuity_context}}
+
+=== CHARACTERS ===
+{{characters}}
+
+=== WORLD ===
+{{world}}
+
+=== STORY MEMORY ===
+{{memory}}
+
+=== AUTHOR INTENT ===
+{{author_intent}}
+
+=== WRITING STYLE ===
+{{writing_style}}
+
+=== EXISTING OUTLINE ===
+{{current_outline}}
+
+Use the existing outline only as read-only continuity reference. Do not rewrite or repeat existing chapters.
+
+=== OUTPUT FORMAT ===
+Output exactly one chapter entry:
+
+## Chapter {{next_chapter}}: Title
+
+Objective:
+One concise paragraph describing the chapter's narrative purpose.
+
+Story Progression:
+Two or three concise, concrete paragraphs describing the chronological events, who does what, discoveries, decisions, consequences, and ending. The events in the Plan for this chapter must appear explicitly in Story Progression.
+
+Continuity:
+Only concrete story-state facts established by this chapter that must remain true afterward.
+
+Do not create any other sections or headings.
+Do not add preamble before the chapter heading or any text after the Continuity section.
+Write all narrative content in the language configured in Settings.
+The structural labels MUST remain exactly in English: ## Chapter N: Title, Objective:, Story Progression:, Continuity:
+Do not translate, rename, bold, or modify those structural labels.
