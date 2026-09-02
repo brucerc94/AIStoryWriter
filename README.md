@@ -135,9 +135,11 @@ Once a project is open, the main workspace appears on the right.
 
 Before asking the application to generate text, make sure a GGUF model is configured.
 
-Open **Settings** and choose your **Models Directory**. Then open **Models** and assign the appropriate GGUF model to the tasks you plan to use, such as Synopsis, Outline, Chapter, Book, Chat, Review, or Rewrite.
+Open **Settings** and choose your **Models Directory**. After changing the directory, scroll to the bottom of the Settings page and click **Save App Settings**. This save step is required to persist the directory change.
 
-You can also adjust generation and hardware settings in **Settings**, including context size, GPU layers, CPU threads, response language, maximum tokens per pass, and other exposed options.
+After saving, open **Models** and assign the appropriate GGUF model to the tasks you plan to use, such as Synopsis, Outline, Chapter, Book, Chat, Review, or Rewrite. Changes made to these per-task model assignments are saved to the current project automatically.
+
+You can also adjust generation and hardware settings in **Settings**, including context size, GPU layers, CPU threads, response language, maximum tokens per pass, and other exposed options. Remember to click **Save App Settings** after changing these values.
 
 ### 3. Start in the Story tab
 
