@@ -188,3 +188,4 @@ cython_debug/
 *..bat_old
 *.bat_old
 run.bat
+setup.bat_old
