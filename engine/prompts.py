@@ -50,7 +50,7 @@ def load_raw(name: str, reload: bool = False) -> str:
             "Prompt text belongs in engine/prompts/, not inline in Python."
         )
     text = path.read_text(encoding="utf-8")
-    # Strip a single trailing newline from the file editor.
+
     if text.endswith("\n"):
         text = text[:-1]
     _cache[name] = text

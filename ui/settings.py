@@ -153,12 +153,12 @@ class ModelPicker(QWidget):
         layout.addWidget(self.top_k_spin)
 
     def set_value(self, path: str) -> None:
-        # Find by data
+
         for i in range(self.combo.count()):
             if self.combo.itemData(i) == path:
                 self.combo.setCurrentIndex(i)
                 return
-        # Not in list — add it
+
         if path:
             self.combo.addItem(Path(path).name, path)
             self.combo.setCurrentIndex(self.combo.count() - 1)
@@ -221,7 +221,7 @@ class ModelPicker(QWidget):
             "GGUF Models (*.gguf);;All Files (*)",
         )
         if path:
-            # Add to combo if not present
+
             found = False
             for i in range(self.combo.count()):
                 if self.combo.itemData(i) == path:
@@ -246,9 +246,9 @@ class AppSettingsWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
 
-        # Helper: label with a fixed minimum width so Qt never truncates it
-        # when the form is narrow.  160 px fits "CPU Threads (Batch)" at 14px
-        # with a small margin on both Windows and Linux.
+
+
+
         def _lbl(text: str) -> QLabel:
             lbl = QLabel(text)
             lbl.setMinimumWidth(160)
@@ -262,7 +262,7 @@ class AppSettingsWidget(QWidget):
         form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
 
-        # Models directory
+
         dir_row = QHBoxLayout()
         self.models_dir_input = QLineEdit()
         self.models_dir_input.setPlaceholderText("Path to folder containing .gguf files")
@@ -273,7 +273,7 @@ class AppSettingsWidget(QWidget):
         dir_row.addWidget(browse_dir_btn)
         form.addRow("Models Directory", dir_row)
 
-        # Context size
+
         self.ctx_spin = QSpinBox()
         self.ctx_spin.setRange(512, 131072)
         self.ctx_spin.setSingleStep(512)
@@ -288,7 +288,7 @@ class AppSettingsWidget(QWidget):
         )
         form.addRow("Context Size", self.ctx_spin)
 
-        # GPU layers
+
         self.gpu_spin = QSpinBox()
         self.gpu_spin.setRange(0, 999)
         self.gpu_spin.setValue(0)
@@ -296,7 +296,7 @@ class AppSettingsWidget(QWidget):
         self.gpu_spin.setToolTip("Number of layers to offload to GPU. 0 = CPU only.")
         form.addRow("GPU Layers", self.gpu_spin)
 
-        # Threads
+
         self.threads_spin = QSpinBox()
         self.threads_spin.setRange(1, 64)
         self.threads_spin.setValue(4)
@@ -306,7 +306,7 @@ class AppSettingsWidget(QWidget):
         )
         form.addRow("CPU Threads", self.threads_spin)
 
-        # Batch threads (n_threads_batch)
+
         self.threads_batch_spin = QSpinBox()
         self.threads_batch_spin.setRange(0, 64)
         self.threads_batch_spin.setValue(0)
@@ -325,12 +325,12 @@ class AppSettingsWidget(QWidget):
         )
         form.addRow("CPU Threads (Batch)", self.threads_batch_spin)
 
-        # Auto-save
+
         self.autosave_check = QCheckBox("Auto-save after AI responses")
         self.autosave_check.setChecked(True)
         form.addRow("", self.autosave_check)
 
-        # Qwen thinking mode
+
         self.enable_thinking_check = QCheckBox("Enable Thinking")
         self.enable_thinking_check.setToolTip(
             "When enabled, Qwen models that support it will receive "
@@ -338,7 +338,7 @@ class AppSettingsWidget(QWidget):
         )
         form.addRow("", self.enable_thinking_check)
 
-        # NSFW / unrestricted content
+
         self.allow_nsfw_check = QCheckBox("Allow mature / unrestricted content (NSFW)")
         self.allow_nsfw_check.setToolTip(
             "When enabled, the model receives an explicit instruction that it may write "
@@ -351,7 +351,7 @@ class AppSettingsWidget(QWidget):
         )
         form.addRow("", self.allow_nsfw_check)
 
-        # Debug: log full prompts to console
+
         self.log_full_prompts_check = QCheckBox("Show full prompt sent to the model in the console/log")
         self.log_full_prompts_check.setToolTip(
             "When enabled, every call to the model logs the complete system+user "
@@ -363,7 +363,7 @@ class AppSettingsWidget(QWidget):
 
         layout.addWidget(box)
 
-        # ── Generation settings ──
+
         gen_box = QGroupBox("Generation")
         gen_form = QFormLayout(gen_box)
         gen_form.setSpacing(12)
@@ -371,15 +371,15 @@ class AppSettingsWidget(QWidget):
         gen_form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         gen_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
 
-        # NOTE: temperature now lives per-task in the Models tab, next to
-        # each task's assigned GGUF model — different models need very
-        # different temperatures, so a single global value here didn't
-        # give real control. Only the custom system prompt (which makes
-        # sense as one shared value across every task) stays here.
 
-        # Response language — every built-in instruction/prompt in this app
-        # is written in English, which otherwise biases local models toward
-        # answering in English regardless of what language your story is in.
+
+
+
+
+
+
+
+
         self.language_input = QLineEdit()
         self.language_input.setPlaceholderText("e.g. Español, English, Français…")
         self.language_input.setToolTip(
@@ -389,7 +389,7 @@ class AppSettingsWidget(QWidget):
         )
         gen_form.addRow("Response Language", self.language_input)
 
-        # Max tokens per generation pass
+
         self.max_tokens_spin = QSpinBox()
         self.max_tokens_spin.setRange(256, 32000)
         self.max_tokens_spin.setSingleStep(256)
@@ -408,7 +408,7 @@ class AppSettingsWidget(QWidget):
         )
         gen_form.addRow("Max Tokens per Pass", self.max_tokens_spin)
 
-        # Custom system prompt — appended to every auto-generated prompt
+
         self.system_prompt_input = QPlainTextEdit()
         self.system_prompt_input.setPlaceholderText(
             "Optional instructions appended to every system prompt, for every task "
@@ -423,7 +423,7 @@ class AppSettingsWidget(QWidget):
 
         layout.addWidget(gen_box)
 
-        # ── MoE performance (only applies to detected MoE models) ──
+
         moe_box = QGroupBox("MoE Performance")
         moe_form = QFormLayout(moe_box)
         moe_form.setSpacing(12)
@@ -466,15 +466,15 @@ class AppSettingsWidget(QWidget):
 
         layout.addWidget(moe_box)
 
-        # ── Image Generation ──────────────────────────────────────────────
-        # Supports both monolithic checkpoints (SD 1.x, SDXL, …) and
-        # multi-component architectures (Z-Image-Turbo, Flux, Anima, …).
-        #
-        # "Diffusion Model" — the primary file, reused from the previous
-        #   design. For Z-Image-Turbo this is z_image_turbo-Q4_0.gguf.
-        # "Text Encoder"   — NEW. LLM / text encoder for multi-component
-        #   models. For Z-Image: Qwen3-4B-ZImage-Heretic-Genesis-Q8.gguf.
-        # "VAE"            — NEW. Standalone VAE. For Z-Image: ae.safetensors.
+
+
+
+
+
+
+
+
+
         img_box = QGroupBox("Image Generation")
         img_form = QFormLayout(img_box)
         img_form.setSpacing(12)
@@ -492,7 +492,7 @@ class AppSettingsWidget(QWidget):
         img_note.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 11px;")
         img_form.addRow(img_note)
 
-        # ── Diffusion Model (existing field, reused) ──────────────────────
+
         img_model_row = QHBoxLayout()
         self.image_model_input = QLineEdit()
         self.image_model_input.setPlaceholderText(
@@ -513,7 +513,7 @@ class AppSettingsWidget(QWidget):
         img_model_row.addWidget(browse_img_btn)
         img_form.addRow("Diffusion Model", img_model_row)
 
-        # ── Text Encoder (NEW) ────────────────────────────────────────────
+
         img_enc_row = QHBoxLayout()
         self.image_text_encoder_input = QLineEdit()
         self.image_text_encoder_input.setPlaceholderText(
@@ -534,7 +534,7 @@ class AppSettingsWidget(QWidget):
         img_enc_row.addWidget(browse_enc_btn)
         img_form.addRow("Text Encoder", img_enc_row)
 
-        # ── VAE (NEW) ─────────────────────────────────────────────────────
+
         img_vae_row = QHBoxLayout()
         self.image_vae_input = QLineEdit()
         self.image_vae_input.setPlaceholderText(
@@ -554,7 +554,7 @@ class AppSettingsWidget(QWidget):
         img_vae_row.addWidget(browse_vae_btn)
         img_form.addRow("VAE", img_vae_row)
 
-        # ── Image Backend selector ────────────────────────────────────────
+
         self.image_backend_combo = QComboBox()
         self.image_backend_combo.addItem(
             "stable-diffusion.cpp", ImageBackend.STABLE_DIFFUSION_CPP.value
@@ -565,7 +565,7 @@ class AppSettingsWidget(QWidget):
         )
         img_form.addRow("Image Backend", self.image_backend_combo)
 
-        # ── Output directory ──────────────────────────────────────────────
+
         img_out_row = QHBoxLayout()
         self.image_output_dir_input = QLineEdit()
         self.image_output_dir_input.setPlaceholderText(
@@ -579,7 +579,7 @@ class AppSettingsWidget(QWidget):
         img_out_row.addWidget(browse_out_btn)
         img_form.addRow("Output Directory", img_out_row)
 
-        # ── Default dimensions ────────────────────────────────────────────
+
         dims_row = QHBoxLayout()
         dims_row.setSpacing(12)
 
@@ -610,7 +610,7 @@ class AppSettingsWidget(QWidget):
         dims_row.addStretch()
         img_form.addRow("", dims_row)
 
-        # ── Steps + CFG ───────────────────────────────────────────────────
+
         gen_row = QHBoxLayout()
         gen_row.setSpacing(12)
 
@@ -647,7 +647,7 @@ class AppSettingsWidget(QWidget):
         gen_row.addStretch()
         img_form.addRow("", gen_row)
 
-        # ── LoRA Models ───────────────────────────────────────────────────
+
         lora_note = QLabel(
             "LoRA adapters are applied at generation time. "
             "Each LoRA must be a .safetensors file compatible with the selected diffusion model. "
@@ -658,7 +658,7 @@ class AppSettingsWidget(QWidget):
         lora_note.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 11px;")
         img_form.addRow(lora_note)
 
-        # Table: columns = Enabled | Path | Weight | Remove
+
         self.lora_table = QTableWidget(0, 5)
         self.lora_table.setHorizontalHeaderLabels(["On", "LoRA Path", "Weight", "Trigger", ""])
         self.lora_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
@@ -685,7 +685,7 @@ class AppSettingsWidget(QWidget):
         save_btn.clicked.connect(self._save)
         layout.addWidget(save_btn)
 
-    # ── load / save ───────────────────────────────────────────────────────
+
 
     def load(self, settings: AppSettings) -> None:
         self._settings = settings
@@ -703,7 +703,7 @@ class AppSettingsWidget(QWidget):
         self.system_prompt_input.setPlainText(settings.custom_system_prompt)
         self.moe_batch_spin.setValue(getattr(settings, "moe_n_batch", 1024))
         self.moe_ubatch_spin.setValue(getattr(settings, "moe_n_ubatch", 1024))
-        # Image settings
+
         self.image_model_input.setText(getattr(settings, "image_model_path", ""))
         self.image_text_encoder_input.setText(
             getattr(settings, "image_text_encoder_path", "")
@@ -714,9 +714,9 @@ class AppSettingsWidget(QWidget):
         self.image_height_spin.setValue(getattr(settings, "image_default_height", 512))
         self.image_steps_spin.setValue(getattr(settings, "image_default_steps", 20))
         self.image_cfg_spin.setValue(getattr(settings, "image_default_cfg_scale", 7.0))
-        # LoRAs
+
         self._load_loras(getattr(settings, "image_loras", None) or [])
-        # Backend combo
+
         backend_val = getattr(
             settings, "image_backend", ImageBackend.STABLE_DIFFUSION_CPP.value
         )
@@ -725,7 +725,7 @@ class AppSettingsWidget(QWidget):
                 self.image_backend_combo.setCurrentIndex(i)
                 break
 
-    # ── browse helpers ────────────────────────────────────────────────────
+
 
     def _browse_models_dir(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "Select Models Directory")
@@ -767,7 +767,7 @@ class AppSettingsWidget(QWidget):
         if d:
             self.image_output_dir_input.setText(d)
 
-    # ── LoRA helpers ──────────────────────────────────────────────────────
+
 
     def _add_lora(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -789,7 +789,7 @@ class AppSettingsWidget(QWidget):
         row = self.lora_table.rowCount()
         self.lora_table.insertRow(row)
 
-        # Col 0 — enable checkbox (centred)
+
         chk = QCheckBox()
         chk.setChecked(enabled)
         chk_container = QWidget()
@@ -799,12 +799,12 @@ class AppSettingsWidget(QWidget):
         chk_layout.setContentsMargins(0, 0, 0, 0)
         self.lora_table.setCellWidget(row, 0, chk_container)
 
-        # Col 1 — path (read-only item with tooltip)
+
         path_item = QTableWidgetItem(path)
         path_item.setToolTip(path)
         self.lora_table.setItem(row, 1, path_item)
 
-        # Col 2 — weight spinbox
+
         weight_spin = QDoubleSpinBox()
         weight_spin.setRange(-2.0, 2.0)
         weight_spin.setSingleStep(0.05)
@@ -817,7 +817,7 @@ class AppSettingsWidget(QWidget):
         )
         self.lora_table.setCellWidget(row, 2, weight_spin)
 
-        # Col 3 — trigger prompt (small editable QLineEdit)
+
         trigger_edit = QLineEdit()
         trigger_edit.setText(trigger)
         trigger_edit.setPlaceholderText("trigger word(s)…")
@@ -828,7 +828,7 @@ class AppSettingsWidget(QWidget):
         )
         self.lora_table.setCellWidget(row, 3, trigger_edit)
 
-        # Col 4 — remove button
+
         rm_btn = QPushButton("✕")
         rm_btn.setObjectName("subtle")
         rm_btn.setFixedWidth(28)
@@ -839,7 +839,7 @@ class AppSettingsWidget(QWidget):
         self.lora_table.resizeRowsToContents()
 
     def _remove_lora_row(self, row: int) -> None:
-        # Find the actual current row of the button (row index shifts after deletions)
+
         btn = self.sender()
         if btn is None:
             return
@@ -847,7 +847,7 @@ class AppSettingsWidget(QWidget):
             widget = self.lora_table.cellWidget(r, 4)
             if widget is btn:
                 self.lora_table.removeRow(r)
-                # Re-wire remaining remove buttons with updated row indices
+
                 for new_r in range(self.lora_table.rowCount()):
                     new_btn = self.lora_table.cellWidget(new_r, 4)
                     if new_btn:
@@ -898,7 +898,7 @@ class AppSettingsWidget(QWidget):
                 trigger=entry.get("trigger", ""),
             )
 
-    # ── _save ─────────────────────────────────────────────────────────────
+
 
     def _save(self) -> None:
         if self._settings is None:
@@ -917,7 +917,7 @@ class AppSettingsWidget(QWidget):
         self._settings.custom_system_prompt = self.system_prompt_input.toPlainText().strip()
         self._settings.moe_n_batch = self.moe_batch_spin.value()
         self._settings.moe_n_ubatch = self.moe_ubatch_spin.value()
-        # Image settings
+
         self._settings.image_model_path = self.image_model_input.text().strip()
         self._settings.image_text_encoder_path = (
             self.image_text_encoder_input.text().strip()
@@ -973,7 +973,7 @@ class ModelsPanel(QWidget):
         subtitle.setWordWrap(True)
         outer.addWidget(subtitle)
 
-        # Refresh models button
+
         refresh_row = QHBoxLayout()
         self.dir_label = QLabel("No models directory set. Configure in Settings.")
         self.dir_label.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px;")
@@ -983,7 +983,7 @@ class ModelsPanel(QWidget):
         refresh_row.addWidget(refresh_btn)
         outer.addLayout(refresh_row)
 
-        # Picker grid
+
         box = QGroupBox("Task → Model Assignment")
         box_layout = QVBoxLayout(box)
         box_layout.setSpacing(10)
@@ -1000,7 +1000,7 @@ class ModelsPanel(QWidget):
 
         outer.addWidget(box)
 
-        # Quick actions
+
         action_box = QGroupBox("Quick Actions")
         ab_layout = QVBoxLayout(action_box)
         ab_layout.setContentsMargins(14, 18, 14, 14)
@@ -1044,7 +1044,7 @@ class ModelsPanel(QWidget):
         for picker in self._pickers.values():
             picker.update_models(models)
 
-        # Update assign-all combo
+
         self.assign_all_combo.clear()
         self.assign_all_combo.addItem("— select model —", "")
         for m in models:
@@ -1128,7 +1128,7 @@ class SettingsPanel(QWidget):
         self.app_settings_widget.settings_changed.connect(self.settings_changed)
         inner_layout.addWidget(self.app_settings_widget)
 
-        # llama-cpp-python install notice
+
         notice_box = QGroupBox("Installation")
         nb_layout = QVBoxLayout(notice_box)
         nb_layout.setContentsMargins(14, 18, 14, 14)

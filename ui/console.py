@@ -37,37 +37,37 @@ from ui.styles import (
     COLOR_WARNING,
 )
 
-# Matches the line emitted by LLMEngine._stream_generate:
-# "[llm_engine] Generacion completo: 312 tokens en 18.4s — 16.9 tok/s (TTFT 842 ms)"
+
+
 _TOK_RE = re.compile(
     r"Generacion (?P<status>\w+): (?P<tokens>\d+) tokens en (?P<elapsed>[\d.]+)s"
     r" — (?P<toks>[\d.]+) tok/s \(TTFT (?P<ttft>[\d.]+) ms\)"
 )
 
-# Evaluation log lines emitted by _evaluate_chapter_completion:
-#   [eval] ── Chapter 3 completion check (after pass 2) ──  847 words written so far
+
+
 _EVAL_START_RE = re.compile(
     r"\[eval\] ── Chapter (?P<ch>\d+) completion check \(after pass (?P<pass>\d+)\)"
     r" ──\s+(?P<words>\d+) words"
 )
-#   [eval] Attempt 1/2 — sending to model…
+
 _EVAL_ATTEMPT_RE = re.compile(r"\[eval\] Attempt (?P<n>\d+)/(?P<total>\d+)")
-#   [eval] Attempt 1: model said 'false' → verdict: FALSE →
+
 _EVAL_VERDICT_RE = re.compile(
     r"\[eval\] Attempt \d+: model said (?P<raw>[^\s→]+).*?verdict: (?P<verdict>TRUE|FALSE)"
 )
-#   [eval] Attempt 1: model returned unparseable output: '...'
+
 _EVAL_UNPARSEABLE_RE = re.compile(r"\[eval\] Attempt \d+:.*unparseable.*: (?P<raw>.+)")
-#   [eval] All N attempts failed … treating as FALSE
+
 _EVAL_ALLFAILED_RE = re.compile(r"\[eval\] All \d+ attempts failed")
-#   [eval] ── Result for Chapter 3: STOP — chapter complete. ──
+
 _EVAL_RESULT_RE = re.compile(r"\[eval\] ── Result for Chapter (?P<ch>\d+): (?P<action>.+?) ──")
 
-# Hard cap on retained lines so a long run (especially with "Show full
-# prompt" enabled in Settings) can't grow this widget's document — and the
-# app's memory — without bound. Oldest lines are dropped first.
+
+
+
 MAX_LINES = 4000
-TRIM_TO = 3000  # when the cap is hit, trim down to this many lines at once
+TRIM_TO = 3000
 
 
 class _QtLogSignal(QObject):
@@ -124,10 +124,10 @@ class ConsolePanel(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(8)
 
-        # ── Stats bar ─────────────────────────────────────────────────────────
-        # Shows tok/s, token count, elapsed time, and TTFT from the last
-        # completed generation. Updated automatically by parsing the log line
-        # that LLMEngine emits after each streaming call.
+
+
+
+
         stats_bar = QFrame()
         stats_bar.setStyleSheet(
             f"QFrame {{ background: {COLOR_SURFACE_RAISED}; "
@@ -164,10 +164,10 @@ class ConsolePanel(QWidget):
         stats_layout.addStretch()
         layout.addWidget(stats_bar)
 
-        # ── Completion-evaluator panel ────────────────────────────────────────
-        # Shows every step of the true/false evaluator in real time:
-        # which chapter + pass triggered it, each model attempt and what it
-        # returned, and the final verdict. Collapsed when nothing is running.
+
+
+
+
         eval_bar = QFrame()
         eval_bar.setStyleSheet(
             f"QFrame {{ background: {COLOR_SURFACE_RAISED}; "
@@ -193,9 +193,9 @@ class ConsolePanel(QWidget):
         eval_title_row.addWidget(self._eval_chapter_lbl)
         eval_layout.addLayout(eval_title_row)
 
-        # Attempt rows — up to MAX_COMPLETION_EVAL_RETRIES (2) shown
+
         self._eval_attempt_rows: list[QLabel] = []
-        for _ in range(3):   # 3 slots to be safe regardless of constant value
+        for _ in range(3):
             row_lbl = QLabel("")
             row_lbl.setStyleSheet(
                 f"color: {COLOR_TEXT}; font-size: 12px; font-family: Consolas, monospace; "
@@ -204,7 +204,7 @@ class ConsolePanel(QWidget):
             eval_layout.addWidget(row_lbl)
             self._eval_attempt_rows.append(row_lbl)
 
-        # Final verdict row
+
         self._eval_verdict_lbl = QLabel("")
         self._eval_verdict_lbl.setStyleSheet(
             f"font-size: 13px; font-weight: 700; font-family: Consolas, monospace; "
@@ -214,7 +214,7 @@ class ConsolePanel(QWidget):
 
         self._eval_bar = eval_bar
         layout.addWidget(eval_bar)
-        # ─────────────────────────────────────────────────────────────────────
+
 
         header = QHBoxLayout()
         title = QLabel("Console")
@@ -276,9 +276,9 @@ class ConsolePanel(QWidget):
         root_logger = logging.getLogger()
         root_logger.addHandler(self._handler)
 
-        # engine.chat's "llm_engine" logger sets propagate=False, so a
-        # handler on root alone would never see its records — attach here
-        # too so model-load / generation-timing lines still show up.
+
+
+
         llm_logger = logging.getLogger("llm_engine")
         llm_logger.addHandler(self._handler)
 
@@ -293,8 +293,8 @@ class ConsolePanel(QWidget):
                 self._scroll_to_bottom()
 
     def _append_line(self, line: str) -> None:
-        # Always update stat/eval panels even while paused — numbers are
-        # useful to glance at without having to unpause the log.
+
+
         m = _TOK_RE.search(line)
         if m:
             self._update_stats(m)
@@ -302,8 +302,8 @@ class ConsolePanel(QWidget):
 
         if self._paused:
             self._pending_while_paused.append(line)
-            # Still cap the pending buffer so leaving it paused for a long
-            # run doesn't grow unbounded either.
+
+
             if len(self._pending_while_paused) > MAX_LINES:
                 self._pending_while_paused = self._pending_while_paused[-TRIM_TO:]
             return
@@ -320,7 +320,7 @@ class ConsolePanel(QWidget):
                 f"Cap. {m.group('ch')}  pass {m.group('pass')}  "
                 f"({m.group('words')} palabras)"
             )
-            # Reset attempt rows for a new evaluation round
+
             for row in self._eval_attempt_rows:
                 row.setText("")
             self._eval_verdict_lbl.setText("")
@@ -341,7 +341,7 @@ class ConsolePanel(QWidget):
             verdict = m.group("verdict")
             is_true = verdict == "TRUE"
             color   = "#4ec97b" if is_true else COLOR_WARNING
-            # Find which attempt slot to update (most recent non-empty or last)
+
             slot = 0
             for i, row in enumerate(self._eval_attempt_rows):
                 if row.text():
@@ -396,13 +396,13 @@ class ConsolePanel(QWidget):
         toks     = float(m.group("toks"))
         ttft_ms  = float(m.group("ttft"))
 
-        # Colour the tok/s reading: green ≥ 10, amber 5–10, red < 5
+
         if toks >= 10:
-            color = "#4ec97b"   # green-ish
+            color = "#4ec97b"
         elif toks >= 5:
             color = COLOR_WARNING
         else:
-            color = "#e05c5c"   # red
+            color = "#e05c5c"
 
         self._stat_toks.setText(f"{toks:.1f}")
         self._stat_toks.setStyleSheet(
@@ -424,7 +424,7 @@ class ConsolePanel(QWidget):
         cursor.movePosition(QTextCursor.Down, QTextCursor.KeepAnchor, lines_to_drop)
         cursor.select(QTextCursor.BlockUnderCursor)
         cursor.removeSelectedText()
-        cursor.deleteChar()  # remove the now-leading empty line, if any
+        cursor.deleteChar()
 
     def _scroll_to_bottom(self) -> None:
         bar = self.text.verticalScrollBar()

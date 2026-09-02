@@ -157,7 +157,7 @@ class Character:
         for r in raw_rels:
             if isinstance(r, dict):
                 rel = CharacterRelationship.from_dict(r)
-                # Only keep relationships that have both required fields non-empty.
+
                 if rel.related_character and rel.relationship:
                     relationships.append(rel)
         return cls(
@@ -287,7 +287,7 @@ class TaskTemperatures:
     conversation_summary: float = 0.3
     chat: float = 0.7
 
-    # Top P — defaults match llama-cpp-python's own generate() default (0.9).
+
     write_synopsis_top_p: float = 0.9
     generate_outline_top_p: float = 0.9
     review_outline_top_p: float = 0.9
@@ -300,8 +300,8 @@ class TaskTemperatures:
     conversation_summary_top_p: float = 0.9
     chat_top_p: float = 0.9
 
-    # Top K — 40 is llama.cpp's own conventional default; 0 means "disabled"
-    # (no top-k filtering), which is respected end-to-end, not just in the UI.
+
+
     write_synopsis_top_k: int = 40
     generate_outline_top_k: int = 40
     review_outline_top_k: int = 40

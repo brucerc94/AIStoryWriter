@@ -20,15 +20,15 @@ logger = logging.getLogger("llama_features")
 
 _supported_params: Optional[set] = None
 
-# Known kwarg names, across different llama-cpp-python versions, for the
-# MoE "keep expert tensors on CPU" optimization that llama.cpp's CLI tools
-# expose as --cpu-moe / --n-cpu-moe. As of this writing that feature lives
-# in llama.cpp's CLI arg-parsing layer (built on the lower-level
-# tensor_buft_overrides mechanism), not as a plain field on the public C
-# API structs — so it is NOT guaranteed to exist as a named Llama()
-# kwarg in every llama-cpp-python release. We check defensively for any
-# name a given build might expose it under, and simply skip it if none
-# match, rather than assuming.
+
+
+
+
+
+
+
+
+
 _MOE_CPU_OFFLOAD_PARAM_CANDIDATES = ("n_cpu_moe", "cpu_moe")
 
 

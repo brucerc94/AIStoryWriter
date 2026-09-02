@@ -59,16 +59,16 @@ class PatchOp(str, Enum):
 @dataclass
 class Patch:
     op: PatchOp
-    search: str = ""    # REPLACE / DELETE target text
-    replace: str = ""   # REPLACE / ADD new content
-    section: str = ""   # ADD target section name (optional)
-    raw_block: str = ""  # original block text, kept for error messages
+    search: str = ""
+    replace: str = ""
+    section: str = ""
+    raw_block: str = ""
 
 
 @dataclass
 class PatchError:
-    index: int            # which patch (0-based) in the batch failed, -1 = batch-level
-    reason: str            # human-readable — safe to feed back to the model
+    index: int
+    reason: str
     raw_block: str = ""
 
 
@@ -76,7 +76,7 @@ class PatchError:
 class PatchResult:
     """Structured result of applying a batch of patches."""
     success: bool
-    document: str = ""     # resulting document — ONLY meaningful if success
+    document: str = ""
     applied: int = 0
     errors: list[PatchError] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -89,9 +89,9 @@ _BLOCK_RE = re.compile(
 _SEP_RE = re.compile(r"\n={7}\n")
 _HEADING_RE = re.compile(r"^(#{1,6})\s*(.+?)\s*$", re.MULTILINE)
 
-# World & Setting is intentionally small and stable. These are the ONLY
-# sections the world document may use. Other legacy headings are migrated
-# into one of these buckets or dropped when they are clearly out of scope.
+
+
+
 WORLD_ALLOWED_SECTIONS = ("Geography", "Culture & Customs", "Relevant History")
 _WORLD_SECTION_ALIASES = {
     "geography": "Geography",
@@ -180,7 +180,7 @@ def _merge_world_sections(document: str) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-# ── Parsing ──────────────────────────────────────────────────────────
+
 
 def parse_patches(text: str) -> tuple[list[Patch], list[str]]:
     """
@@ -234,7 +234,7 @@ def parse_patches(text: str) -> tuple[list[Patch], list[str]]:
     return patches, warnings
 
 
-# ── Markdown section helpers ─────────────────────────────────────────
+
 
 def _headings(document: str) -> list[tuple[int, int, str]]:
     """[(start_offset, heading_level, title), ...] in document order."""
@@ -365,15 +365,15 @@ def merge_markdown_document(existing: str, new_text: str, default_sections: list
     """
     doc = ensure_sections(existing, default_sections)
 
-    # World generation returns a whole structured document. Normalize it first
-    # so old headings such as Magic/Kingdoms cannot survive into the stored world.
+
+
     if _is_world_document(new_text):
         normalized_new = _merge_world_sections(new_text)
     else:
         normalized_new = new_text
 
     if _is_world_document(doc):
-        # Merge only allowed sections from the new document.
+
         for title, body in split_markdown_sections(normalized_new):
             canonical = _canonical_world_section(title)
             if not canonical:
@@ -386,8 +386,8 @@ def merge_markdown_document(existing: str, new_text: str, default_sections: list
                 continue
             start, end, _level = bounds
             existing_body = doc[start:end]
-            # Avoid exact duplicate paragraphs/bullets when the same world pass
-            # is generated repeatedly.
+
+
             additions = [line.strip() for line in body_content.splitlines() if line.strip()]
             new_lines = []
             existing_norm = {re.sub(r"\s+", " ", line).strip().lower() for line in existing_body.splitlines() if line.strip()}
@@ -419,7 +419,7 @@ def merge_markdown_document(existing: str, new_text: str, default_sections: list
     return doc.strip() + "\n"
 
 
-# ── Validation & application ─────────────────────────────────────────
+
 
 def _count_occurrences(document: str, search: str) -> int:
     if not search:
@@ -526,7 +526,7 @@ def apply_patches(document: str, patches: list[Patch], strict: bool = True) -> P
                         insertion = section_text.rstrip("\n") + "\n" + "\n".join(unique_lines) + "\n"
                         working = working[:start] + insertion + working[end:]
                     else:
-                        # For World, never create an ad-hoc section.
+
                         if _is_world_document(working):
                             continue
                         working = working.rstrip() + f"\n\n## {section}\n{p.replace.strip()}\n"

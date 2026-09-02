@@ -61,10 +61,10 @@ class SizeAdjustingTabWidget(QTabWidget):
 
     def setCurrentIndex(self, index: int) -> None:
         super().setCurrentIndex(index)
-        # Force the layout system to re-query our (now different) size
-        # hints immediately, so switching tabs promptly relaxes/tightens
-        # the window's minimum size instead of waiting for some other
-        # event to trigger a relayout.
+
+
+
+
         self.updateGeometry()
 
 
@@ -151,7 +151,7 @@ class EmptyStateCard(QWidget):
                 link_row.addWidget(secondary_btn)
             if secondary_label and tertiary_label:
                 sep = QLabel("·")
-                sep.setStyleSheet("color: transparent;")  # spacing only
+                sep.setStyleSheet("color: transparent;")
                 link_row.addWidget(sep)
             if tertiary_label:
                 tertiary_btn = QPushButton(tertiary_label)

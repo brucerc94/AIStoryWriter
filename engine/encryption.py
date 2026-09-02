@@ -50,17 +50,17 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 logger = logging.getLogger("encryption")
 
 MAGIC = b"ASWENC1"
-_KEY_SIZE_BYTES = 32       # 256 bits — AES-256
-_NONCE_SIZE_BYTES = 12     # 96 bits — the standard/recommended AES-GCM nonce size
+_KEY_SIZE_BYTES = 32
+_NONCE_SIZE_BYTES = 12
 
 
 class DecryptionError(Exception):
     """Raised when data cannot be decrypted (wrong key, corruption, or tampering)."""
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# Key providers
-# ─────────────────────────────────────────────────────────────────────────
+
+
+
 
 class KeyProvider(abc.ABC):
     """
@@ -112,10 +112,10 @@ class LocalKeyProvider(KeyProvider):
             key = os.urandom(_KEY_SIZE_BYTES)
             self._key_file.write_bytes(key)
             try:
-                os.chmod(self._key_file, stat.S_IRUSR | stat.S_IWUSR)  # 0600
+                os.chmod(self._key_file, stat.S_IRUSR | stat.S_IWUSR)
             except OSError:
-                # Best-effort on platforms without POSIX permission bits
-                # (e.g. some Windows filesystems) — not fatal.
+
+
                 pass
             logger.info(f"Generated new local encryption key at '{self._key_file}'.")
         self._key = key
@@ -163,9 +163,9 @@ class PasswordKeyProvider(KeyProvider):
         return self._key
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# Encryption service
-# ─────────────────────────────────────────────────────────────────────────
+
+
+
 
 class EncryptionService(abc.ABC):
     """
@@ -233,20 +233,20 @@ class AesGcmEncryptionService(EncryptionService):
         return blob[:len(MAGIC)] == MAGIC
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# Default instance wiring (simple DI for a single-process desktop app)
-# ─────────────────────────────────────────────────────────────────────────
-#
-# The app doesn't use a DI framework, so this module-level factory is the
-# composition root for encryption: it's the one place that decides which
-# KeyProvider/EncryptionService implementation is active. Everything else
-# (engine/storage.py) depends only on the abstract `EncryptionService`
-# type and asks this factory for an instance — it never constructs
-# `AesGcmEncryptionService` or `LocalKeyProvider` itself. That indirection
-# is what lets tests inject a throwaway service via
-# `configure_encryption_service()`, and what will let a future
-# password-unlock flow swap in a `PasswordKeyProvider`-backed service at
-# startup with a single call to the same function.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 _default_service: EncryptionService | None = None
 

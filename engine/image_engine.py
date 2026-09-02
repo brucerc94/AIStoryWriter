@@ -100,9 +100,9 @@ from engine.models import (
 logger = logging.getLogger("image_engine")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ──────────────────────────────────────────────────────────────────────────────
+
+
+
 
 def _is_diffusion_only_file(path: str) -> bool:
     """
@@ -135,11 +135,11 @@ def _sd_supports_diffusion_flash_attn() -> bool:
         return False
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Minimal GGUF tensor-name reader (no external deps) — used only as a
-# best-effort pre-flight sanity check, never as the primary source of
-# truth. Any parsing failure is swallowed and simply skips the check.
-# ──────────────────────────────────────────────────────────────────────────────
+
+
+
+
+
 
 _GGUF_SIMPLE_VALUE_SIZES = {0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1, 10: 8, 11: 8, 12: 8}
 
@@ -172,9 +172,9 @@ def _read_gguf_tensor_names(path: str, max_tensors: int = 4000) -> Optional[set[
             def skip_value(vtype: int) -> None:
                 if vtype in _GGUF_SIMPLE_VALUE_SIZES:
                     f.read(_GGUF_SIMPLE_VALUE_SIZES[vtype])
-                elif vtype == 8:  # string
+                elif vtype == 8:
                     read_str()
-                elif vtype == 9:  # array
+                elif vtype == 9:
                     (arr_type,) = struct.unpack("<I", f.read(4))
                     (arr_len,) = struct.unpack("<Q", f.read(8))
                     for _ in range(arr_len):
@@ -183,7 +183,7 @@ def _read_gguf_tensor_names(path: str, max_tensors: int = 4000) -> Optional[set[
                     raise ValueError(f"unknown gguf value type {vtype}")
 
             for _ in range(kv_count):
-                read_str()  # key
+                read_str()
                 (vtype,) = struct.unpack("<I", f.read(4))
                 skip_value(vtype)
 
@@ -191,13 +191,13 @@ def _read_gguf_tensor_names(path: str, max_tensors: int = 4000) -> Optional[set[
             for _ in range(min(tensor_count, max_tensors)):
                 name = read_str()
                 (n_dims,) = struct.unpack("<I", f.read(4))
-                f.read(8 * n_dims)  # dims (uint64 each)
-                f.read(4)           # ggml tensor type
-                f.read(8)           # offset
+                f.read(8 * n_dims)
+                f.read(4)
+                f.read(8)
                 names.add(name)
             return names
     except Exception:
-        # Best-effort only — never let a parsing quirk break model loading.
+
         return None
 
 
@@ -224,10 +224,10 @@ def _check_llm_gguf_matches_sdcpp_naming(llm_path: str) -> Optional[str]:
     return None
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Native log capture — lets us detect load failures that the Python
-# binding itself doesn't turn into an exception (see module docstring).
-# ──────────────────────────────────────────────────────────────────────────────
+
+
+
+
 
 _LOAD_FAILURE_MARKERS = (
     "not in model file",
@@ -242,7 +242,7 @@ _LOAD_FAILURE_MARKERS = (
 _log_lock = threading.Lock()
 _log_buffer: list[str] = []
 _log_callback_installed = False
-_log_callback_ref = None  # kept alive so ctypes doesn't GC the CFUNCTYPE
+_log_callback_ref = None
 
 
 def _install_capturing_log_callback() -> bool:
@@ -277,7 +277,7 @@ def _install_capturing_log_callback() -> bool:
     except Exception:
         return False
 
-    _log_callback_ref = _capturing_cb  # prevent garbage collection
+    _log_callback_ref = _capturing_cb
     _log_callback_installed = True
     return True
 
@@ -298,9 +298,9 @@ def _detect_load_failure(captured_log: str) -> Optional[str]:
     return None
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Abstract base — every backend must implement this contract
-# ──────────────────────────────────────────────────────────────────────────────
+
+
+
 
 class ImageEngine(ABC):
     """
@@ -395,9 +395,9 @@ class ImageEngine(ABC):
         """Release the loaded model and free memory."""
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# stable-diffusion.cpp backend
-# ──────────────────────────────────────────────────────────────────────────────
+
+
+
 
 class StableDiffusionCppEngine(ImageEngine):
     """
@@ -428,12 +428,12 @@ class StableDiffusionCppEngine(ImageEngine):
     request.allow_custom_sampling (see generate() below).
     """
 
-    # Z-Image-Turbo recommended generation defaults.
+
     _ZIMAGE_STEPS_DEFAULT: int = 8
     _ZIMAGE_CFG_DEFAULT: float = 1.0
 
     def __init__(self) -> None:
-        self._sd = None                      # stable_diffusion_cpp.StableDiffusion instance
+        self._sd = None
         self._model_path: str = ""
         self._text_encoder_path: str = ""
         self._vae_path: str = ""
@@ -441,7 +441,7 @@ class StableDiffusionCppEngine(ImageEngine):
         self._loras: list[dict] = []
         self._loaded_lora_dir: str = ""
 
-    # ── LoRA support ───────────────────────────────────────────────────
+
 
     def load_loras(self, loras: list) -> None:
         """Register active LoRA adapters before calling load_model()."""
@@ -478,7 +478,7 @@ class StableDiffusionCppEngine(ImageEngine):
         if not tags:
             return base_prompt
 
-        # Build: [triggers, ] base_prompt <lora:…> …
+
         parts = []
         if triggers:
             parts.append(", ".join(triggers))
@@ -493,7 +493,7 @@ class StableDiffusionCppEngine(ImageEngine):
         first_path = self._loras[0].get("path", "").strip()
         return os.path.dirname(first_path) if first_path else ""
 
-    # ── Properties ────────────────────────────────────────────────────
+
 
     @property
     def backend_name(self) -> str:
@@ -512,7 +512,7 @@ class StableDiffusionCppEngine(ImageEngine):
     def is_model_loaded(self) -> bool:
         return self._sd is not None
 
-    # ── load_model ────────────────────────────────────────────────────
+
 
     def load_model(
         self,
@@ -572,7 +572,7 @@ class StableDiffusionCppEngine(ImageEngine):
             return
 
 
-        # Unload existing model first to free memory.
+
         if self._sd is not None:
             self.unload_model()
 
@@ -584,27 +584,27 @@ class StableDiffusionCppEngine(ImageEngine):
                 "Install stable-diffusion-cpp-python to enable image generation."
             ) from exc
 
-        # Determine load mode.
+
         is_multi = bool(text_encoder_path or vae_path) or (
             _is_diffusion_only_file(model_path)
             and bool(text_encoder_path or vae_path)
         )
-        # Even without companion paths, if the filename clearly signals a
-        # standalone diffusion model, prefer the diffusion_model_path= path
-        # so we don't trigger "get sd version from file failed".
+
+
+
         if not is_multi and _is_diffusion_only_file(model_path):
             is_multi = True
 
-        # NOTE: we no longer do a static pre-flight rejection of llm_path
-        # based on guessed tensor-name conventions (see
-        # _check_llm_gguf_matches_sdcpp_naming's docstring for why that
-        # was removed — it produced false positives on valid files).
-        # The real check happens after construction, via native log
-        # capture below.
+
+
+
+
+
+
 
         self._is_multi_component = is_multi
 
-        # Build kwargs for StableDiffusion().
+
         kwargs: dict = {}
 
         if is_multi:
@@ -613,20 +613,20 @@ class StableDiffusionCppEngine(ImageEngine):
                 kwargs["llm_path"] = text_encoder_path
             if vae_path:
                 kwargs["vae_path"] = vae_path
-            # Z-Image-Turbo / multi-component memory optimisation.
+
             kwargs["offload_params_to_cpu"] = True
-            # Enable diffusion flash-attention if the build supports it.
+
             if _sd_supports_diffusion_flash_attn():
                 kwargs["diffusion_flash_attn"] = True
         else:
-            # Monolithic checkpoint (SD 1.x, SDXL, …).
+
             kwargs["model_path"] = model_path
             if vae_path:
                 kwargs["vae_path"] = vae_path
 
-        # If the caller has already registered LoRAs via load_loras(), tell
-        # stable-diffusion.cpp where to find the .safetensors files so the
-        # <lora:name:weight> tags injected at generation time resolve correctly.
+
+
+
         lora_dir = self._lora_model_dir()
         if lora_dir and os.path.isdir(lora_dir):
             kwargs["lora_model_dir"] = lora_dir
@@ -647,8 +647,8 @@ class StableDiffusionCppEngine(ImageEngine):
             vae_path or "(none)",
         )
 
-        # Install (once) our capturing log callback, then drain any stale
-        # output so the buffer only contains what happens during THIS load.
+
+
         _install_capturing_log_callback()
         _drain_log_buffer()
 
@@ -665,14 +665,14 @@ class StableDiffusionCppEngine(ImageEngine):
         captured_log = _drain_log_buffer()
         failure_marker = _detect_load_failure(captured_log)
         if failure_marker is not None:
-            # The C library accepted the files and returned a context, but
-            # logged that it could not find one or more expected tensors —
-            # this WILL crash with a NULL pointer error the moment
-            # generate_image() touches the missing weights. Treat it as a
-            # load failure now rather than a generation-time crash later.
+
+
+
+
+
             try:
-                # Best-effort: drop the reference so the (partially loaded,
-                # broken) native context can be garbage-collected / freed.
+
+
                 del new_sd
             except Exception:
                 pass
@@ -697,7 +697,7 @@ class StableDiffusionCppEngine(ImageEngine):
 
         logger.info("[sd_cpp] Model loaded successfully.")
 
-    # ── generate ──────────────────────────────────────────────────────
+
 
     def generate(
         self,
@@ -744,12 +744,12 @@ class StableDiffusionCppEngine(ImageEngine):
             effective_cfg,
         )
 
-        # Build progress wrapper.
+
         def _progress(step: int, steps: int, _time: float) -> None:
             if progress_callback:
                 progress_callback(step, steps)
 
-        # Inject trigger words + <lora:name:weight> tags for active LoRA adapters.
+
         effective_prompt = self._lora_prompt_tags(request.prompt)
         if effective_prompt != request.prompt:
             logger.info("[sd_cpp] LoRA prompt — original : %s", request.prompt)
@@ -778,11 +778,11 @@ class StableDiffusionCppEngine(ImageEngine):
                     error_message="generate_image() returned an empty list.",
                 )
 
-            # Save the first image (generate_image returns a list).
+
             os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
             images[0].save(output_path)
 
-            # Try to read back the seed actually used.
+
             seed_used = request.seed
             try:
                 seed_used = int(images[0].info.get("seed", request.seed))
@@ -803,7 +803,7 @@ class StableDiffusionCppEngine(ImageEngine):
                 error_message=str(exc),
             )
 
-    # ── unload_model ──────────────────────────────────────────────────
+
 
     def unload_model(self) -> None:
         logger.info("[sd_cpp] Unloading image model.")
@@ -814,13 +814,13 @@ class StableDiffusionCppEngine(ImageEngine):
         self._is_multi_component = False
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Backend registry
-# ──────────────────────────────────────────────────────────────────────────────
+
+
+
 
 _BACKEND_REGISTRY: dict[str, type[ImageEngine]] = {
     ImageBackend.STABLE_DIFFUSION_CPP.value: StableDiffusionCppEngine,
-    # ImageBackend.FLUX.value: FluxEngine,
+
 }
 
 
@@ -831,9 +831,9 @@ def create_engine_for_backend(backend: ImageBackend) -> ImageEngine:
     return cls()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Module-level singleton — mirrors engine/chat.py's get_engine() pattern
-# ──────────────────────────────────────────────────────────────────────────────
+
+
+
 
 _image_engine_instance: Optional[ImageEngine] = None
 
@@ -854,7 +854,7 @@ def get_image_engine(backend: Optional[ImageBackend] = None) -> ImageEngine:
         logger.info("[image_engine] Created engine: %s", _image_engine_instance.backend_name)
         return _image_engine_instance
 
-    # Hot-swap if the backend changed.
+
     if (
         backend is not None
         and _image_engine_instance.backend_name

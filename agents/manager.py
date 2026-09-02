@@ -25,11 +25,11 @@ class ManagerAgent:
         if not project.outline:
             return TaskType.GENERATE_OUTLINE, "Generate the chapter outline"
 
-        # Check if there are unreviewed chapters
+
         for ch in project.chapters:
             if not ch.reviewed:
                 return TaskType.REVIEW_CHAPTER, f"Review Chapter {ch.number}"
 
-        # Next chapter to write
+
         next_num = len(project.chapters) + 1
         return TaskType.WRITE_CHAPTER, f"Write Chapter {next_num}"

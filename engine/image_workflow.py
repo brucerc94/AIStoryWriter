@@ -49,22 +49,22 @@ class ImageWorkflowWorker(QObject):
     UI can handle both with the same patterns.
     """
 
-    # Emitted for each sampling step: (current_step, total_steps)
+
     progress_updated = Signal(int, int)
 
-    # Status text while the engine is working
+
     status_changed = Signal(str)
 
-    # Model load/unload status messages
+
     model_loading = Signal(str)
 
-    # Generation complete — carries the ImageGenerationResult
+
     generation_finished = Signal(object)
 
-    # Unrecoverable error
+
     error_occurred = Signal(str)
 
-    # All done (success or failure)
+
     finished = Signal()
 
     def __init__(
@@ -96,9 +96,9 @@ class ImageWorkflowWorker(QObject):
         finally:
             self.finished.emit()
 
-    # ──────────────────────────────────────────────
-    # Internal
-    # ──────────────────────────────────────────────
+
+
+
 
     def _run_generation(self) -> None:
         self.status_changed.emit("Loading image model…")
@@ -119,9 +119,9 @@ class ImageWorkflowWorker(QObject):
             )
             return
 
-        # Register active LoRAs BEFORE load_model so lora_model_dir is
-        # included in the constructor kwargs (stable-diffusion.cpp needs
-        # it at construction time, not at generation time).
+
+
+
         engine.load_loras(self._loras())
 
         try:
@@ -230,8 +230,8 @@ def generate_character_image(project_id: str, character, settings: Optional[AppS
         steps=getattr(settings, "image_default_steps", 20) if settings else 20,
         cfg_scale=getattr(settings, "image_default_cfg_scale", 7.0) if settings else 7.0,
     )
-    # Use a temp directory for the raw engine output; the final copy goes
-    # through the encrypted storage layer into the project's characters/ folder.
+
+
     import tempfile
     output_dir = tempfile.mkdtemp(prefix="aiss_img_")
     output_path = os.path.join(output_dir, f"character_{character.id}.png")
@@ -239,7 +239,7 @@ def generate_character_image(project_id: str, character, settings: Optional[AppS
     if not engine.is_available:
         return False, None, f"The {engine.backend_name} library is not installed."
 
-    # Apply any configured LoRAs before loading so lora_model_dir is set.
+
     loras = getattr(settings, "image_loras", None) or [] if settings else []
     engine.load_loras(loras)
 
@@ -265,7 +265,7 @@ def generate_character_image(project_id: str, character, settings: Optional[AppS
     with open(result.image_path, "rb") as fh:
         image_bytes = fh.read()
 
-    # Clean up the temp file used by the engine
+
     try:
         os.remove(result.image_path)
         os.rmdir(output_dir)
@@ -310,9 +310,9 @@ def _vae_path(settings: Optional[AppSettings]) -> str:
     return ""
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Thread wrapper — mirrors WorkflowThread in engine/workflow.py
-# ──────────────────────────────────────────────────────────────────────────────
+
+
+
 
 class ImageWorkflowThread(QThread):
     """Owns the worker and runs it in a background thread."""
@@ -334,7 +334,7 @@ class ImageWorkflowThread(QThread):
         self.worker = ImageWorkflowWorker(request, settings, output_directory)
         self.worker.moveToThread(self)
 
-        # Forward signals
+
         self.worker.progress_updated.connect(self.progress_updated)
         self.worker.status_changed.connect(self.status_changed)
         self.worker.model_loading.connect(self.model_loading)

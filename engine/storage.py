@@ -40,13 +40,13 @@ logger = logging.getLogger("storage")
 DATA_DIR = Path(__file__).parent.parent / "data"
 SETTINGS_FILE = DATA_DIR / "settings.json"
 
-# Module-level encryption service, resolved lazily via the injected
-# factory in engine.encryption rather than constructed here — storage.py
-# depends only on the `EncryptionService` interface. Tests (or a future
-# "unlock with password" flow) swap the active implementation by calling
-# `engine.encryption.configure_encryption_service(...)` before any I/O
-# happens; this module always asks for "whatever is configured right
-# now" instead of caching a stale instance.
+
+
+
+
+
+
+
 def _encryption_service() -> EncryptionService:
     return get_default_encryption_service()
 
@@ -68,13 +68,13 @@ def chapters_dir(project_id: str) -> Path:
     return project_dir(project_id) / "chapters"
 
 
-# ──────────────────────────────────────────────
-# Encrypted I/O primitives
-# ──────────────────────────────────────────────
-#
-# Every other function in this module goes through these two functions
-# to touch disk. Nothing else in the file — and nothing outside it —
-# ever calls Path.read_text/write_text directly on user data.
+
+
+
+
+
+
+
 
 def _read_bytes(path: Path) -> Optional[bytes]:
     """
@@ -92,7 +92,7 @@ def _read_bytes(path: Path) -> Optional[bytes]:
     if service.is_encrypted(raw):
         return service.decrypt(raw)
 
-    # Legacy plaintext file — migrate it in place.
+
     logger.info(f"Migrating legacy unencrypted file to AES-256: '{path}'.")
     _write_bytes(path, raw)
     return raw
@@ -115,9 +115,9 @@ def _write_text_encrypted(path: Path, content: str) -> None:
     _write_bytes(path, content.encode("utf-8"))
 
 
-# ──────────────────────────────────────────────
-# Settings
-# ──────────────────────────────────────────────
+
+
+
 
 def load_settings() -> AppSettings:
     ensure_data_dir()
@@ -138,9 +138,9 @@ def save_settings(settings: AppSettings) -> None:
     )
 
 
-# ──────────────────────────────────────────────
-# Projects index
-# ──────────────────────────────────────────────
+
+
+
 
 def list_project_ids() -> list[str]:
     ensure_data_dir()
@@ -161,9 +161,9 @@ def load_all_projects() -> list[Project]:
     return projects
 
 
-# ──────────────────────────────────────────────
-# Single project
-# ──────────────────────────────────────────────
+
+
+
 
 def load_project(project_id: str) -> Optional[Project]:
     pdir = project_dir(project_id)
@@ -175,20 +175,20 @@ def load_project(project_id: str) -> Optional[Project]:
         data = json.loads(_read_text(project_file))
         project = Project.from_dict(data)
 
-        # Load markdown blobs
+
         project.synopsis = _read_text(pdir / "synopsis.md")
         project.outline = _read_text(pdir / "outline.md")
         project.world = _read_text(pdir / "world.md")
         project.memory = _read_text(pdir / "memory.md")
 
-        # Load chat
+
         chat_file = pdir / "chat.json"
         chat_text = _read_text(chat_file)
         if chat_text:
             chat_data = json.loads(chat_text)
             project.chat_messages = [ChatMessage.from_dict(m) for m in chat_data]
 
-        # Load characters
+
         cdir = characters_dir(project_id)
         project.characters = []
         if cdir.exists():
@@ -199,7 +199,7 @@ def load_project(project_id: str) -> Optional[Project]:
                 except Exception:
                     pass
 
-        # Load chapters
+
         chdir = chapters_dir(project_id)
         project.chapters = []
         if chdir.exists():
@@ -208,7 +208,7 @@ def load_project(project_id: str) -> Optional[Project]:
                 try:
                     ch_data = json.loads(_read_text(f))
                     ch = Chapter.from_dict(ch_data)
-                    # Load chapter content from markdown
+
                     md_path = chdir / f"chapter_{ch.number:03d}.md"
                     if md_path.exists():
                         ch.content = _read_text(md_path)
@@ -234,34 +234,34 @@ def save_project(project: Project) -> None:
 
     project.updated_at = datetime.now().isoformat()
 
-    # Save main JSON (no heavy content)
+
     project_file = pdir / "project.json"
     _write_text_encrypted(
         project_file,
         json.dumps(project.to_dict(), indent=2, ensure_ascii=False),
     )
 
-    # Save markdown blobs
+
     _write_md(pdir / "synopsis.md", project.synopsis)
     _write_md(pdir / "outline.md", project.outline)
     _write_md(pdir / "world.md", project.world)
     _write_md(pdir / "memory.md", project.memory)
 
-    # Save story.md — full concatenated story for human reading. This
-    # is a *derived* convenience file (never read back by the app), but
-    # it still contains the user's story text, so it's encrypted at
-    # rest like everything else. Use "Export" (docx/pdf) from the UI to
-    # get an intentional, explicit plaintext copy outside the app.
+
+
+
+
+
     _write_story_md(project)
 
-    # Save chat
+
     chat_file = pdir / "chat.json"
     chat_data = [m.to_dict() for m in project.chat_messages]
     _write_text_encrypted(chat_file, json.dumps(chat_data, indent=2, ensure_ascii=False))
 
-    # Save characters
+
     cdir = characters_dir(project.id)
-    # Remove old files not in current list
+
     existing_ids = {c.id for c in project.characters}
     for f in cdir.glob("*.json"):
         if f.stem not in existing_ids:
@@ -270,10 +270,10 @@ def save_project(project: Project) -> None:
         f = cdir / f"{char.id}.json"
         _write_text_encrypted(f, json.dumps(char.to_dict(), indent=2, ensure_ascii=False))
 
-    # Save chapters
+
     chdir = chapters_dir(project.id)
     existing_nums = {ch.number for ch in project.chapters}
-    # Remove orphan chapter files
+
     for f in chdir.glob("chapter_*.json"):
         try:
             num = int(f.stem.split("_")[1])
@@ -286,7 +286,7 @@ def save_project(project: Project) -> None:
 
     for ch in project.chapters:
         meta = ch.to_dict()
-        # Don't store content in JSON, only in MD
+
         content = meta.pop("content", "")
         f = chdir / f"chapter_{ch.number:03d}.json"
         _write_text_encrypted(f, json.dumps(meta, indent=2, ensure_ascii=False))
@@ -323,9 +323,9 @@ def rename_project(project_id: str, new_title: str) -> None:
         logger.info(f"Renamed project ({project_id}): '{old_title}' -> '{new_title}'.")
 
 
-# ──────────────────────────────────────────────
-# Helpers
-# ──────────────────────────────────────────────
+
+
+
 
 def _read_md(path: Path) -> str:
     return _read_text(path)

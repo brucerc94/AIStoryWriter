@@ -115,7 +115,7 @@ class MarkdownEditor(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # ── Editor page (always built — this is the "real" content view) ──
+
         edit_page = QWidget()
         layout = QVBoxLayout(edit_page)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -147,7 +147,7 @@ class MarkdownEditor(QWidget):
         btn_row.addWidget(self.save_btn)
         layout.addLayout(btn_row)
 
-        # ── Optional empty state, shown instead of the editor when blank ──
+
         self._stack: Optional[QStackedWidget] = None
         if empty_title:
             self._stack = QStackedWidget()
@@ -160,8 +160,8 @@ class MarkdownEditor(QWidget):
             )
             empty_card.primary_clicked.connect(self.generate_requested)
             empty_card.secondary_clicked.connect(self._show_editor_page)
-            self._stack.addWidget(empty_card)   # index 0
-            self._stack.addWidget(edit_page)    # index 1
+            self._stack.addWidget(empty_card)
+            self._stack.addWidget(edit_page)
             outer.addWidget(self._stack)
         else:
             outer.addWidget(edit_page)
@@ -185,7 +185,7 @@ class MarkdownEditor(QWidget):
 
 class SynopsisTab(QWidget):
     task_requested = Signal(TaskType, str)
-    content_changed = Signal(str)  # synopsis text
+    content_changed = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -240,7 +240,7 @@ class SynopsisTab(QWidget):
 
 
 
-# ── Style option tables ───────────────────────────────────────────────────────
+
 
 
 def _localize(key: str, lang: str, table: list[tuple[str, dict[str, str]]]) -> str:
@@ -414,7 +414,7 @@ class GenerateOutlineDialog(QDialog):
         root.setSpacing(12)
         root.setContentsMargins(20, 20, 20, 20)
 
-        # ── Scrollable body ───────────────────────────────────────────
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("QScrollArea { border: none; }")
@@ -425,7 +425,7 @@ class GenerateOutlineDialog(QDialog):
         scroll.setWidget(body_widget)
         root.addWidget(scroll, 1)
 
-        # ── Section 1: Structure ──────────────────────────────────────
+
         struct_box = QGroupBox(_ui("structure_group", lang))
         struct_form = QFormLayout(struct_box)
         struct_form.setSpacing(8)
@@ -441,7 +441,7 @@ class GenerateOutlineDialog(QDialog):
         struct_form.addRow(_ui("num_chapters", lang), self.chapters_spin)
         body.addWidget(struct_box)
 
-        # ── Section 2: Author's Creative Intent ───────────────────────
+
         intent_box = QGroupBox(_ui("intent_group", lang))
         intent_form = QFormLayout(intent_box)
         intent_form.setSpacing(10)
@@ -498,7 +498,7 @@ class GenerateOutlineDialog(QDialog):
 
         body.addWidget(intent_box)
 
-        # ── Section 3: Writing Style ──────────────────────────────────
+
         style_box = QGroupBox(_ui("style_group", lang))
         style_form = QFormLayout(style_box)
         style_form.setSpacing(8)
@@ -540,7 +540,7 @@ class GenerateOutlineDialog(QDialog):
 
         body.addWidget(style_box)
 
-        # ── Buttons ───────────────────────────────────────────────────
+
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText(_ui("generate_btn", lang))
         buttons.button(QDialogButtonBox.Ok).setObjectName("accent")
@@ -548,7 +548,7 @@ class GenerateOutlineDialog(QDialog):
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
 
-    # ── Public accessors ──────────────────────────────────────────────
+
 
     def chapter_count(self) -> int:
         return self.chapters_spin.value()
@@ -596,7 +596,7 @@ class ExtendOutlineDialog(QDialog):
         root.setSpacing(12)
         root.setContentsMargins(20, 20, 20, 20)
 
-        # ── Section: Structure ────────────────────────────────────────
+
         struct_box = QGroupBox("Structure")
         struct_form = QFormLayout(struct_box)
         struct_form.setSpacing(8)
@@ -612,7 +612,7 @@ class ExtendOutlineDialog(QDialog):
         struct_form.addRow("Number of chapters to add", self.chapters_spin)
         root.addWidget(struct_box)
 
-        # ── Section: What to cover ─────────────────────────────────────
+
         cover_label = QLabel("What would you like these chapters to cover?")
         root.addWidget(cover_label)
 
@@ -629,7 +629,7 @@ class ExtendOutlineDialog(QDialog):
         )
         root.addWidget(self.cover_text, 1)
 
-        # ── Buttons ───────────────────────────────────────────────────
+
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("Extend Outline")
         buttons.button(QDialogButtonBox.Ok).setObjectName("accent")
@@ -637,7 +637,7 @@ class ExtendOutlineDialog(QDialog):
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
 
-    # ── Public accessors ──────────────────────────────────────────────
+
 
     def chapter_count(self) -> int:
         return self.chapters_spin.value()
@@ -751,7 +751,7 @@ class OutlineTab(QWidget):
             )
             return
 
-        # Persist unsaved editor text before the workflow starts.
+
         self.content_changed.emit(self.editor.get_text())
 
         suggestion, accepted = QInputDialog.getMultiLineText(
@@ -777,7 +777,7 @@ class OutlineTab(QWidget):
             )
             return
 
-        # Persist unsaved editor text before the workflow starts.
+
         self.content_changed.emit(self.editor.get_text())
 
         lang = storage.load_settings().response_language
@@ -839,9 +839,9 @@ class _ClickableImageLabel(QLabel):
 
 
 class CharacterCard(QFrame):
-    edit_requested = Signal(str)  # character id
+    edit_requested = Signal(str)
     delete_requested = Signal(str)
-    image_requested = Signal(str, bool)  # character id, regenerate
+    image_requested = Signal(str, bool)
 
     def __init__(self, character: Character, project_id: str = "", parent=None) -> None:
         super().__init__(parent)
@@ -1013,7 +1013,7 @@ class CharactersTab(QWidget):
         header_row.addWidget(add_btn)
         outer.addLayout(header_row)
 
-        # Scrollable cards area
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("QScrollArea { border: none; }")
@@ -1035,7 +1035,7 @@ class CharactersTab(QWidget):
         return self._project.id if self._project else ""
 
     def _refresh_cards(self) -> None:
-        # Remove all cards
+
         while self.cards_layout.count() > 1:
             item = self.cards_layout.takeAt(0)
             if item.widget():
@@ -1178,7 +1178,7 @@ class CharacterDialog(QDialog):
         self.setMinimumWidth(520)
         self.setModal(True)
 
-        # Names of every other character in the project (for relationship targets)
+
         self._all_character_names: list[str] = [
             c.name for c in (all_characters or [])
             if character is None or c.id != character.id
@@ -1188,7 +1188,7 @@ class CharacterDialog(QDialog):
         layout.setSpacing(10)
         layout.setContentsMargins(20, 20, 20, 20)
 
-        # ── Basic fields ──────────────────────────────────────────────────
+
         form = QFormLayout()
         form.setSpacing(8)
 
@@ -1219,17 +1219,17 @@ class CharacterDialog(QDialog):
 
         layout.addLayout(form)
 
-        # ── Relationships section ─────────────────────────────────────────
+
         rel_group = QGroupBox("Relationships")
         rel_layout = QVBoxLayout(rel_group)
         rel_layout.setSpacing(6)
 
-        # Scrollable list of existing relationships
+
         self._rel_list = QListWidget()
         self._rel_list.setFixedHeight(120)
         rel_layout.addWidget(self._rel_list)
 
-        # Row for adding / editing a relationship
+
         add_row = QHBoxLayout()
         add_row.setSpacing(6)
 
@@ -1259,7 +1259,7 @@ class CharacterDialog(QDialog):
 
         rel_layout.addLayout(add_row)
 
-        # Edit / delete buttons for the selected list item
+
         edit_del_row = QHBoxLayout()
         edit_del_row.setSpacing(6)
         btn_edit_rel = QPushButton("Edit selected")
@@ -1273,13 +1273,13 @@ class CharacterDialog(QDialog):
 
         layout.addWidget(rel_group)
 
-        # ── Dialog buttons ────────────────────────────────────────────────
+
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-        # ── Populate from existing character ──────────────────────────────
+
         if character:
             self._char_id = character.id
             self._existing_character = character
@@ -1294,12 +1294,12 @@ class CharacterDialog(QDialog):
             self._char_id = None
             self._existing_character = None
 
-    # ── Relationship list helpers ─────────────────────────────────────────
+
 
     def _append_rel_item(self, target: str, rel_type: str) -> None:
         """Add one relationship entry to the list widget."""
         item = QListWidgetItem(f"{rel_type}  →  {target}")
-        # Store data as a tuple in the user role
+
         item.setData(Qt.UserRole, (target, rel_type))
         self._rel_list.addItem(item)
 
@@ -1312,20 +1312,20 @@ class CharacterDialog(QDialog):
         if not rel_type:
             QMessageBox.warning(self, "Missing type", "Select or type the relationship type.")
             return
-        # Handle "otro" — ask for a custom label
+
         if rel_type.lower() == "otro":
             custom, ok = QInputDialog.getText(self, "Custom relationship", "Enter relationship label (e.g. 'rival de'):")
             if not ok or not custom.strip():
                 return
             rel_type = custom.strip()
-        # Prevent duplicate entries for the same (target, type) pair
+
         for i in range(self._rel_list.count()):
             stored = self._rel_list.item(i).data(Qt.UserRole)
             if stored and stored[0] == target and stored[1] == rel_type:
                 QMessageBox.information(self, "Duplicate", "This relationship already exists.")
                 return
         self._append_rel_item(target, rel_type)
-        # Reset inputs
+
         self._rel_target_combo.setCurrentIndex(-1)
         self._rel_type_combo.setCurrentIndex(-1)
 
@@ -1337,13 +1337,13 @@ class CharacterDialog(QDialog):
         if not stored:
             return
         old_target, old_type = stored
-        # Pre-fill the add-row fields so the user can modify and re-add
+
         if old_target in self._all_character_names:
             self._rel_target_combo.setCurrentText(old_target)
         else:
             self._rel_target_combo.setCurrentText(old_target)
         self._rel_type_combo.setCurrentText(old_type)
-        # Remove the old entry so the user "replaces" it via Add
+
         row = self._rel_list.row(item)
         self._rel_list.takeItem(row)
 
@@ -1354,7 +1354,7 @@ class CharacterDialog(QDialog):
         row = self._rel_list.row(item)
         self._rel_list.takeItem(row)
 
-    # ── Result extraction ─────────────────────────────────────────────────
+
 
     def get_character(self) -> Character:
         import uuid
@@ -1419,7 +1419,7 @@ class ChangeChapterDialog(QDialog):
         layout.setSpacing(12)
         layout.setContentsMargins(20, 20, 20, 20)
 
-        # Header label
+
         header = QLabel(
             f"<b>Chapter {chapter.number}: {chapter.title}</b><br>"
             "<span style='color:#aaa;font-size:13px;'>"
@@ -1430,7 +1430,7 @@ class ChangeChapterDialog(QDialog):
         header.setWordWrap(True)
         layout.addWidget(header)
 
-        # Instructions text area
+
         self._text = QTextEdit()
         self._text.setPlaceholderText(
             "Examples:\n"
@@ -1442,7 +1442,7 @@ class ChangeChapterDialog(QDialog):
         self._text.setMinimumHeight(160)
         layout.addWidget(self._text)
 
-        # Buttons
+
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("Apply Changes")
         buttons.accepted.connect(self._on_accept)
@@ -1628,13 +1628,13 @@ class _BookPageTextEdit(QTextEdit):
         event.ignore()
 
     def scrollContentsBy(self, dx: int, dy: int) -> None:  # noqa: N802 — Qt override
-        # Prevent any implicit scrolling after HTML/document relayout.
+
         return
 
 
 class _ReadPane(QWidget):
 
-    page_key_pressed = Signal(str)  # "prev" | "next" | "first" | "last"
+    page_key_pressed = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -1664,23 +1664,23 @@ class ChaptersTab(QWidget):
     task_requested = Signal(TaskType, str)
     project_changed = Signal()
 
-    # Paper-page metrics for the book reader (px). Kept as class constants
-    # so the pagination math and the widget geometry always agree.
+
+
     PAGE_PADDING_H = 56
     PAGE_PADDING_V = 12
-    PAGE_NUMBER_RESERVE = 16  # space reserved at the page bottom for the folio number
-    BODY_FONT_PX = 14   # must match the QTextEdit's `font-size` in its stylesheet
-    TITLE_FONT_PX = 20  # chapter-title size on a page's opening block
-    CARD_LAYOUT_SPACING = 0  # gap between the text area and the folio number
+    PAGE_NUMBER_RESERVE = 16
+    BODY_FONT_PX = 14
+    TITLE_FONT_PX = 20
+    CARD_LAYOUT_SPACING = 0
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._project: Optional[Project] = None
         self._current_chapter: Optional[Chapter] = None
 
-        # ── Book-reader state ───────────────────────────────────────────
-        self._mode = "read"  # "read" | "edit" — which view is showing
-        self._pages: list[str] = []  # current chapter's paginated HTML
+
+        self._mode = "read"
+        self._pages: list[str] = []
         self._current_page_index = 0
         self._page_anim: Optional[QPropertyAnimation] = None
         self._resize_timer = QTimer(self)
@@ -1693,7 +1693,7 @@ class ChaptersTab(QWidget):
 
         splitter = QSplitter(Qt.Horizontal)
 
-        # Left: chapter list
+
         left = QWidget()
         left.setMinimumWidth(200)
         left.setMaximumWidth(280)
@@ -1727,8 +1727,8 @@ class ChaptersTab(QWidget):
 
         splitter.addWidget(left)
 
-        # Right: chapter editor (or an empty state when the project has no
-        # chapters at all yet — swapped in/out by _update_empty_state()).
+
+
         right = QWidget()
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(8, 12, 12, 12)
@@ -1755,7 +1755,7 @@ class ChaptersTab(QWidget):
         editor_area_layout.setContentsMargins(0, 0, 0, 0)
         editor_area_layout.setSpacing(8)
 
-        # ── Read / Edit mode toggle ─────────────────────────────────────
+
         mode_row = QHBoxLayout()
         mode_row.addStretch()
         self.read_mode_btn = QPushButton("📖 Read")
@@ -1785,14 +1785,14 @@ class ChaptersTab(QWidget):
 
         self.content_stack = QStackedWidget()
         self._build_read_view()
-        self.content_stack.addWidget(self.read_view)  # index 0
+        self.content_stack.addWidget(self.read_view)
 
         self.edit_view = QWidget()
         editor_layout = QVBoxLayout(self.edit_view)
         editor_layout.setContentsMargins(0, 0, 0, 0)
         editor_layout.setSpacing(8)
 
-        # Chapter title row
+
         title_row = QHBoxLayout()
         self.chapter_title_edit = QLineEdit()
         self.chapter_title_edit.setPlaceholderText("Chapter title")
@@ -1804,7 +1804,7 @@ class ChaptersTab(QWidget):
         self.chapter_title_edit.editingFinished.connect(self._save_chapter_title)
         editor_layout.addLayout(title_row)
 
-        # Chapter content editor
+
         self.chapter_editor = QTextEdit()
         self.chapter_editor.setPlaceholderText(
             "Chapter content will appear here.\n\n"
@@ -1825,10 +1825,10 @@ class ChaptersTab(QWidget):
         """)
         editor_layout.addWidget(self.chapter_editor, 1)
 
-        # ── Word count footer ──────────────────────────────────────────
-        # Updates on every keystroke via textChanged. Sits between the
-        # editor and the action buttons so it reads as part of the editor,
-        # not as a separate control.
+
+
+
+
         wc_row = QHBoxLayout()
         wc_row.setContentsMargins(2, 0, 2, 0)
 
@@ -1888,7 +1888,7 @@ class ChaptersTab(QWidget):
 
         editor_layout.addLayout(action_row)
 
-        self.content_stack.addWidget(self.edit_view)  # index 1
+        self.content_stack.addWidget(self.edit_view)
         editor_area_layout.addWidget(self.content_stack, 1)
         right_layout.addWidget(self._editor_area, 1)
 
@@ -1904,7 +1904,7 @@ class ChaptersTab(QWidget):
         read_layout.setContentsMargins(4, 4, 4, 4)
         read_layout.setSpacing(12)
 
-        # ── Chapter nav header ──────────────────────────────────────────
+
         nav_top = QHBoxLayout()
         self.prev_chapter_btn = QPushButton("← Previous Chapter")
         self.prev_chapter_btn.setFlat(True)
@@ -1926,7 +1926,7 @@ class ChaptersTab(QWidget):
         nav_top.addWidget(self.next_chapter_btn)
         read_layout.addLayout(nav_top)
 
-        # ── The book page itself ────────────────────────────────────────
+
         self._page_outer = QWidget()
         page_outer_layout = QVBoxLayout(self._page_outer)
         page_outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -1961,10 +1961,10 @@ class ChaptersTab(QWidget):
         self.page_text_edit.document().setDocumentMargin(0)
         self.page_text_edit.setContentsMargins(0, 0, 0, 0)
         self.page_text_edit.setViewportMargins(0, 0, 0, 0)
-        # Pinned explicitly so it can never silently diverge from the
-        # wrap mode `_paginate_book_pages` sets on its measuring
-        # QTextDocument — both must break lines identically or pagination
-        # and rendering disagree on how many lines a paragraph takes.
+
+
+
+
         self.page_text_edit.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
         self.page_text_edit.setStyleSheet(f"""
             QTextEdit {{
@@ -1988,7 +1988,7 @@ class ChaptersTab(QWidget):
         page_outer_layout.addWidget(self._page_card)
         read_layout.addWidget(self._page_outer, 1)
 
-        # ── Page nav footer ─────────────────────────────────────────────
+
         nav_bottom = QHBoxLayout()
         self.prev_page_btn = QPushButton("‹ Previous Page")
         self.prev_page_btn.clicked.connect(lambda: self._go_to_page(self._current_page_index - 1))
@@ -2005,7 +2005,7 @@ class ChaptersTab(QWidget):
         nav_bottom.addWidget(self.next_page_btn)
         read_layout.addLayout(nav_bottom)
 
-    # ── Mode switching ───────────────────────────────────────────────────
+
 
     def _set_mode(self, mode: str) -> None:
         self._mode = mode
@@ -2015,7 +2015,7 @@ class ChaptersTab(QWidget):
         if mode == "read":
             QTimer.singleShot(0, lambda: self._refresh_read_view(preserve_fraction=False))
 
-    # ── Book pagination / rendering ─────────────────────────────────────
+
 
     def _compute_page_card_size(self) -> tuple[int, int]:
         outer = self._page_outer
@@ -2060,10 +2060,10 @@ class ChaptersTab(QWidget):
             new_index = min(int(round(prev_fraction * len(self._pages))), len(self._pages) - 1)
         else:
             new_index = 0
-        # Always re-render directly (not via _go_to_page) — the page
-        # *content* just changed even when the index itself didn't, so
-        # the "index unchanged, skip" short-circuit in _go_to_page would
-        # otherwise leave stale text on screen.
+
+
+
+
         self._current_page_index = -1
         self._go_to_page(max(new_index, 0), animate=False)
         self._update_chapter_nav_buttons()
@@ -2129,7 +2129,7 @@ class ChaptersTab(QWidget):
         elif direction == "last":
             self._go_to_page(len(self._pages) - 1 if self._pages else 0)
 
-    # ── Chapter-to-chapter nav (within Read mode) ───────────────────────
+
 
     def _sorted_chapters(self) -> list[Chapter]:
         if not self._project:
@@ -2188,18 +2188,18 @@ class ChaptersTab(QWidget):
         self._current_chapter = None
         self._refresh_list()
         self._update_empty_state()
-        # Jump straight to the first chapter instead of leaving the editor
-        # blank — one less click, and the project feels alive immediately.
+
+
         if self.chapter_list.count() > 0:
             self.chapter_list.setCurrentRow(0)
 
     def _refresh_list(self) -> None:
-        # Rebuilding the list from scratch would otherwise emit spurious
-        # currentRowChanged signals (Qt auto-selects row 0 the moment the
-        # first item is added back to an emptied list), which could
-        # re-trigger chapter selection mid-save and clobber the editor's
-        # content with the wrong chapter. Block signals across the
-        # rebuild and restore the selection afterwards without notifying.
+
+
+
+
+
+
         current_num = self._current_chapter.number if self._current_chapter else None
         self.chapter_list.blockSignals(True)
         try:
@@ -2235,13 +2235,13 @@ class ChaptersTab(QWidget):
             self.chapter_title_edit.setText(chapter.title)
             self.chapter_editor.setPlainText(chapter.content)
             self._update_word_count()
-            # Mode depends on the chapter's actual state, not on how it was
-            # created: an empty chapter (typically just added manually, but
-            # this applies equally to any chapter with no content) has
-            # nothing to read yet, so it opens straight into Edit with the
-            # cursor ready to type. A chapter that already has content —
-            # whether written by the AI or by hand — opens in the book
-            # reader as before.
+
+
+
+
+
+
+
             if chapter.content.strip():
                 self._set_mode("read")
             else:
@@ -2267,8 +2267,8 @@ class ChaptersTab(QWidget):
             self.project_changed.emit()
 
     def _mark_chapter_ready(self) -> None:
-        # A plain manual toggle — no AI call involved — so it works exactly
-        # the same for a chapter written by the AI or added/edited by hand.
+
+
         if self._current_chapter:
             self._current_chapter.reviewed = True
             if self._project:
@@ -2288,9 +2288,9 @@ class ChaptersTab(QWidget):
             storage.save_project(self._project)
             self._refresh_list()
             self._update_empty_state()
-            # Open the chapter we just created. Since it starts out empty,
-            # _on_chapter_selected() will land it in Edit (not the book
-            # reader) with the cursor ready to type.
+
+
+
             self._select_chapter_number(next_num)
             self.project_changed.emit()
 
@@ -2322,10 +2322,10 @@ class ChaptersTab(QWidget):
             self._read_time_label.setText("")
             return
 
-        # Word count with thousands separator
+
         self._wc_label.setText(f"{words:,} words  ·  {chars:,} chars")
 
-        # Reading time at 250 wpm
+
         minutes = words / 250
         if minutes < 1:
             rt = "< 1 min read"
@@ -2462,14 +2462,14 @@ class ChaptersTab(QWidget):
             self._project.chapters = [
                 c for c in self._project.chapters if c.number != self._current_chapter.number
             ]
-            # current_chapter is a separate persisted "how far did we get"
-            # pointer — it does NOT shrink automatically just because a
-            # chapter was removed from the list. If we leave it pointing at
-            # the old (now possibly nonexistent) chapter number, the engine's
-            # _next_chapter_number() will trust that stale value over the
-            # real chapter list and silently skip past the gap we just
-            # created next time "Generate Chapter"/"Generate Full Book" runs — even
-            # after restarting the app, since it's saved to disk below.
+
+
+
+
+
+
+
+
             self._project.current_chapter = max(
                 (c.number for c in self._project.chapters), default=0
             )
@@ -2493,9 +2493,9 @@ class ChaptersTab(QWidget):
         self._refresh_list()
         self._update_empty_state()
         if current_num is None and project.chapters:
-            # Nothing was selected before (e.g. generating the very first
-            # chapter from the empty state) — jump to the newest one so the
-            # result is immediately visible instead of the editor staying blank.
+
+
+
             current_num = max(c.number for c in project.chapters)
         if current_num:
             chapter = next((c for c in project.chapters if c.number == current_num), None)
@@ -2509,9 +2509,9 @@ class ChaptersTab(QWidget):
                     if item and item.data(Qt.UserRole) == current_num:
                         self.chapter_list.setCurrentRow(i)
                         break
-                # A freshly generated chapter always opens in the book
-                # reader — this also covers the case where the row above
-                # didn't actually change (currentRowChanged wouldn't fire).
+
+
+
                 self._set_mode("read")
 
 
@@ -2546,7 +2546,7 @@ class WorldTab(QWidget):
         self.editor.set_text(project.world)
 
     def set_busy(self, busy: bool, project_name: str = "") -> None:
-        pass  # No AI-trigger buttons remain on this tab; world updates automatically.
+        pass
 
     def save_to(self, project: Project) -> None:
         project.world = self.editor.get_text()
@@ -2607,18 +2607,18 @@ class AuthorProfilePanel(QWidget):
         super().__init__(parent)
         self._project: Optional[Project] = None
         self._lang: str = ""
-        self._built = False  # deferred until first load() call
+        self._built = False
 
     def load(self, project: Project) -> None:
         self._project = project
         lang = storage.load_settings().response_language
 
-        # Rebuild UI if language changed or first load
+
         if not self._built or lang != self._lang:
             self._lang = lang
             self._rebuild_ui(lang)
 
-        # Populate fields
+
         intent = project.author_intent
         style = project.writing_style
 
@@ -2641,7 +2641,7 @@ class AuthorProfilePanel(QWidget):
 
     def _rebuild_ui(self, lang: str) -> None:
         """Build (or rebuild) the full UI for the given language."""
-        # Clear any existing layout
+
         old_layout = self.layout()
         if old_layout:
             while old_layout.count():
@@ -2658,7 +2658,7 @@ class AuthorProfilePanel(QWidget):
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(12)
 
-        # Header
+
         hdr = QHBoxLayout()
         title_lbl = QLabel("Author Profile")
         title_lbl.setStyleSheet(f"font-size: 15px; font-weight: 700; color: {COLOR_TEXT};")
@@ -2669,7 +2669,7 @@ class AuthorProfilePanel(QWidget):
         hdr.addWidget(hint)
         root.addLayout(hdr)
 
-        # Scrollable form
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("QScrollArea { border: none; }")
@@ -2706,7 +2706,7 @@ class AuthorProfilePanel(QWidget):
             w.setStyleSheet(line_style)
             return w
 
-        # ── Intent section ────────────────────────────────────────────
+
         intent_box = QGroupBox(_ui("intent_group_short", lang))
         intent_form = QFormLayout(intent_box)
         intent_form.setSpacing(10)
@@ -2732,7 +2732,7 @@ class AuthorProfilePanel(QWidget):
 
         body.addWidget(intent_box)
 
-        # ── Style section ─────────────────────────────────────────────
+
         style_box = QGroupBox(_ui("style_group_short", lang))
         style_form = QFormLayout(style_box)
         style_form.setSpacing(8)
@@ -2765,7 +2765,7 @@ class AuthorProfilePanel(QWidget):
 
         body.addWidget(style_box)
 
-        # ── Save / Load buttons ──────────────────────────────────────
+
         btn_row = QHBoxLayout()
         save_btn = QPushButton(_ui("save_profile_btn", lang))
         save_btn.setObjectName("accent")
@@ -2784,7 +2784,7 @@ class AuthorProfilePanel(QWidget):
 
         self._built = True
 
-    # ── Save ──────────────────────────────────────────────────────────
+
 
     def _on_save(self) -> None:
         if not self._project:
@@ -2810,7 +2810,7 @@ class AuthorProfilePanel(QWidget):
         self.profile_changed.emit()
         self.status_lbl.setText("")
 
-    # ── Load from another project ───────────────────────────────────────
+
 
     def _on_load_from_other_project(self) -> None:
 
@@ -2853,7 +2853,7 @@ class AuthorProfilePanel(QWidget):
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
 
-        # Double-clicking a project loads it immediately, same as OK.
+
         list_widget.itemDoubleClicked.connect(dialog.accept)
 
         if dialog.exec() != QDialog.Accepted:

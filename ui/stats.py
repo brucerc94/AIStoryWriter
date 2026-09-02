@@ -38,7 +38,7 @@ from ui.styles import (
     FONT_MONO,
 )
 
-# Average adult reading speed (words per minute)
+
 _WPM = 250
 
 
@@ -57,7 +57,7 @@ def _reading_time(words: int) -> str:
     return f"{hours}h {mins}m" if mins else f"{hours}h"
 
 
-# ── Stat card ─────────────────────────────────────────────────────────────────
+
 
 class _StatCard(QFrame):
     """A single metric card: big number + label, optional sub-label."""
@@ -108,7 +108,7 @@ class _StatCard(QFrame):
             self._sub_lbl.setText(sub)
 
 
-# ── Chapter row ───────────────────────────────────────────────────────────────
+
 
 class _ChapterRow(QWidget):
     """One row in the per-chapter breakdown table."""
@@ -151,12 +151,12 @@ class _ChapterRow(QWidget):
         )
         layout.addWidget(status_lbl)
 
-        # Alternating row bg applied via parent; separator line instead
+
         sep = QFrame()
         sep.setFrameShape(QFrame.HLine)
 
 
-# ── Stats Tab ─────────────────────────────────────────────────────────────────
+
 
 class StatsTab(QWidget):
     """
@@ -169,7 +169,7 @@ class StatsTab(QWidget):
         self._project: Optional[Project] = None
         self._build_ui()
 
-    # ── construction ──────────────────────────────────────────────────────────
+
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -186,7 +186,7 @@ class StatsTab(QWidget):
         scroll.setWidget(inner)
         root.addWidget(scroll)
 
-        # ── Overview grid (4 stat cards) ──
+
         self._grid = QGridLayout()
         self._grid.setSpacing(12)
 
@@ -201,7 +201,7 @@ class StatsTab(QWidget):
         self._grid.addWidget(self._card_reviewed,    0, 3)
         self._layout.addLayout(self._grid)
 
-        # ── Progress bar ──
+
         progress_section = QWidget()
         ps_layout = QVBoxLayout(progress_section)
         ps_layout.setContentsMargins(0, 0, 0, 0)
@@ -238,7 +238,7 @@ class StatsTab(QWidget):
         ps_layout.addWidget(self._progress_detail)
         self._layout.addWidget(progress_section)
 
-        # ── Section stats row (synopsis / outline / world / memory) ──
+
         section_row = QWidget()
         sr_layout = QHBoxLayout(section_row)
         sr_layout.setContentsMargins(0, 0, 0, 0)
@@ -257,7 +257,7 @@ class StatsTab(QWidget):
 
         self._layout.addWidget(section_row)
 
-        # ── Per-chapter breakdown ──
+
         breakdown_label = QLabel("Chapter Breakdown")
         breakdown_label.setStyleSheet(
             f"color: {COLOR_TEXT_DIM}; font-size: 12px; font-weight: 600; "
@@ -286,7 +286,7 @@ class StatsTab(QWidget):
         self._layout.addWidget(self._chapter_table)
         self._layout.addStretch()
 
-    # ── public API ────────────────────────────────────────────────────────────
+
 
     def load(self, project: Project) -> None:
         self._project = project
@@ -300,15 +300,15 @@ class StatsTab(QWidget):
         chapters_written = [c for c in p.chapters if c.content.strip()]
         chapters_reviewed = [c for c in chapters_written if c.reviewed]
 
-        # Word counts
+
         chapter_words = sum(_word_count(c.content) for c in chapters_written)
         synopsis_words = _word_count(p.synopsis)
         outline_words  = _word_count(p.outline)
         world_words    = _word_count(p.world)
         memory_words   = _word_count(p.memory)
-        total_words    = chapter_words   # reader-facing total = chapter prose
+        total_words    = chapter_words
 
-        # Overview cards
+
         self._card_total_words.update_value(
             f"{total_words:,}",
             sub=_reading_time(total_words),
@@ -326,7 +326,7 @@ class StatsTab(QWidget):
             sub=f"of {len(chapters_written)} written",
         )
 
-        # Progress bar — vs. outline target
+
         from ui.story import outline_chapter_numbers
         outline_nums = outline_chapter_numbers(p.outline)
         target = max(outline_nums) if outline_nums else 0
@@ -344,7 +344,7 @@ class StatsTab(QWidget):
                 "Set a chapter count in the Outline tab to track progress against a target."
             )
 
-        # Section stats
+
         def _fmt(words: int) -> str:
             return f"{words:,} words" if words else "Empty"
 
@@ -361,7 +361,7 @@ class StatsTab(QWidget):
             f"{memory_words:,}" if memory_words else "—", sub=_fmt(memory_words)
         )
 
-        # Per-chapter table
+
         while self._chapter_table_layout.count():
             item = self._chapter_table_layout.takeAt(0)
             if item.widget():
@@ -377,7 +377,7 @@ class StatsTab(QWidget):
             self._chapter_table_layout.addWidget(self._empty_chapter_lbl)
             return
 
-        # Header row
+
         header = QWidget()
         hl = QHBoxLayout(header)
         hl.setContentsMargins(12, 8, 12, 8)

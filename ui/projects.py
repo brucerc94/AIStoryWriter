@@ -51,8 +51,8 @@ class ProjectListRow(QWidget):
     discovering the right-click context menu.
     """
 
-    open_requested = Signal(str)    # project_id
-    delete_requested = Signal(str)  # project_id
+    open_requested = Signal(str)
+    delete_requested = Signal(str)
 
     def __init__(self, project: Project, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -64,7 +64,7 @@ class ProjectListRow(QWidget):
         outer.setContentsMargins(12, 10, 10, 10)
         outer.setSpacing(5)
 
-        # ── Title row: title, status chip, delete button ──
+
         top_row = QHBoxLayout()
         top_row.setSpacing(6)
 
@@ -104,7 +104,7 @@ class ProjectListRow(QWidget):
 
         outer.addLayout(top_row)
 
-        # ── Progress info: chapters written vs. outline target ──
+
         if target:
             chapters_str = f"{written} / {target} Chapters"
         else:
@@ -136,8 +136,8 @@ class ProjectListRow(QWidget):
             outer.addWidget(date_lbl)
 
     def mousePressEvent(self, event) -> None:
-        # Clicks on the delete button are handled by the button itself and
-        # never reach here. Any other click on the row opens the project.
+
+
         self.open_requested.emit(self.project_id)
         super().mousePressEvent(event)
 
@@ -148,9 +148,9 @@ class ProjectsPanel(QWidget):
     Emits project_selected(project_id) when user clicks a project.
     """
 
-    project_selected = Signal(str)   # project_id
-    project_created = Signal(str)    # project_id
-    project_deleted = Signal(str)    # project_id
+    project_selected = Signal(str)
+    project_created = Signal(str)
+    project_deleted = Signal(str)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -165,7 +165,7 @@ class ProjectsPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Header
+
         header = QFrame()
         header.setStyleSheet(f"background: {COLOR_SURFACE}; border-bottom: 1px solid {COLOR_BORDER};")
         header.setFixedHeight(60)
@@ -189,7 +189,7 @@ class ProjectsPanel(QWidget):
 
         layout.addWidget(header)
 
-        # Search
+
         search_frame = QFrame()
         search_frame.setStyleSheet(f"background: {COLOR_SURFACE}; border-bottom: 1px solid {COLOR_BORDER};")
         s_layout = QHBoxLayout(search_frame)
@@ -201,7 +201,7 @@ class ProjectsPanel(QWidget):
         s_layout.addWidget(self.search_input)
         layout.addWidget(search_frame)
 
-        # List
+
         self.list_widget = QListWidget()
         self.list_widget.setStyleSheet(f"""
             QListWidget {{
@@ -229,7 +229,7 @@ class ProjectsPanel(QWidget):
         self.list_widget.itemDoubleClicked.connect(self._on_item_clicked)
         layout.addWidget(self.list_widget, 1)
 
-        # Empty state
+
         self.empty_label = QLabel("No projects yet.\nClick + to create one.")
         self.empty_label.setAlignment(Qt.AlignCenter)
         self.empty_label.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 13px; padding: 20px;")
@@ -316,7 +316,7 @@ class ProjectsPanel(QWidget):
             self._projects[proj.id] = proj
             self.refresh()
             self.project_created.emit(proj.id)
-            # Select it
+
             for i in range(self.list_widget.count()):
                 item = self.list_widget.item(i)
                 if item.data(Qt.UserRole) == proj.id:
@@ -396,5 +396,5 @@ class NewProjectDialog(QDialog):
         super().accept()
 
 
-# Small local import alias to avoid circular issues
+
 from PySide6.QtWidgets import QTextEdit as QTextEdit_small

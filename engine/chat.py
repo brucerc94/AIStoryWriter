@@ -77,23 +77,23 @@ if not logger.handlers:
     logger.propagate = False
 
 
-# GPU name substrings known to lack real Tensor Cores despite a
-# Tensor-Core-era Compute Capability (Turing GTX 16-series) or being
-# older architectures entirely (Pascal/Maxwell GTX 9/10-series).
+
+
+
 _NO_TENSOR_CORE_MARKERS = ("GTX 16", "GTX 10", "GTX 9", "GTX 7")
 
-# MoE-tuned batch sizes. Only applied when the model is MoE AND the
-# installed llama-cpp-python actually supports these kwargs (checked via
-# engine.llama_features, never assumed).
+
+
+
 _MOE_N_BATCH = 1024
 _MOE_N_UBATCH = 1024
 
-# How many of a MoE model's transformer layers to CPU-offload experts for
-# by default, when the installed llama-cpp-python supports it at all. This
-# is deliberately conservative (a modest starting point rather than an
-# aggressive full-offload) — it only ever activates on builds that expose
-# the parameter in the first place, and never on dense models.
-_DEFAULT_MOE_CPU_LAYERS = 999  # llama.cpp convention: a large number = "all"
+
+
+
+
+
+_DEFAULT_MOE_CPU_LAYERS = 999
 
 
 def _detect_gpu_info() -> Optional[dict]:
@@ -140,7 +140,7 @@ class LLMEngine:
     """
 
     def __init__(self) -> None:
-        self._model: Optional[object] = None  # Llama instance
+        self._model: Optional[object] = None
         self._current_path: str = ""
         self._current_n_ctx: int = 0
         self._lock = threading.Lock()
@@ -205,7 +205,7 @@ class LLMEngine:
 
         with self._lock:
             if self._current_path == model_path and self._model is not None:
-                return  # Already loaded
+                return
 
             if progress_callback:
                 progress_callback(f"Unloading previous model...")
@@ -238,8 +238,8 @@ class LLMEngine:
                         f"force_mmq={force_mmq} | flash_attn={flash_attn}"
                     )
                 else:
-                    # No nvidia-smi / no GPU detected but n_gpu_layers requested —
-                    # be conservative and assume no Tensor Cores.
+
+
                     force_mmq = True
                     flash_attn = False
                     os.environ["GGML_CUDA_FORCE_MMQ"] = "1"
@@ -264,9 +264,9 @@ class LLMEngine:
                     f"| capas={model_info.block_count or '?'}"
                 )
 
-                # 1) CPU-offload MoE expert tensors, mirroring llama.cpp's
-                #    --cpu-moe / --n-cpu-moe — ONLY if this installed
-                #    llama-cpp-python build actually exposes it.
+
+
+
                 moe_param = llama_features.moe_cpu_offload_param()
                 if moe_param:
                     extra_kwargs[moe_param] = _DEFAULT_MOE_CPU_LAYERS
@@ -282,7 +282,7 @@ class LLMEngine:
                         "omite ese parametro especifico (no existe, no se usa)."
                     )
 
-                # 2) Larger batch sizes for MoE — only if supported.
+
                 if llama_features.supports("n_batch"):
                     extra_kwargs["n_batch"] = moe_n_batch
                 if llama_features.supports("n_ubatch"):
@@ -296,24 +296,24 @@ class LLMEngine:
                         "expertos por token en modelos MoE)."
                     )
 
-                # flash_attn already computed above from GPU Tensor-Core
-                # detection — same logic applies regardless of architecture,
-                # nothing MoE-specific needed there.
+
+
+
             elif model_info:
                 logger.info(
                     f"[llm_engine] Modelo Dense detectado: arch={model_info.architecture} "
                     f"| capas={model_info.block_count or '?'} — sin cambios de comportamiento."
                 )
 
-            # Only pass flash_attn if this build actually supports it too,
-            # for consistency with the "verify before using" rule (older
-            # llama-cpp-python releases predate this kwarg).
+
+
+
             if llama_features.supports("flash_attn"):
                 extra_kwargs.setdefault("flash_attn", flash_attn)
 
-            # Prompt/batch-processing threads, separate from n_threads
-            # (single-token generation). 0 = leave it unset so
-            # llama-cpp-python applies its own default (mirrors n_threads).
+
+
+
             if n_threads_batch > 0 and llama_features.supports("n_threads_batch"):
                 extra_kwargs["n_threads_batch"] = n_threads_batch
 
@@ -449,7 +449,7 @@ class LLMEngine:
 
         chunks: list[str] = []
         token_count = 0
-        t_first: Optional[float] = None   # timestamp of first content token
+        t_first: Optional[float] = None
         t_start = time.perf_counter()
 
         response_iter = self._create_chat_completion(
@@ -475,15 +475,15 @@ class LLMEngine:
             if token:
                 now = time.perf_counter()
                 if t_first is None:
-                    t_first = now   # first real content token — ends the TTFT window
+                    t_first = now
                 chunks.append(token)
                 token_count += 1
                 stream_callback(token)
 
         t_end = time.perf_counter()
         total_elapsed = t_end - t_start
-        # Decode speed = tokens produced / time spent actually decoding
-        # (excludes prompt-eval / TTFT, which is dominated by the prefill pass).
+
+
         if t_first is not None and token_count > 0:
             decode_elapsed = max(t_end - t_first, 1e-6)
             tok_per_sec = token_count / decode_elapsed
@@ -499,7 +499,7 @@ class LLMEngine:
         return "".join(chunks)
 
 
-# Global singleton
+
 _engine = LLMEngine()
 
 

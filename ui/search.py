@@ -38,20 +38,20 @@ from ui.styles import (
     COLOR_TEXT_MUTED,
 )
 
-_CONTEXT_CHARS = 140   # characters of surrounding text shown per match
-_MAX_RESULTS   = 200   # cap to avoid UI lock-up on very long books
+_CONTEXT_CHARS = 140
+_MAX_RESULTS   = 200
 
 
-# ── Data ──────────────────────────────────────────────────────────────────────
+
 
 @dataclass
 class _Match:
-    source: str        # e.g. "Chapter 3: The Storm"
-    snippet: str       # highlighted excerpt
-    sort_key: tuple    # for stable ordering (source_order, char_offset)
+    source: str
+    snippet: str
+    sort_key: tuple
 
 
-# ── Result card ───────────────────────────────────────────────────────────────
+
 
 class _ResultCard(QFrame):
     def __init__(self, source: str, snippet_html: str, parent=None) -> None:
@@ -88,7 +88,7 @@ class _ResultCard(QFrame):
         layout.addWidget(snippet_lbl)
 
 
-# ── Search Tab ────────────────────────────────────────────────────────────────
+
 
 class SearchTab(QWidget):
     """
@@ -105,14 +105,14 @@ class SearchTab(QWidget):
         self._debounce.timeout.connect(self._run_search)
         self._build_ui()
 
-    # ── construction ──────────────────────────────────────────────────────────
+
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 20, 24, 20)
         root.setSpacing(14)
 
-        # Search bar
+
         bar = QHBoxLayout()
         bar.setSpacing(8)
 
@@ -156,7 +156,7 @@ class SearchTab(QWidget):
 
         root.addLayout(bar)
 
-        # Options row (case-sensitive toggle)
+
         opts = QHBoxLayout()
         opts.setSpacing(12)
 
@@ -202,7 +202,7 @@ class SearchTab(QWidget):
         opts.addWidget(self._count_label)
         root.addLayout(opts)
 
-        # Results area
+
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.NoFrame)
@@ -218,16 +218,16 @@ class SearchTab(QWidget):
 
         self._show_placeholder("Start typing to search your project.")
 
-    # ── public API ────────────────────────────────────────────────────────────
+
 
     def load(self, project: Project) -> None:
         self._project = project
-        # Re-run the search if there's already a query, so switching
-        # projects refreshes results immediately.
+
+
         if self._search_input.text().strip():
             self._run_search()
 
-    # ── internals ─────────────────────────────────────────────────────────────
+
 
     def _on_text_changed(self, text: str) -> None:
         if not text.strip():
@@ -258,8 +258,8 @@ class SearchTab(QWidget):
         matches: list[_Match] = []
         p = self._project
 
-        # ── Sources to search ──
-        sources: list[tuple[str, str, int]] = []   # (display_name, text, sort_order)
+
+        sources: list[tuple[str, str, int]] = []
 
         sources.append(("Synopsis", p.synopsis, 0))
         sources.append(("Outline", p.outline, 1))
@@ -282,7 +282,7 @@ class SearchTab(QWidget):
                 start = max(0, m.start() - _CONTEXT_CHARS // 2)
                 end   = min(len(text), m.end() + _CONTEXT_CHARS // 2)
                 snippet = ("…" if start > 0 else "") + text[start:end].strip() + ("…" if end < len(text) else "")
-                # Highlight match within snippet
+
                 snippet_html = self._highlight(snippet, pattern)
                 matches.append(_Match(
                     source=name,
@@ -294,7 +294,7 @@ class SearchTab(QWidget):
             if len(matches) >= _MAX_RESULTS:
                 break
 
-        # Sort by source order, then by position
+
         matches.sort(key=lambda x: x.sort_key)
 
         if not matches:
@@ -322,16 +322,16 @@ class SearchTab(QWidget):
             return f'<b style="color: {COLOR_ACCENT};">{escaped}</b>'
 
         safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        # Re-apply pattern on the escaped version — only safe because we
-        # escaped the text first and the match positions shift uniformly.
-        # Works for simple patterns; edge-case for regex touching & < >.
+
+
+
         try:
             return pattern.sub(replace, text)
         except Exception:
             return safe
 
     def _clear_results(self) -> None:
-        while self._results_layout.count() > 1:   # keep the trailing stretch
+        while self._results_layout.count() > 1:
             item = self._results_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
@@ -342,5 +342,5 @@ class SearchTab(QWidget):
         lbl.setStyleSheet(
             f"color: {COLOR_TEXT_MUTED}; font-size: 14px; padding: 40px; background: transparent;"
         )
-        # Insert before the stretch
+
         self._results_layout.insertWidget(0, lbl)

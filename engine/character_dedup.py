@@ -88,22 +88,22 @@ def character_match_score(candidate: dict, existing: Character) -> float:
     existing_text = " ".join((existing.description, existing.backstory, " ".join(existing.traits)))
     text_similarity = _jaccard(_text_tokens(candidate_text), _text_tokens(existing_text))
 
-    # Strong aliases / abbreviated forms: "Marcus" vs "Marcus Vale" should
-    # match only when the role/context also agrees, avoiding a blind merge of
-    # unrelated characters who happen to share a first name.
+
+
+
     shorter, longer = sorted((candidate_tokens, existing_tokens), key=len)
     contained_name = bool(shorter) and shorter.issubset(longer)
     if contained_name and same_role and (name_similarity >= 0.45 or text_similarity >= 0.12):
         return 0.88
 
-    # Close spelling/name variants are treated as the same identity when the
-    # role agrees or the descriptions strongly overlap.
+
+
     if name_similarity >= 0.88 and (same_role or text_similarity >= 0.15):
         return 0.90
 
-    # Different names can still represent the same character (nickname,
-    # surname added later, title, etc.) when both role and descriptive context
-    # are strongly aligned. Keep the threshold deliberately high.
+
+
+
     if same_role and text_similarity >= 0.55 and (shared_name >= 0.25 or name_similarity >= 0.35):
         return 0.82
 

@@ -3,13 +3,13 @@ UI theme constants and stylesheets for AI Story Studio.
 Dark ink-on-paper aesthetic — like a serious writing tool, not a chatbot.
 """
 
-# Palette
+
 COLOR_BG = "#0f0f11"
 COLOR_SURFACE = "#17171a"
 COLOR_SURFACE_RAISED = "#1f1f24"
 COLOR_BORDER = "#2a2a30"
 COLOR_BORDER_LIGHT = "#38383f"
-COLOR_ACCENT = "#7c5cbf"          # deep violet
+COLOR_ACCENT = "#7c5cbf"
 COLOR_ACCENT_HOVER = "#9370db"
 COLOR_ACCENT_DIM = "#3d2d60"
 COLOR_TEXT = "#e8e6f0"

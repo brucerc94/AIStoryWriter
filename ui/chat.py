@@ -73,7 +73,7 @@ class AutoResizeTextEdit(QTextEdit):
     """
 
     MIN_HEIGHT = 24
-    MAX_HEIGHT = 8000  # generous ceiling so long chapters aren't clipped
+    MAX_HEIGHT = 8000
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -86,16 +86,16 @@ class AutoResizeTextEdit(QTextEdit):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        # The width changed (e.g. window resize, splitter drag) — re-wrap
-        # and recompute height for the new width.
+
+
         self._update_height()
 
     def _update_height(self) -> None:
         width = self.viewport().width()
         if width <= 0:
-            # Not laid out yet (e.g. just constructed, not yet added to a
-            # visible layout). Retry once the event loop settles and Qt
-            # has assigned a real geometry.
+
+
+
             QTimer.singleShot(0, self._update_height)
             return
 
@@ -104,8 +104,8 @@ class AutoResizeTextEdit(QTextEdit):
         new_height = max(self.MIN_HEIGHT, min(doc_height, self.MAX_HEIGHT))
         if self.height() != new_height:
             self.setFixedHeight(new_height)
-            # Make sure the change propagates up through parent layouts
-            # (bubble -> messages area -> scroll area) immediately.
+
+
             self.updateGeometry()
             parent = self.parentWidget()
             if parent is not None:
@@ -125,7 +125,7 @@ class MessageBubble(QFrame):
         layout.setContentsMargins(16, 10, 16, 10)
         layout.setSpacing(4)
 
-        # Role label row
+
         role_row = QHBoxLayout()
         role_row.setContentsMargins(0, 0, 0, 0)
 
@@ -142,7 +142,7 @@ class MessageBubble(QFrame):
             bg = COLOR_ASSISTANT_MSG
             role_color = COLOR_TEXT_DIM
 
-        # Dim summarized messages slightly
+
         if msg.summarized:
             bg = COLOR_SURFACE
             role_text += " (summarized)"
@@ -176,7 +176,7 @@ class MessageBubble(QFrame):
 
         layout.addLayout(role_row)
 
-        # Content — auto-resizing, no scrollbars, never clips.
+
         content_edit = AutoResizeTextEdit()
         content_edit.setPlainText(msg.content)
         content_edit.setStyleSheet(f"""
@@ -191,8 +191,8 @@ class MessageBubble(QFrame):
         """)
         layout.addWidget(content_edit)
         self._content_edit = content_edit
-        # Force an initial measurement once this bubble has real geometry
-        # (right after it's inserted into the messages layout).
+
+
         QTimer.singleShot(0, content_edit._update_height)
 
     def append_text(self, text: str) -> None:
@@ -247,9 +247,9 @@ class StreamingBubble(QFrame):
             cursor.insertText(token)
             self.content_edit.setTextCursor(cursor)
         except RuntimeError:
-            # content_edit's C++ object was already destroyed — swallow silently.
-            # The parent MessagesWidget.append_streaming_token() will null its
-            # reference on the next call so future tokens skip the dead object.
+
+
+
             pass
 
     def get_text(self) -> str:
@@ -278,11 +278,11 @@ class ChatMessagesArea(QWidget):
         Those calls become no-ops for the rest of the generation — text is
         still accumulated in the thread and saved to disk correctly.
         """
-        # Disown the streaming bubble BEFORE clearing so deleteLater() on
-        # the layout items doesn't leave us with a dangling C++ pointer.
+
+
         self._streaming_bubble = None
 
-        while self._layout.count() > 1:  # keep the trailing stretch
+        while self._layout.count() > 1:
             item = self._layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
@@ -325,9 +325,9 @@ class ChatMessagesArea(QWidget):
         try:
             self._streaming_bubble.append_token(token)
         except RuntimeError:
-            # The C++ object was destroyed (e.g. by a concurrent load_messages
-            # deleteLater() flush) between the None check and the call.
-            # Null our reference so subsequent tokens skip immediately.
+
+
+
             self._streaming_bubble = None
 
     def finalize_streaming(self) -> Optional[str]:
@@ -338,12 +338,12 @@ class ChatMessagesArea(QWidget):
             try:
                 text = bubble.get_text()
             except RuntimeError:
-                # The underlying Qt/C++ object was already destroyed — e.g.
-                # a project reload rebuilt the message list out from under
-                # an in-flight generation. Nothing to recover here, but we
-                # must NOT let this exception escape: callers rely on this
-                # method completing so they can still emit project_updated
-                # and refresh the rest of the UI.
+
+
+
+
+
+
                 logger.warning(
                     "finalize_streaming: bubble was already destroyed "
                     "(likely a project reload happened mid-generation)."
@@ -417,13 +417,13 @@ class ChatPanel(QWidget):
     Manages the WorkflowThread for chat interactions.
     """
 
-    # Emitted when the project's data changes (so other panels can refresh)
+
     project_updated = Signal()
-    # Emitted when the workflow thread starts/stops, so other panels can disable their generate buttons
-    # Args: (is_busy: bool, project_name: str)
+
+
     busy_changed = Signal(bool, str)
-    # Emitted every time the status text changes (task step description, model loading, idle)
-    # Args: (message: str)  — empty string means idle
+
+
     status_changed = Signal(str)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -432,14 +432,14 @@ class ChatPanel(QWidget):
         self._thread: Optional[WorkflowThread] = None
         self._current_task: Optional[TaskType] = None
         self._settings = None
-        # Tracks which project the currently-running thread belongs to,
-        # independently of self._project (what the user is *viewing* now).
+
+
         self._active_project: Optional[Project] = None
-        # Whether to include story context (synopsis, outline, characters,
-        # world, memory) in chat prompts. Toggled via the header button.
+
+
         self._include_story_context: bool = True
-        # A one-shot (number, title, content) tuple set by "Insert Chapter";
-        # consumed by the next _send_message call and then cleared.
+
+
         self._pending_chapter_attachment: Optional[tuple[int, str, str]] = None
         self._build_ui()
 
@@ -451,7 +451,7 @@ class ChatPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Header toolbar
+
         header = QFrame()
         header.setFixedHeight(40)
         header.setStyleSheet(
@@ -468,12 +468,12 @@ class ChatPanel(QWidget):
         header_layout.addWidget(header_lbl)
         header_layout.addStretch()
 
-        # Context toggle — controls whether story context (synopsis, outline,
-        # characters, world, memory) is injected into every chat prompt.
+
+
         self.context_toggle_btn = QPushButton("📚 Context: ON")
         self.context_toggle_btn.setObjectName("subtle")
         self.context_toggle_btn.setCheckable(True)
-        self.context_toggle_btn.setChecked(True)  # ON by default
+        self.context_toggle_btn.setChecked(True)
         self.context_toggle_btn.setToolTip(
             "Toggle story context injection.\n\n"
             "ON  — sends Synopsis, Outline, Characters (with relationships),\n"
@@ -511,12 +511,12 @@ class ChatPanel(QWidget):
 
         layout.addWidget(header)
 
-        # Status is now shown in the global Activity Bar in MainWindow.
-        # We keep dummy references so existing _show_status/_hide_status
-        # calls don't crash while we redirect them to status_changed.
 
-        # Banner shown when the user switches to another project while a
-        # thread is still running for the previous one.
+
+
+
+
+
         self._bg_banner = QFrame()
         self._bg_banner.setObjectName("bgBanner")
         self._bg_banner.setFixedHeight(30)
@@ -533,15 +533,15 @@ class ChatPanel(QWidget):
         self._bg_banner.hide()
         layout.addWidget(self._bg_banner)
 
-        # Cycles the small spinner glyph while a task is running, so the
-        # status bar visibly animates instead of just holding static text.
+
+
         self._spinner_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
         self._spinner_index = 0
         self._spinner_timer = QTimer(self)
         self._spinner_timer.setInterval(90)
         self._spinner_timer.timeout.connect(self._advance_spinner)
 
-        # Scroll area
+
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setStyleSheet("QScrollArea { border: none; }")
@@ -551,7 +551,7 @@ class ChatPanel(QWidget):
         self.scroll_area.setWidget(self.messages_widget)
         layout.addWidget(self.scroll_area, 1)
 
-        # Input area
+
         input_frame = QFrame()
         input_frame.setStyleSheet(
             f"background: {COLOR_SURFACE}; border-top: 1px solid {COLOR_BORDER};"
@@ -561,7 +561,7 @@ class ChatPanel(QWidget):
         input_layout.setContentsMargins(12, 10, 12, 10)
         input_layout.setSpacing(6)
 
-        # Input row
+
         input_row = QHBoxLayout()
         input_row.setSpacing(8)
 
@@ -609,7 +609,7 @@ class ChatPanel(QWidget):
         input_layout.addLayout(input_row)
         layout.addWidget(input_frame)
 
-        # Welcome state
+
         self._show_empty_state()
 
     def _context_toggle_style(self, is_on: bool) -> str:
@@ -653,10 +653,10 @@ class ChatPanel(QWidget):
     def load_project(self, project: Project) -> None:
         self._project = project
         if self._thread and self._thread.isRunning():
-            # A thread is still running for _active_project (the old project).
-            # Don't touch the message list (the streaming bubble lives there),
-            # and don't reassign _active_project — the thread still owns that.
-            # Show a banner so the user knows background work is continuing.
+
+
+
+
             logger.info(
                 "load_project: thread running for '%s', switching view to '%s'.",
                 self._active_project.title if self._active_project else "?",
@@ -682,7 +682,7 @@ class ChatPanel(QWidget):
         never rebuilds any widgets.
         """
         self._project = project
-        # If no thread is running, keep _active_project in sync too.
+
         if not (self._thread and self._thread.isRunning()):
             self._active_project = project
 
@@ -733,7 +733,7 @@ class ChatPanel(QWidget):
 
         self.input_edit.clear()
 
-        # Add user message to UI immediately
+
         from engine.models import ChatMessage, MessageRole
         from datetime import datetime
         user_msg = ChatMessage(role=MessageRole.USER, content=text)
@@ -741,10 +741,10 @@ class ChatPanel(QWidget):
         self.messages_widget.begin_streaming()
         self._scroll_to_bottom()
 
-        # If a chapter is attached, fold it into extra_input behind a marker
-        # so WorkflowWorker._run_chat can build the attachment prompt itself.
-        # This is a one-shot attachment — cleared as soon as it's sent, and
-        # it travels with the request instead of living in shared global state.
+
+
+
+
         extra_input = text
         if self._pending_chapter_attachment is not None:
             number, title, content = self._pending_chapter_attachment
@@ -760,7 +760,7 @@ class ChatPanel(QWidget):
             self._chapter_context_pending_label.setVisible(False)
             self._chapter_context_pending_label.setText("")
 
-        self._active_project = self._project  # lock in the project for this run
+        self._active_project = self._project
         self._set_busy(True)
         self._thread = WorkflowThread(
             project=self._active_project,
@@ -784,7 +784,7 @@ class ChatPanel(QWidget):
         if self._thread and self._thread.isRunning():
             return
 
-        self._active_project = self._project  # lock in the project for this run
+        self._active_project = self._project
         self.messages_widget.begin_streaming()
         self._scroll_to_bottom()
         self._set_busy(True)
@@ -811,14 +811,14 @@ class ChatPanel(QWidget):
 
     def _on_step_started(self, desc: str) -> None:
         self._show_status(desc)
-        # "Write Book" (and similar multi-step tasks) fire step_started once
-        # per chapter/sub-step, but the streaming bubble from the PREVIOUS
-        # step was already removed by finalize_streaming() in
-        # _on_step_finished(). Without opening a fresh bubble here, tokens
-        # for every step after the first one have nowhere to go — the
-        # status label keeps updating, but the chat looks frozen even
-        # though the model is actively generating. Re-open a bubble for
-        # each new step so streaming stays visible the whole way through.
+
+
+
+
+
+
+
+
         self.messages_widget.begin_streaming()
         self._scroll_to_bottom()
 
@@ -827,12 +827,12 @@ class ChatPanel(QWidget):
 
     def _on_step_finished(self, step: str, result: str) -> None:
         self.messages_widget.finalize_streaming()
-        # The worker already added the messages to _active_project.chat_messages.
-        # Always reload from _active_project (the project the thread belongs to),
-        # NOT self._project (the one the user might currently be viewing).
+
+
+
         if self._active_project:
-            # Only update the visible message list if the user is still
-            # looking at the same project the thread is working on.
+
+
             if self._project and self._project.id == self._active_project.id:
                 self.messages_widget.load_messages(self._active_project.chat_messages)
         self._scroll_to_bottom()
@@ -849,12 +849,12 @@ class ChatPanel(QWidget):
         self._bg_banner.hide()
         self._scroll_to_bottom()
         self._current_task = None
-        # After the thread finishes, _active_project and _project should
-        # agree on which project the user is viewing.
+
+
         if self._project and self._active_project and self._project.id != self._active_project.id:
-            # User was viewing a different project while the thread ran.
-            # Now that the thread is done, keep _active_project pointed at
-            # whatever the user is currently viewing.
+
+
+
             self._active_project = self._project
         self.busy_changed.emit(False, "")
 
@@ -946,9 +946,9 @@ class ChatPanel(QWidget):
 
     def _advance_spinner(self) -> None:
         self._spinner_index = (self._spinner_index + 1) % len(self._spinner_frames)
-        # Re-emit so the global Activity Bar updates its spinner character
-        # without needing to know the spinner state internally.
-        # We emit the last known message (empty = idle, skip the re-emit).
+
+
+
         if self._last_status_msg:
             self.status_changed.emit(self._last_status_msg)
 

@@ -102,7 +102,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._wire_signals()
 
-        # Apply loaded app settings to the panels that need them
+
         self.settings_panel.load(self._settings)
         self.models_panel.update_available_models(self._settings.models_directory)
         self.chat_panel.set_settings(self._settings)
@@ -111,9 +111,9 @@ class MainWindow(QMainWindow):
         self.projects_panel.refresh()
         self._show_empty_state()
 
-    # ──────────────────────────────────────────────
-    # UI construction
-    # ──────────────────────────────────────────────
+
+
+
 
     def _build_ui(self) -> None:
         central = QWidget()
@@ -123,11 +123,11 @@ class MainWindow(QMainWindow):
 
         self.splitter = QSplitter(Qt.Horizontal)
 
-        # Left: projects sidebar
+
         self.projects_panel = ProjectsPanel()
         self.splitter.addWidget(self.projects_panel)
 
-        # Right: title bar + tabbed workspace (or empty state)
+
         right_container = QWidget()
         right_layout = QVBoxLayout(right_container)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -174,9 +174,9 @@ class MainWindow(QMainWindow):
 
         right_layout.addWidget(title_bar)
 
-        # ── Activity Bar ──────────────────────────────────────────────────────
-        # Always-visible stripe showing exactly what the AI is doing right now.
-        # Idle: dim dot + "Listo". Active: animated spinner + step description.
+
+
+
         self._activity_bar = QFrame()
         self._activity_bar.setFixedHeight(38)
         self._activity_bar.setStyleSheet(
@@ -187,7 +187,7 @@ class MainWindow(QMainWindow):
         ab_layout.setContentsMargins(20, 0, 20, 0)
         ab_layout.setSpacing(10)
 
-        # Phase dot — filled circle whose color flips idle↔active
+
         self._ab_dot = QLabel("●")
         self._ab_dot.setFixedWidth(14)
         self._ab_dot.setStyleSheet(
@@ -195,7 +195,7 @@ class MainWindow(QMainWindow):
         )
         ab_layout.addWidget(self._ab_dot)
 
-        # Spinner character (braille frames) — only visible while busy
+
         self._ab_spinner_lbl = QLabel("")
         self._ab_spinner_lbl.setFixedWidth(14)
         self._ab_spinner_lbl.setStyleSheet(
@@ -205,14 +205,14 @@ class MainWindow(QMainWindow):
         self._ab_spinner_lbl.hide()
         ab_layout.addWidget(self._ab_spinner_lbl)
 
-        # Main status label
+
         self._ab_label = QLabel("Listo")
         self._ab_label.setStyleSheet(
             f"color: {COLOR_TEXT_DIM}; font-size: 12px; background: transparent;"
         )
         ab_layout.addWidget(self._ab_label, 1)
 
-        # Thin progress bar — indeterminate pulse while active, hidden at idle
+
         self._ab_progress = QProgressBar()
         self._ab_progress.setRange(0, 0)
         self._ab_progress.setTextVisible(False)
@@ -224,7 +224,7 @@ class MainWindow(QMainWindow):
         self._ab_progress.hide()
         ab_layout.addWidget(self._ab_progress)
 
-        # Spinner timer (shared — chat.py's own timer drives text updates via signal)
+
         self._ab_spinner_frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
         self._ab_spinner_idx = 0
         self._ab_timer = QTimer(self)
@@ -232,7 +232,7 @@ class MainWindow(QMainWindow):
         self._ab_timer.timeout.connect(self._ab_tick)
 
         right_layout.addWidget(self._activity_bar)
-        # ─────────────────────────────────────────────────────────────────────
+
 
         self.tabs = SizeAdjustingTabWidget()
         self.tabs.setDocumentMode(True)
@@ -273,9 +273,9 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status)
         self.status.showMessage("Ready")
 
-    # ──────────────────────────────────────────────
-    # Signal wiring
-    # ──────────────────────────────────────────────
+
+
+
 
     def _wire_signals(self) -> None:
         self.projects_panel.project_selected.connect(self._open_project)
@@ -295,9 +295,9 @@ class MainWindow(QMainWindow):
 
         self.settings_panel.settings_changed.connect(self._on_settings_changed)
 
-    # ──────────────────────────────────────────────
-    # Project lifecycle
-    # ──────────────────────────────────────────────
+
+
+
 
     def _on_chat_busy_changed(self, busy: bool, project_name: str) -> None:
         """Propagate thread busy state to panels that have AI-trigger buttons."""
@@ -352,9 +352,9 @@ class MainWindow(QMainWindow):
 
         self._current_project = project
         self.story_panel.load_project(project)
-        # ChatPanel handles mid-generation project switches internally:
-        # it keeps _active_project pointed at the running thread's project
-        # and shows the bg-gen banner when the user switches away.
+
+
+
         self.chat_panel.load_project(project)
         self.models_panel.load_project(project)
         self.images_panel.load_project(project)
@@ -386,24 +386,24 @@ class MainWindow(QMainWindow):
         """An AI workflow task finished and persisted its own changes."""
         if not self._current_project:
             return
-        # The finished task may have been for a project the user navigated
-        # away from (the user browsed to project B while project A generated).
-        # In that case, _active_project inside ChatPanel still points at A.
-        # We always reload the *currently viewed* project so the UI is fresh,
-        # but we also sync ChatPanel's reference regardless.
+
+
+
+
+
         refreshed = storage.load_project(self._current_project.id)
         if refreshed is None:
             return
         self._current_project = refreshed
         self.story_panel.refresh_after_task(refreshed)
         self.models_panel.load_project(refreshed)
-        # Keep ChatPanel's project object in sync with everyone else's.
-        # Without this, StoryPanel/ModelsPanel end up mutating a *different*
-        # in-memory Project object (this freshly reloaded one) than the one
-        # ChatPanel actually hands to WorkflowThread — so things like
-        # "which chapter number to target" set from the Chapters tab would
-        # silently have no effect on the next task, since the thread reads
-        # them off ChatPanel's stale copy instead.
+
+
+
+
+
+
+
         self.chat_panel.sync_project_reference(refreshed)
         self.projects_panel.refresh()
         self._update_next_step()
@@ -415,9 +415,9 @@ class MainWindow(QMainWindow):
         self.tabs.setCurrentWidget(self.chat_panel)
         self.chat_panel.run_task(task, extra_input)
 
-    # ──────────────────────────────────────────────
-    # Suggested next step
-    # ──────────────────────────────────────────────
+
+
+
 
     def _update_next_step(self) -> None:
         """
@@ -457,9 +457,9 @@ class MainWindow(QMainWindow):
         target_tab = _tab_map.get(task, self.story_panel.chapters_tab)
         story_tabs.setCurrentWidget(target_tab)
 
-    # ──────────────────────────────────────────────
-    # Export
-    # ──────────────────────────────────────────────
+
+
+
 
     def _show_export_menu(self) -> None:
         if not self._current_project:
@@ -529,9 +529,9 @@ class MainWindow(QMainWindow):
         self.status.showMessage(f"Exported to {path}", 5000)
         QMessageBox.information(self, "Export Complete", f"Saved to:\n{path}")
 
-    # ──────────────────────────────────────────────
-    # Settings
-    # ──────────────────────────────────────────────
+
+
+
 
     def _on_settings_changed(self, settings: AppSettings) -> None:
         self._settings = settings
@@ -540,9 +540,9 @@ class MainWindow(QMainWindow):
         self.models_panel.update_available_models(settings.models_directory)
         self.status.showMessage("Settings saved", 3000)
 
-    # ──────────────────────────────────────────────
-    # View state
-    # ──────────────────────────────────────────────
+
+
+
 
     def _show_empty_state(self) -> None:
         self.project_title_bar.setText("")

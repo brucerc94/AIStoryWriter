@@ -22,17 +22,17 @@ from engine.models import ChatMessage, MessageRole, TaskType
 
 logger = logging.getLogger("workflow")
 
-MAX_CHANGE_EVAL_RETRIES = 3          # attempts before declaring an evaluation invalid
+MAX_CHANGE_EVAL_RETRIES = 3
 MAX_CHANGE_PLAN_TOKENS = 2048
 MAX_CHANGE_PASSES = 10
-# Flat eval budget; each checklist item needs ~80 chars of JSON.
+
 MAX_CHANGE_EVAL_TOKENS = 3072
-# Near-duplicate threshold: 60% of the tail must appear verbatim at the start of the continuation.
+
 _DUPLICATE_OVERLAP_RATIO = 0.60
-# Maximum consecutive invalid evaluations before stopping the loop.
+
 MAX_CONSECUTIVE_INVALID_EVALS = 2
 
-# Section size caps to prevent context overflow regardless of model settings.
+
 PREV_CHAPTER_CAP = 14000
 WORLD_CAP = 6000
 MEMORY_CAP = 5000
@@ -53,9 +53,9 @@ def _cap(text: str, limit: int, label: str) -> str:
     return f"[... earlier {label} omitted for length ...]\n\n" + text[-limit:]
 
 
-# ---------------------------------------------------------------------------
-# STAGE 1 — CONTINUITY SUMMARY
-# ---------------------------------------------------------------------------
+
+
+
 
 NO_PREVIOUS_CHAPTER = "No previous chapter. This is the beginning of the story."
 
@@ -93,9 +93,9 @@ def summarize_previous_chapter(worker, chapter_num: int) -> str:
     return summary.strip()
 
 
-# ---------------------------------------------------------------------------
-# STAGE 2 — PLANNER (checklist)
-# ---------------------------------------------------------------------------
+
+
+
 
 def plan_change(worker, chapter_num: int, chapter_content: str, instruction: str) -> str:
     system = prompts.render("change_chapter/plan_system")
@@ -130,9 +130,9 @@ def parse_checklist_items(checklist: str) -> list[tuple[int, str]]:
     return items
 
 
-# ---------------------------------------------------------------------------
-# STAGE 3 — FULL REWRITE WITH CLEAN CONTEXT
-# ---------------------------------------------------------------------------
+
+
+
 
 def build_clean_context_sections(worker, chapter_num: int, prev_summary: str) -> str:
     """Assemble the clean context block (no full outline, chat history, or previous chapter text)."""
@@ -185,9 +185,9 @@ def build_full_rewrite_prompt(
     return system, user
 
 
-# ---------------------------------------------------------------------------
-# STAGE 4 — EVALUATOR
-# ---------------------------------------------------------------------------
+
+
+
 
 def _build_eval_prompt(worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str) -> tuple[str, str]:
     items = parse_checklist_items(checklist)
@@ -252,13 +252,13 @@ def parse_checklist_eval_result(text: str, checklist: str) -> dict:
                     if s:
                         missing.append(s)
 
-            # Every expected checklist ID must be accounted for.
+
             unaccounted = set(expected_items) - done_ids - missing_ids
             for item_id in sorted(unaccounted):
                 missing_ids.add(item_id)
                 missing.append(f"{item_id}: not evaluated — {expected_items[item_id]}")
 
-            # An ID both done AND missing is a contradiction — treat as missing.
+
             contradictory = done_ids & missing_ids
             if contradictory:
                 for item_id in sorted(contradictory):
@@ -326,9 +326,9 @@ def evaluate_change(worker, chapter_num: int, chapter_content: str, instruction:
     return final
 
 
-# ---------------------------------------------------------------------------
-# STAGE 5 — CONTINUATION (never SEARCH/REPLACE — always appends prose)
-# ---------------------------------------------------------------------------
+
+
+
 
 def ends_abruptly(text: str) -> bool:
     stripped = (text or "").rstrip()
@@ -411,9 +411,9 @@ def continue_rewrite(worker, chapter_num: int, chapter, instruction: str, checkl
     return True
 
 
-# ---------------------------------------------------------------------------
-# ORCHESTRATOR
-# ---------------------------------------------------------------------------
+
+
+
 
 def run(worker) -> None:
     """
@@ -435,14 +435,14 @@ def run(worker) -> None:
     instruction = worker.extra_input.strip()
     original_content = chapter.content
 
-    # Stage 1: continuity summary of the previous chapter.
+
     prev_summary = summarize_previous_chapter(worker, chapter_num)
 
-    # Stage 2: plan — checklist BEFORE rewriting anything.
+
     worker.step_started.emit(f"Planning Change Chapter {chapter_num}...")
     checklist = plan_change(worker, chapter_num, original_content, instruction)
 
-    # Stage 3: full rewrite with clean context.
+
     worker.step_started.emit(f"Rewriting Chapter {chapter_num} with your changes...")
     system, user = build_full_rewrite_prompt(worker, chapter_num, original_content, instruction, checklist, prev_summary)
     rewritten = worker._run_lean_inference(TaskType.CHANGE_CHAPTER, system, user, max_tokens=worker._content_max_tokens())
@@ -459,8 +459,8 @@ def run(worker) -> None:
         content=f"*(Rewrote the complete Chapter {chapter_num} according to your instructions.)*",
     ))
 
-    # Stage 4/5: evaluate -> continue loop. Characters/World/Memory are
-    # deliberately NOT refreshed until the chapter is accepted below.
+
+
     consecutive_invalid_evals = 0
     for pass_number in range(1, MAX_CHANGE_PASSES + 1):
         evaluation = evaluate_change(worker, chapter_num, chapter.content, instruction, checklist, pass_number)
@@ -477,8 +477,8 @@ def run(worker) -> None:
             continue
         consecutive_invalid_evals = 0
 
-        # A truncated chapter can never exit as "complete", even if the
-        # evaluator says so — check this before trusting evaluation["completed"].
+
+
         if ends_abruptly(chapter.content):
             note = "Chapter is truncated mid-sentence — must be continued to a natural ending."
             if evaluation["completed"]:
@@ -505,21 +505,21 @@ def run(worker) -> None:
             logger.warning("[change_chapter] Continuation produced no new content on pass %d; stopping.", pass_number + 1)
             break
 
-    # Reached only on limit / early stop — finalize and save regardless.
+
     worker._finalize_changed_chapter(chapter_num, chapter)
     from engine import storage
     storage.save_project(worker.project)
     worker.step_finished.emit(f"Updated Chapter {chapter_num} (continuation limit reached)", chapter.content)
 
 
-# ---------------------------------------------------------------------------
-# WRITE_CHAPTER — same planner/evaluator philosophy as CHANGE_CHAPTER above,
-# sourced from the chapter's outline entry instead of a user instruction.
-# See the module docstring for how this relates to the rest of the file.
-# The generation and continuation calls themselves stay in
-# engine/workflow.py (_run_write_chapter), since they use the app's normal
-# full-context pipeline rather than this module's "clean context" builder.
-# ---------------------------------------------------------------------------
+
+
+
+
+
+
+
+
 
 def plan_chapter(worker, chapter_num: int, chapter_title: str, outline_entry: str) -> str:
     """

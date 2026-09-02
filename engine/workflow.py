@@ -282,32 +282,32 @@ class _StepTimer:
 
 MAX_CONTINUATIONS = 3
 MAX_COMPLETION_EVAL_RETRIES = 2
-# Allow additional passes for long outlines (a 40-chapter outline won't fit in one pass).
+
 MAX_OUTLINE_CONTINUATIONS = 8
 
-# Trailing existing-outline chapters sent as reference context per Extend Outline pass.
-# Kept small to avoid context overflow on long outlines.
+
+
 EXTEND_OUTLINE_REFERENCE_TAIL_CHAPTERS = 2
 
-# Trailing accumulated-chapters sent as reference within an extension run.
-# Prevents context overflow when several large chapters are generated in sequence.
+
+
 EXTEND_OUTLINE_ACCUMULATED_TAIL_CHAPTERS = 1
 
-# Default section skeleton for World & Setting, created lazily on first update.
+
 DEFAULT_WORLD_SECTIONS = ["Geography", "Kingdoms", "Factions", "Magic", "History"]
 
 
 class WorkflowWorker(QObject):
 
 
-    token_received = Signal(str)          # streaming token
-    step_started = Signal(str)            # step description
-    step_finished = Signal(str, str)      # step description, full result
-    error_occurred = Signal(str)          # error message
-    finished = Signal()                   # all done
-    model_loading = Signal(str)           # model load status
-    approval_needed = Signal(str, str)    # step_name, content — UI must approve
-    clear_chat_requested = Signal()       # UI should clear temporary chat history
+    token_received = Signal(str)
+    step_started = Signal(str)
+    step_finished = Signal(str, str)
+    error_occurred = Signal(str)
+    finished = Signal()
+    model_loading = Signal(str)
+    approval_needed = Signal(str, str)
+    clear_chat_requested = Signal()
 
     def __init__(
         self,
@@ -355,7 +355,7 @@ class WorkflowWorker(QObject):
     def _load_model_for_task(self, task: TaskType) -> bool:
         model_path = self.project.model_assignments.get(task)
         if not model_path:
-            # Fall back to chat model
+
             model_path = self.project.model_assignments.get(TaskType.CHAT)
         if not model_path:
             logger.error(f"No model assigned for task '{task.value}' (and no chat fallback).")
@@ -564,11 +564,11 @@ class WorkflowWorker(QObject):
                 "The response will be capped to the effective limit."
             )
 
-        # Print the full prompt to stdout for debugging.
+
         _ROLE_COLORS = {
-            "system":    "\033[36m",   # cyan
-            "user":      "\033[32m",   # green
-            "assistant": "\033[33m",   # yellow
+            "system":    "\033[36m",
+            "user":      "\033[32m",
+            "assistant": "\033[33m",
         }
         _RESET = "\033[0m"
         _DIVIDER = "─" * 72
@@ -666,7 +666,7 @@ class WorkflowWorker(QObject):
                 f' The "description" value should be written in {language}.'
                 if language else ""
             )
-            # Large chunk size so a typical chapter/outline fits in one call.
+
             CHUNK_SIZE = 16000
             text_chunks = [
                 source_text[i:i + CHUNK_SIZE]
@@ -677,7 +677,7 @@ class WorkflowWorker(QObject):
                 if self._cancelled:
                     break
                 if chunk_idx > 0:
-                    # Refresh so later chunks don't duplicate characters found in earlier ones.
+
                     existing_names = ", ".join(c.name for c in self.project.characters) or "(none yet)"
                 prompt = prompts.render(
                     "characters/extract_user",
@@ -693,7 +693,7 @@ class WorkflowWorker(QObject):
                     {"role": "user", "content": prompt},
                 ]
 
-                # Cap prompt+reply against n_ctx (bypasses build_context_for_model).
+
                 context_limit = self._model_context_limit()
                 prompt_tokens = estimate_messages_tokens(messages)
                 effective_max_tokens = min(1500, max(64, context_limit - prompt_tokens - 32))
@@ -707,7 +707,7 @@ class WorkflowWorker(QObject):
                             max_tokens=effective_max_tokens,
                             temperature=0.2,
                             stream=True,
-                            stream_callback=lambda _t: None,  # silent — no chat UI noise
+                            stream_callback=lambda _t: None,
                             cancel_check=lambda: self._cancelled,
                         )
                 except Exception as e:
@@ -727,7 +727,7 @@ class WorkflowWorker(QObject):
     def _merge_extracted_characters(self, raw_json: str) -> int:
 
         text = raw_json.strip()
-        # Strip markdown code fences some models add around JSON.
+
         if text.startswith("```"):
             text = text.strip("`")
             if text.lower().startswith("json"):
@@ -840,7 +840,7 @@ class WorkflowWorker(QObject):
                         )
                         continue
 
-                    # Merge by section heading; duplicate lines are silently skipped.
+
                     updated = _wf_merge_markdown_document(
                         self.project.world, cleaned, DEFAULT_WORLD_SECTIONS
                     )
@@ -956,9 +956,9 @@ class WorkflowWorker(QObject):
             elif task == TaskType.CONVERSATION_SUMMARY:
                 self._run_conversation_summary()
 
-    # ──────────────────────────────────────────────
-    # Task implementations
-    # ──────────────────────────────────────────────
+
+
+
 
     def _detect_chapter_continuation_request(self, message: str) -> Optional[int]:
 
@@ -966,7 +966,7 @@ class WorkflowWorker(QObject):
             return None
 
         lower = message.lower()
-        # Strip accents for accent-insensitive matching.
+
         normalized = (
             unicodedata.normalize("NFKD", lower)
             .encode("ascii", "ignore")
@@ -985,9 +985,9 @@ class WorkflowWorker(QObject):
             num = int(m.group(1))
             if any(c.number == num for c in self.project.chapters):
                 return num
-            return None  # they named a chapter that doesn't exist — don't guess
+            return None
 
-        # Without an explicit chapter number, require a story-related word or a short message.
+
         mentions_story = any(
             w in normalized for w in ("cap", "chapter", "historia", "story", "escena", "scene")
         )
@@ -999,7 +999,7 @@ class WorkflowWorker(QObject):
     def _run_chat_continue_chapter(self, chapter_num: int) -> None:
         chapter = next((c for c in self.project.chapters if c.number == chapter_num), None)
         if not chapter:
-            # Shouldn't happen, but fall back to a normal chat reply.
+
             result = self._run_inference(TaskType.CHAT, self.extra_input, add_to_chat=True)
             if result:
                 self._maybe_summarize()
@@ -1021,7 +1021,7 @@ class WorkflowWorker(QObject):
         if self.extra_input.strip():
             model_prompt += f"\n\nAuthor's note for this continuation: {self.extra_input.strip()}"
 
-        # add_to_chat=False: show the author's original message in chat, not the constructed prompt.
+
         result = self._run_inference(
             TaskType.WRITE_CHAPTER, model_prompt, add_to_chat=False, max_tokens=self._content_max_tokens()
         )
@@ -1049,7 +1049,7 @@ class WorkflowWorker(QObject):
     def _run_chat(self) -> None:
         self.step_started.emit("Generating response...")
 
-        # Chapter attachment: parse and dispatch before normal chat handling.
+
         if self.extra_input.startswith(CHAT_CHAPTER_ATTACHMENT_MARKER):
             self._run_chat_with_chapter_attachment()
             return
@@ -1118,7 +1118,7 @@ class WorkflowWorker(QObject):
         if result:
             self.project.synopsis = result
             self._extract_and_merge_characters(result)
-            # Synopsis is plot summary, not worldbuilding — skip world extraction.
+
             storage.save_project(self.project)
             self.step_finished.emit("Synopsis", result)
 
@@ -1143,8 +1143,8 @@ class WorkflowWorker(QObject):
 
         requested_n = self._extract_requested_chapter_count(self.extra_input)
 
-        # Pre-render the outline template with requested_count, injected into the prompts
-        # cache so build_system_prompt picks it up; restored after the loop.
+
+
         _outline_template_key = "task_instructions/generate_outline"
         _requested_count_str = str(requested_n) if requested_n is not None else "(not specified)"
         _original_cached = prompts._cache.get(_outline_template_key)
@@ -1154,8 +1154,8 @@ class WorkflowWorker(QObject):
                 requested_count=_requested_count_str,
             )
         except Exception:
-            # If render fails for any reason, fall back to the raw template
-            # so the outline generation still works.
+
+
             pass
 
         try:
@@ -1180,7 +1180,7 @@ class WorkflowWorker(QObject):
                     logger.warning(f"[generate_outline] generation pass {generation_pass} returned empty text.")
                     break
 
-                # Strip repeated chapters from continuation passes.
+
                 if generation_pass > 1 and outline_text:
                     highest_so_far = max(self._chapter_numbers_in_text(outline_text), default=0)
                     generated = self._extract_new_outline_chapters(generated, highest_so_far)
@@ -1196,7 +1196,7 @@ class WorkflowWorker(QObject):
                     if outline_text else generated.strip()
                 )
     
-                # Normalize chapter headings.
+
                 outline_text = re.sub(
                     r"^\s*#{3,}\s*(Chapter\s+\d+\b.*)$",
                     r"## \1",
@@ -1204,11 +1204,11 @@ class WorkflowWorker(QObject):
                     flags=re.IGNORECASE | re.MULTILINE,
                 )
 
-                # Keep project.outline in sync so the next pass sees what's already written.
+
                 self.project.outline = outline_text
 
                 if not requested_n:
-                    # No target chapter count — one pass only.
+
                     break
 
                 actual_numbers = self._chapter_numbers_in_text(outline_text)
@@ -1235,7 +1235,7 @@ class WorkflowWorker(QObject):
                 self._extract_and_merge_characters(outline_text)
                 self._update_world_incremental(outline_text, source_type="outline")
 
-                # Warn if the chapter count doesn't match the request.
+
                 actual_numbers = self._outline_chapter_numbers()
                 if requested_n and actual_numbers and len(actual_numbers) != requested_n:
                     note = (
@@ -1252,7 +1252,7 @@ class WorkflowWorker(QObject):
                 storage.save_project(self.project)
                 self.step_finished.emit("Outline", outline_text)
         finally:
-            # Restore the prompts cache so other callers get the raw template.
+
             if _original_cached is None:
                 prompts._cache.pop(_outline_template_key, None)
             else:
@@ -1301,9 +1301,9 @@ class WorkflowWorker(QObject):
         storage.save_project(self.project)
         self.step_finished.emit("Outline Regenerated", updated)
 
-    # ------------------------------------------------------------------
-    # Extend Outline — Phase 1 helpers
-    # ------------------------------------------------------------------
+
+
+
 
     def _parse_extend_plan(self, plan_text: str, next_chapter: int, requested_count: int) -> list[str]:
 
@@ -1311,7 +1311,7 @@ class WorkflowWorker(QObject):
         seen_chapters: set[int] = set()
         for line in plan_text.splitlines():
             line = line.strip()
-            # Match "Chapter N →" or "Chapter N ->" (model may use ASCII arrow)
+
             m = re.match(r"(?i)chapter\s+(\d+)\s*(?:→|->|–>|—>)\s*(.*)", line)
             if not m:
                 continue
@@ -1355,7 +1355,7 @@ class WorkflowWorker(QObject):
     def _run_extend_outline(self) -> None:
 
         payload = self.extra_input.split(OUTLINE_EXTEND_MARKER, 1)[1].strip("\n")
-        # Format: "<count>\n<request>" — count is a hard constraint, validated here.
+
         count_line, _, rest = payload.partition("\n")
         try:
             requested_count = int(count_line.strip())
@@ -1388,7 +1388,7 @@ class WorkflowWorker(QObject):
 
         existing_numbers = set(self._outline_chapter_numbers())
 
-        # ---- PHASE 1 — Planning ----
+
         self.step_started.emit(
             f"Planning {requested_count} new chapter(s) starting at Chapter {next_chapter_start}..."
         )
@@ -1404,7 +1404,7 @@ class WorkflowWorker(QObject):
             next_chapter=next_chapter_start,
             last_new_chapter=final_chapter,
         )
-        # Use only a tail of the existing outline to stay within context budget.
+
         plan_outline_ref = self._tail_outline_chapters(
             current_outline, EXTEND_OUTLINE_REFERENCE_TAIL_CHAPTERS
         ) or current_outline
@@ -1424,7 +1424,7 @@ class WorkflowWorker(QObject):
             current_outline=plan_outline_ref,
         )
 
-        # Planning output is one line per chapter; 512 tokens is sufficient.
+
         plan_raw = self._run_lean_inference(
             TaskType.GENERATE_OUTLINE, plan_system, plan_user, max_tokens=512,
         )
@@ -1447,7 +1447,7 @@ class WorkflowWorker(QObject):
             f"[extend_outline] Phase 1 complete: {len(chapter_plans)} chapter plans parsed."
         )
 
-        # ---- PHASE 2 — Per-chapter generation (each chapter is an independent inference) ----
+
         chapter_system = prompts.render(
             "outline/extend_system",
             language_note=language_note,
@@ -1465,8 +1465,8 @@ class WorkflowWorker(QObject):
             context_limit = None
         min_reply_tokens = 300
 
-        accumulated_entries = ""   # holds validated chapter text; never touches project.outline
-        max_retries_per_chapter = MAX_OUTLINE_CONTINUATIONS  # retry budget per chapter
+        accumulated_entries = ""
+        max_retries_per_chapter = MAX_OUTLINE_CONTINUATIONS
 
         for chapter_idx, chapter_plan_desc in enumerate(chapter_plans):
             next_chapter = next_chapter_start + chapter_idx
@@ -1478,7 +1478,7 @@ class WorkflowWorker(QObject):
                 f"plan='{chapter_plan_desc[:80]}...'"
             )
 
-            # Each chapter receives its plan position (prev/next) without accumulated generated text.
+
             continuity_lines: list[str] = [
                 "=== CHAPTER POSITION IN PLAN ===",
                 f"Current chapter: Chapter {next_chapter}",
@@ -1569,7 +1569,7 @@ class WorkflowWorker(QObject):
                     )
                     continue
 
-                # Trim any extra chapters the model appended beyond this one.
+
                 if pass_numbers[-1] > next_chapter:
                     m = re.search(
                         rf"(?m)^\s*##\s*Chapter\s+{next_chapter + 1}\b", candidate
@@ -1602,17 +1602,17 @@ class WorkflowWorker(QObject):
                 )
                 return
 
-            # Hold in memory; project.outline is not updated until all chapters are validated.
+
             accumulated_entries = (
                 (accumulated_entries.rstrip() + "\n\n" + chapter_entry.strip()).strip()
                 if accumulated_entries else chapter_entry.strip()
             )
 
-        # ---- All chapters generated — validate and save atomically ----
+
         new_entries = accumulated_entries
         new_numbers = self._chapter_numbers_in_text(new_entries)
 
-        # Final validation on the full accumulated output.
+
         if not new_numbers:
             self.error_occurred.emit("The model returned no new chapters.")
             return
@@ -1690,7 +1690,7 @@ class WorkflowWorker(QObject):
         if has_continuity and ends_cleanly:
             return text.rstrip()
 
-        # Incomplete — discard the last block.
+
         return text[:last_start].rstrip()
 
     @staticmethod
@@ -1709,7 +1709,7 @@ class WorkflowWorker(QObject):
                     if chapter_num > highest_already:
                         skip_until_new = False
                         new_lines.append(line)
-                # Repeated or pre-chapter line — skip.
+
             else:
                 new_lines.append(line)
         return "\n".join(new_lines).strip()
@@ -1763,7 +1763,7 @@ class WorkflowWorker(QObject):
             TaskType.GENERATE_WORLD, prompt, add_to_chat=True, max_tokens=800
         )
         if result:
-            # Merge by section heading into the existing document.
+
             self.project.world = _wf_merge_markdown_document(
                 self.project.world, result, DEFAULT_WORLD_SECTIONS
             )
@@ -1810,7 +1810,7 @@ class WorkflowWorker(QObject):
         if not text:
             return text
 
-        # Strip code fences some models wrap the entire response in.
+
         fenced = re.match(r"^\s*```(?:[a-zA-Z]*)\n(.*)\n```\s*$", text, re.DOTALL)
         if fenced:
             text = fenced.group(1)
@@ -1958,7 +1958,7 @@ class WorkflowWorker(QObject):
 
         raw = text.strip()
         normalized = raw.lower()
-        # Strip common noise characters the model may wrap the token in
+
         cleaned = normalized.strip("` \t\n.,;:\"'")
         has_true  = "true"  in cleaned
         has_false = "false" in cleaned
@@ -1966,7 +1966,7 @@ class WorkflowWorker(QObject):
             return {"valid": True, "completed": True,  "raw": raw}
         if has_false and not has_true:
             return {"valid": True, "completed": False, "raw": raw}
-        # Ambiguous or empty
+
         return {"valid": False, "completed": False, "raw": raw}
 
     def _evaluate_chapter_completion(
@@ -1994,7 +1994,7 @@ class WorkflowWorker(QObject):
                 TaskType.REVIEW_CHAPTER,
                 system_content,
                 user_content,
-                max_tokens=16,   # slightly more room so noise doesn't eat the token
+                max_tokens=16,
             )
             parsed = self._parse_completion_evaluation(raw_output)
             verdict = "TRUE ✓" if parsed["completed"] else "FALSE →"
@@ -2011,10 +2011,10 @@ class WorkflowWorker(QObject):
                     "(expected 'true' or 'false')",
                     attempt, raw_output.strip(),
                 )
-                final = parsed  # keep last attempt's raw for the log below
+                final = parsed
 
         if not final["valid"]:
-            # All retries failed — treat as not complete rather than truncating silently.
+
             logger.warning(
                 "[eval] All %d attempts failed to get a clean true/false. "
                 "Last raw output: %r  — treating as FALSE (will continue).",
@@ -2050,7 +2050,7 @@ class WorkflowWorker(QObject):
                     "change_chapter/section", heading="END OF PREVIOUS CHAPTER (continuity only)", body=tail,
                 ))
 
-        # Reinforce style/intent at the point of generation.
+
         style_frag = self.project.writing_style.to_prompt_fragment()
         if style_frag:
             sections.append(prompts.render("change_chapter/section", heading="STYLE TO APPLY", body=style_frag))
@@ -2064,7 +2064,7 @@ class WorkflowWorker(QObject):
         if intent_lines:
             sections.append(prompts.render("change_chapter/section", heading="AUTHOR INTENT", body="\n".join(intent_lines)))
 
-        # extra_input supplements the structured context.
+
         if self.extra_input and self.extra_input.strip():
             sections.append(prompts.render("change_chapter/section", heading="AUTHOR'S REQUEST", body=self.extra_input.strip()))
 
@@ -2079,17 +2079,17 @@ class WorkflowWorker(QObject):
         if self.extra_input.startswith(WRITE_CHAPTER_TARGET_MARKER):
             chapter_num = int(self.extra_input[len(WRITE_CHAPTER_TARGET_MARKER):].strip())
         else:
-            # Derive chapter number from disk, not project.current_chapter (may be stale).
+
             chapter_num = self._next_chapter_number()
         self.step_started.emit(f"Writing Chapter {chapter_num}...")
 
         outline_entry = self._extract_chapter_outline_section(chapter_num)
         if not outline_entry and self.project.outline:
-            # No matching "## Chapter N" heading — fall back to the full outline.
+
             outline_entry = self.project.outline
 
-        # Derive a checklist from the outline entry (same planner/evaluate/continue
-        # philosophy as CHANGE_CHAPTER). Skipped if there's no outline.
+
+
         checklist = ""
         if outline_entry:
             self.step_started.emit(f"Planning Chapter {chapter_num}...")
@@ -2097,7 +2097,7 @@ class WorkflowWorker(QObject):
 
         prompt = self._build_chapter_generation_prompt(chapter_num, outline_entry, checklist)
 
-        # Fallback goal text for the true/false evaluator when no checklist is available.
+
         chapter_goal = outline_entry or prompt
 
         chapter_text = ""
@@ -2120,8 +2120,8 @@ class WorkflowWorker(QObject):
             else:
                 self.step_started.emit(f"Generating continuation (pass {generation_pass})...")
                 logger.info(f"[write_chapter] Generating continuation (pass {generation_pass})...")
-                # Clear chat history before building the next prompt to avoid
-                # the model seeing the chapter tail twice.
+
+
                 self._clear_chat_messages_for_continuation()
                 continuation_prompt = self._build_chapter_continuation_prompt(
                     chapter_num,
@@ -2130,7 +2130,7 @@ class WorkflowWorker(QObject):
                     checklist,
                     missing_items,
                 )
-                # add_to_chat=False: the chapter tail is already embedded in the prompt.
+
                 generated = self._run_inference(
                     TaskType.WRITE_CHAPTER, continuation_prompt, add_to_chat=False, max_tokens=self._content_max_tokens()
                 )
@@ -2138,7 +2138,7 @@ class WorkflowWorker(QObject):
                     logger.warning(f"[write_chapter] generation pass {generation_pass} returned empty text.")
                     break
 
-                # Trim overlap with existing text, same as CHANGE_CHAPTER continuations.
+
                 addition = generated.strip()
                 tail = chapter_text[-2500:].strip()
                 addition = change_chapter.trim_leading_overlap(addition, tail)
@@ -2154,7 +2154,7 @@ class WorkflowWorker(QObject):
                 evaluation = change_chapter.evaluate_chapter(
                     self, chapter_num, f"Chapter {chapter_num}", chapter_text, outline_entry, checklist, generation_pass,
                 )
-                # Override: a truncated chapter is never "complete", even if the evaluator says so.
+
                 if change_chapter.ends_abruptly(chapter_text) and evaluation["completed"]:
                     logger.warning(
                         f"[write_chapter] Pass {generation_pass}: evaluator said complete=true but "
@@ -2196,7 +2196,7 @@ class WorkflowWorker(QObject):
                 existing.content = chapter_text
                 existing.reviewed = False
             else:
-                # Use the outline heading as title source; fall back to generic title.
+
                 outline_title = self._outline_chapter_title(chapter_num)
                 ch = Chapter(
                     number=chapter_num,
@@ -2211,7 +2211,7 @@ class WorkflowWorker(QObject):
             self.step_finished.emit(f"Chapter {chapter_num}", chapter_text)
 
     def _run_write_book(self) -> None:
-        # Start Write Book with a clean chat history.
+
         logger.info("[write_book] Clearing chat before Chapter 1.")
         self._clear_temporary_chat_history()
         self.clear_chat_requested.emit()
@@ -2225,7 +2225,7 @@ class WorkflowWorker(QObject):
         while not self._cancelled:
             if not self._reload_project_from_storage():
                 break
-            # Refresh outline metadata after reload (it may have been edited).
+
             current_outline_numbers = self._outline_chapter_numbers()
             if current_outline_numbers:
                 max_outline_chapter = max(current_outline_numbers)
@@ -2235,7 +2235,7 @@ class WorkflowWorker(QObject):
             if pending <= 0:
                 break
             if self.project.outline:
-                # Stop if this chapter has no outline entry, or exceeds the highest outlined chapter.
+
                 if not self._outline_has_chapter(pending):
                     logger.info(
                         f"[write_book] Chapter {pending} has no outline entry "
@@ -2254,10 +2254,10 @@ class WorkflowWorker(QObject):
             if self._cancelled:
                 break
 
-            # Update Story Memory before the next chapter so it includes events from this one.
+
             wrote_chapter = any(c.number == pending for c in self.project.chapters)
             if wrote_chapter:
-                # Point current_chapter at the finished chapter before calling _run_update_memory.
+
                 self.project.current_chapter = pending
                 logger.info(f"[write_book] Updating Story Memory for Chapter {pending}.")
                 self.step_started.emit(f"Updating Story Memory for Chapter {pending}...")
@@ -2311,7 +2311,7 @@ class WorkflowWorker(QObject):
 
         review_parts = [f"Review Chapter {chapter_num}: '{chapter.title}'\n\n{chapter.content}"]
 
-        # Include intent and style so the reviewer judges against the author's goals.
+
         style_frag = self.project.writing_style.to_prompt_fragment()
         if style_frag:
             review_parts.append(f"Style preferences to check against:\n{style_frag}")
@@ -2335,7 +2335,7 @@ class WorkflowWorker(QObject):
         )
         if result:
             chapter.reviewed = True
-            chapter.last_review = result  # keep it so "Rewrite with Feedback" can use it
+            chapter.last_review = result
             storage.save_project(self.project)
             self.step_finished.emit(f"Review of Chapter {chapter_num}", result)
 
@@ -2580,9 +2580,9 @@ class WorkflowThread(QThread):
         self.worker.request_stop_after_current_chapter()
 
 
-# ---------------------------------------------------------------------------
-# Tests for _run_extend_outline() — run via `python -m engine.workflow`.
-# ---------------------------------------------------------------------------
+
+
+
 
 def _tb_chapter_block(n: int) -> str:
     return (
@@ -2722,7 +2722,7 @@ def _test_temporary_history_cleared_between_chapters() -> None:
 
     for i, n in enumerate(range(9, 13)):
         _, _, user_prompt = call_args_list[i + 1]
-        # Prompt must target this chapter
+
         case.assertIn(f"Chapter {n}", user_prompt)
 
         for other_n in range(9, 13):

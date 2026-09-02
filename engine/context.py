@@ -40,7 +40,7 @@ def format_characters_block(characters: list) -> str:
     return "\n\n".join(_format_character_for_prompt(c) for c in characters).strip()
 
 
-# Approximate token estimate: 1 token ≈ 4 chars
+
 def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
@@ -127,7 +127,7 @@ def _section_payloads(
     if "## Additional Author Instructions" in system_prompt:
         author_instructions = system_prompt.split("## Additional Author Instructions", 1)[1].strip()
 
-    # Creative Direction varies by task: full for outline/review, partial for chapter tasks.
+
     creative_direction = ""
     intent = project.author_intent
     style = project.writing_style
@@ -193,24 +193,24 @@ def _compact_sections(
         "Synopsis": max(120, max_context_tokens // 20),
         "Characters": max(180, max_context_tokens // 14),
         "Outline": max(350, max_context_tokens // 8),
-        # World: capped lower — the model needs key rules, not the full wiki.
+
         "World": max(80, max_context_tokens // 32),
         "Memory": max(150, max_context_tokens // 16),
         "Chat Summary": max(100, max_context_tokens // 24),
-        # Creative Direction: kept short — a handful of directives, not an essay.
+
         "Creative Direction": max(60, max_context_tokens // 20),
         "Author Instructions": max(80, max_context_tokens // 40),
     }
     if task == TaskType.WRITE_CHAPTER:
         budgets["Memory"] = max(budgets["Memory"], max_context_tokens // 10)
         budgets["Chat Summary"] = max(budgets["Chat Summary"], max_context_tokens // 20)
-        # _run_write_chapter (workflow.py) already embeds this chapter's
-        # outline entry directly in the user message — with a "binding,
-        # follow exactly" framing — and falls back to the full outline
-        # there too if no matching "## Chapter N" heading is found. Either
-        # way it's guaranteed to already be in-band, so injecting it again
-        # here would just double it in the same request. Drop it from the
-        # system side for this task only.
+
+
+
+
+
+
+
         sections["Outline"] = ""
     if task in (TaskType.CHAT, TaskType.REVIEW_CHAPTER):
         budgets["Chat Summary"] = max(budgets["Chat Summary"], max_context_tokens // 12)
@@ -229,11 +229,11 @@ def _repair_alternation(messages: list[dict]) -> list[dict]:
     Token trimming can leave a dangling assistant reply; most llama.cpp
     chat templates require strict alternation and raise a jinja error otherwise.
     """
-    # Drop leading assistant turns until the window starts with "user".
+
     while messages and messages[0]["role"] != "user":
         messages.pop(0)
 
-    # Merge consecutive same-role turns rather than dropping content.
+
     repaired: list[dict] = []
     for m in messages:
         if repaired and repaired[-1]["role"] == m["role"]:
@@ -314,10 +314,10 @@ def build_context_for_model(
         removed = recent_msgs.pop(0)
         total -= _estimate_tokens(removed["content"])
 
-    # Repair alternation after trimming.
+
     recent_msgs = _repair_alternation(recent_msgs)
 
-    # Fold the new user message into the trailing user turn if one already exists.
+
     if recent_msgs and recent_msgs[-1]["role"] == "user":
         recent_msgs[-1] = {
             "role": "user",
@@ -332,7 +332,7 @@ def build_context_for_model(
     if trailing_user_msg is not None:
         messages.append(trailing_user_msg)
 
-    # If user_message alone overflows the budget, trim it (keeping the end) as a last resort.
+
     reserved = reply_reserved if reply_reserved is not None else max(256, min(4096, max_context_tokens // 3))
     non_user_tokens = _messages_token_count(messages[:-1]) if trailing_user_msg is not None else _messages_token_count(messages)
     target_msg = messages[-1] if trailing_user_msg is not None else (messages[-1] if messages[-1]["role"] == "user" else None)
@@ -394,7 +394,7 @@ def build_review_context_for_model(
         project,
     )
 
-    # Include only the relevant chapter's outline entry, if available.
+
     chapter_num = project.current_chapter if project.current_chapter else max(1, len(project.chapters))
     specific_outline = extract_outline_section(project.outline, chapter_num)
     if specific_outline:
@@ -415,8 +415,8 @@ def build_review_context_for_model(
         system_content_parts.append(f"\n\n## Additional Author Instructions\n{sections['Author Instructions']}")
     system_content = "\n".join(system_content_parts)
 
-    # Truncate user_message (the chapter draft) to fit within the context budget,
-    # keeping the end — the chapter's conclusion matters more than its opening.
+
+
     reserved = reply_reserved if reply_reserved is not None else 512
     system_tokens = _section_tokens(system_content)
     budget_for_user = max(200, max_context_tokens - system_tokens - reserved - 64)
@@ -584,7 +584,7 @@ def build_system_prompt(
     language: if set, an explicit language instruction overrides model bias toward English.
     allow_nsfw: enables adult content for creative tasks only (no effect on review/chat/summary).
     """
-    # NSFW freedom only applies to tasks that generate creative prose.
+
     _CREATIVE_TASKS = {
         TaskType.WRITE_SYNOPSIS,
         TaskType.GENERATE_OUTLINE,
@@ -607,7 +607,7 @@ def build_system_prompt(
             "regardless of the language these instructions are written in."
         )
 
-    # Explicit permission grant — local models respond better to "you are allowed" than style notes.
+
     if allow_nsfw and task in _CREATIVE_TASKS:
         base += (
             "\n\nCONTENT POLICY: This is an adult fiction project. "
@@ -619,7 +619,7 @@ def build_system_prompt(
             "No content filtering is applied to this project."
         )
 
-    # Story sections (Synopsis, Characters, etc.) are injected by build_context_for_model.
+
     instruction = _estimate_task_instruction(task)
 
     prompt = base.strip()

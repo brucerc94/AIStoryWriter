@@ -18,7 +18,7 @@ from PySide6.QtGui import QIcon
 
 logger = logging.getLogger("ui.resources")
 
-# Project root = parent of the ui/ package this file lives in.
+
 _ROOT = Path(__file__).resolve().parent.parent
 _ICON_CANDIDATES = (
     _ROOT / "assets" / "icon.ico",
