@@ -1,0 +1,80 @@
+name: Cleanup code comments
+
+on:
+  push:
+    branches: [cleanup-comments]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: ${{ !startsWith(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Remove non-directive Python comments
+        shell: python
+        run: |
+          from pathlib import Path
+          import io
+          import re
+          import tokenize
+
+          keep = re.compile(r'^#\s*(?:noqa\b|type:\s*ignore\b|pragma:\s*\w+|coding[:=])', re.I)
+
+          for path in Path('.').rglob('*.py'):
+              if '.git' in path.parts:
+                  continue
+              text = path.read_text(encoding='utf-8')
+              try:
+                  tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
+              except (SyntaxError, tokenize.TokenError):
+                  continue
+
+              lines = text.splitlines(keepends=True)
+              changed = False
+              for tok in tokens:
+                  if tok.type != tokenize.COMMENT:
+                      continue
+                  comment = tok.string
+                  line_no = tok.start[0]
+                  if line_no <= 2 and (comment.startswith('#!') or re.search(r'coding[:=]\s*[-\w.]+', comment, re.I)):
+                      continue
+                  if keep.match(comment):
+                      continue
+                  idx = line_no - 1
+                  line = lines[idx]
+                  start = tok.start[1]
+                  if start == 0:
+                      newline = '\n' if line.endswith('\n') else ''
+                      if newline and line.endswith('\r\n'):
+                          newline = '\r\n'
+                      lines[idx] = newline
+                  else:
+                      newline = '\r\n' if line.endswith('\r\n') else ('\n' if line.endswith('\n') else '')
+                      prefix = line[:start].rstrip()
+                      lines[idx] = prefix + newline
+                  changed = True
+
+              if changed:
+                  path.write_text(''.join(lines), encoding='utf-8')
+
+      - name: Verify Python syntax
+        run: python -m compileall -q .
+
+      - name: Commit cleaned files
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f .github/workflows/cleanup-comments.yml
+          git add -A
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "[skip ci] chore: clean code comments"
+          git push origin HEAD:cleanup-comments
