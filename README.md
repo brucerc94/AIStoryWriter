@@ -12,7 +12,7 @@
     <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+" />
     <img src="https://img.shields.io/badge/UI-PySide6-41CD52?style=flat-square&logo=qt&logoColor=white" alt="PySide6" />
     <img src="https://img.shields.io/badge/LLM-GGUF-111827?style=flat-square" alt="GGUF" />
-    <img src="https://img.shields.io/badge/License-MIT-0F7660" alt="MIT License" />
+    <img src="https://img.shields.io/badge/License-MIT-0F766E" alt="MIT License" />
   </p>
 
   <p>
@@ -20,6 +20,7 @@
     <a href="#screenshots">Screenshots</a> ·
     <a href="#how-it-works">How it works</a> ·
     <a href="#using-the-ui">Using the UI</a> ·
+    <a href="#tips">Tips</a> ·
     <a href="#recommended-models">Recommended models</a> ·
     <a href="#quick-start">Quick Start</a>
   </p>
@@ -286,6 +287,86 @@ The current UI supports:
 
 ---
 
+## Tips
+
+These are practical settings and workflow habits that have worked well in testing. They are **recommendations, not hard requirements**; your hardware, model, and story can change the best values.
+
+### Keep character relationships detailed
+
+When a character has relationships with other characters, define them explicitly in the **Characters** tab instead of leaving the relationship section vague.
+
+For example:
+
+```text
+father of → Daniel
+rival of → Marcus
+friend of → Elena
+```
+
+Try to define the important relationships **for each relevant character**, not only for the protagonist. This gives chapter generation more concrete information about how characters should behave toward each other.
+
+### Use Change Chapter for precise revisions
+
+**Change Chapter** is especially useful when you already have a chapter and want to alter how it behaves without rewriting the entire book from scratch.
+
+Be specific. Instead of:
+
+```text
+Make this chapter better.
+```
+
+describe exactly what should change and what should remain. You can specify things such as:
+
+- the tone or emotional intensity you want
+- which scene should be expanded or shortened
+- how a character should behave
+- how a relationship should affect the dialogue
+- whether pacing should become faster or slower
+- what information should be added or removed
+- how the chapter should end
+- what the AI must preserve from the current version
+
+For example:
+
+```text
+Make the confrontation between Elena and Marcus more tense.
+Keep the existing plot events and ending, but make Elena more defensive and
+Marcus more controlled and threatening. Add more subtext to their dialogue,
+slow the scene slightly, and make the final exchange end with Elena realizing
+that Marcus already knows about the letter. Do not add a new character or
+change the outcome of the chapter.
+```
+
+The more concrete the instruction, the easier it is to steer the revision toward the result you actually want.
+
+### Context size
+
+A good starting point is **8192 tokens** for **Context Size**.
+
+You can use a smaller context if your hardware needs it. Context Size is the model's combined window for the prompt and the generated response, so increasing it can help when the project context is large, while decreasing it can reduce memory pressure.
+
+### Max Tokens per Pass
+
+A useful starting point is **4256 tokens** for **Max Tokens per Pass**.
+
+This is separate from Context Size: Context Size is the total model window, while Max Tokens per Pass limits how much the application asks the model to generate in one pass.
+
+The best value depends on the model and the task, so treat 4256 as a practical starting point rather than a universal setting.
+
+### Thinking mode
+
+For the current writing workflow, **Enable Thinking** can be left **off** when using a model that supports that option.
+
+In testing, keeping thinking disabled avoids spending part of the available token budget on hidden reasoning and leaves more room for the actual story response. If you prefer a different balance for a particular model, you can experiment with it.
+
+### Save manual edits
+
+Whenever you manually change content in a section that has a **Save** button, use it before moving on.
+
+This is especially important for **Synopsis**, **Outline**, **World**, **Memory**, and chapter editing.
+
+---
+
 ## Recommended models
 
 AI Story Studio uses local **GGUF** language models. Choose the model that matches your hardware.
@@ -313,38 +394,6 @@ For systems with substantially more memory, this is the higher-capability option
 AI Story Studio can also be used with **MoE models**. The application exposes MoE-related performance settings in **Settings → MoE Performance**, so users with compatible hardware can tune this class of model without changing the writing workflow.
 
 The model choice is the part that changes. The writing workflow remains the same.
-
----
-
-## Story workspace reference
-
-### Synopsis
-
-Write manually or use **Generate Synopsis** to create a draft that you can refine.
-
-### Outline
-
-Edit the outline directly, generate it from the outline wizard, or use **Extend Outline** to append more chapters.
-
-### Characters
-
-Create and edit characters, relationships, and optional portraits.
-
-### World & Setting
-
-Store setting information manually so the story has a stable reference for later generations.
-
-### Author
-
-Maintain the project's creative intent and writing-style preferences.
-
-### Chapters
-
-Generate individual chapters, generate the next unfinished chapter, or generate the remaining book. Read, edit, review, change, save, mark ready, and delete chapters from the chapter workspace.
-
-### Memory, Stats & Search
-
-Use Memory for accumulated story state, Stats for project progress, and Search for text lookup.
 
 ---
 
@@ -379,21 +428,7 @@ It provides:
 
 Character portraits can also be generated from the Characters workflow or in batches from the Images tab.
 
-All generated images are saved encrypted inside the active project.
-
----
-
-## Models & Settings
-
-The **Models** tab is where you assign local GGUF models to the task types exposed by the application.
-
-The **Settings** tab contains the current UI controls for model and hardware configuration, generation behavior, response language, maximum tokens per pass, mature/unrestricted content, diagnostics, MoE performance, and image-generation configuration.
-
----
-
-## Console
-
-The Console is an advanced diagnostics view for runtime output and generation information such as token count, speed, elapsed time, time to first token, current state, and other runtime details.
+All generated images are saved inside the active project.
 
 ---
 
@@ -463,8 +498,8 @@ On Windows, `run.bat` is also available as a convenience launcher.
 ### First setup in the app
 
 1. Open **Settings** and choose the **Models Directory**.
-2. After changing the Models Directory, scroll to the bottom of **Settings** and click **Save App Settings**. This is required to persist the directory and other application-level settings.
-3. Open **Models** and assign a GGUF model to the tasks you plan to use. Per-task model assignments are saved to the current project automatically.
+2. Scroll to the bottom and click **Save App Settings**.
+3. Open **Models** and assign a GGUF model to the tasks you plan to use.
 4. Create a project from **Projects → + New**.
 5. Open **Story → Synopsis** and write or generate the synopsis. Click **Save** after manual edits.
 6. Open **Story → Outline** and generate or write the outline. Click **Save** after manual edits.
