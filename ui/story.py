@@ -1,16 +1,3 @@
-"""
-Story Panel.
-
-Displays and edits all story content:
-- Synopsis
-- Outline
-- Characters
-- World
-- Chapters (list + editor)
-
-Also provides action buttons that trigger workflow tasks via the Chat panel.
-"""
-
 from __future__ import annotations
 
 import html
@@ -72,19 +59,13 @@ from ui.styles import (
 )
 from ui.widgets import EmptyStateCard, SizeAdjustingTabWidget
 
-# Imported here (not at top) to avoid circular imports — stats.py itself
-# imports outline_chapter_numbers from this module.
+
 from ui.stats import StatsTab
 from ui.search import SearchTab
 
 
 def outline_chapter_numbers(outline_text: str) -> list[int]:
-    """
-    Chapter numbers found in an outline's "## Chapter N" headings.
-    Mirrors engine.workflow's own parser so the UI (chapter-count badge,
-    Write Book confirmation) always agrees with what the workflow will
-    actually do with the same text.
-    """
+
     numbers = set()
     for match in re.finditer(r"^\s*##\s*Chapter\s+(\d+)\b", outline_text or "", re.IGNORECASE | re.MULTILINE):
         try:
@@ -113,15 +94,7 @@ class SectionHeader(QWidget):
 
 
 class MarkdownEditor(QWidget):
-    """
-    A labeled text editor for markdown content with a save/generate button row.
 
-    Optionally shows a friendlier empty state (icon + explanation + a
-    primary "Generate …" action, plus a "write it myself" link) in place
-    of the editor when there's no content yet — pass empty_title to
-    enable it. Without empty_title, behaves exactly as before: a plain
-    text box with placeholder text.
-    """
 
     content_saved = Signal(str)
     generate_requested = Signal()
@@ -268,10 +241,7 @@ class SynopsisTab(QWidget):
 
 
 # ── Style option tables ───────────────────────────────────────────────────────
-# Each table is a list of (internal_key, labels_by_language_prefix) tuples.
-# internal_key: the value stored in WritingStyle and sent to the model (English).
-# labels_by_language_prefix: maps a lowercased language prefix to a display label.
-# The first entry in each table is always the "auto" sentinel (key = "").
+
 
 def _localize(key: str, lang: str, table: list[tuple[str, dict[str, str]]]) -> str:
     """Return the display label for key in lang, falling back to English."""
@@ -345,7 +315,7 @@ _LENGTH_TABLE: list[tuple[str, dict[str, str]]] = [
     ("Long (~3k+ words)", {"en": "Long (~3 000+ words)", "es": "Largo (~3 000+ palabras)", "fr": "Long (~3 000+ mots)", "de": "Lang (~3 000+ Wörter)", "pt": "Longo (~3 000+ palavras)", "it": "Lungo (~3 000+ parole)"}),
 ]
 
-# Also: localized labels for UI form rows and group boxes (used by both dialog and panel)
+
 _UI_STRINGS: dict[str, dict[str, str]] = {
     "structure_group":    {"en": "Structure", "es": "Estructura", "fr": "Structure", "de": "Struktur", "pt": "Estrutura", "it": "Struttura"},
     "num_chapters":       {"en": "Number of chapters", "es": "Número de capítulos", "fr": "Nombre de chapitres", "de": "Kapitelanzahl", "pt": "Número de capítulos", "it": "Numero di capitoli"},
@@ -380,16 +350,14 @@ _UI_STRINGS: dict[str, dict[str, str]] = {
 
 
 def _ui(key: str, lang: str) -> str:
-    """Resolve a UI string key to the user's language, fallback to English."""
+
     lang_lc = lang.lower()[:2] if lang else "en"
     row = _UI_STRINGS.get(key, {})
     return row.get(lang_lc) or row.get("en", key)
 
 
 def _make_combo(table: list[tuple[str, dict[str, str]]], lang: str, parent=None) -> QComboBox:
-    """Build a QComboBox from a key/label table.
-    itemData(i) holds the internal English key; itemText(i) is the localized label.
-    """
+
     cb = QComboBox(parent)
     lang_lc = lang.lower()[:2] if lang else "en"
     for key, labels in table:
@@ -415,24 +383,7 @@ def _set_combo(combo: QComboBox, value: str) -> None:
 
 
 class GenerateOutlineDialog(QDialog):
-    """
-    Outline generation wizard.
-
-    Collects:
-      • Chapter count  (structural — required)
-      • Author intent  (creative goals — all optional, pre-filled from project)
-      • Writing style  (technical preferences — all optional, pre-filled)
-
-    Combo boxes display labels in the configured response language; their
-    itemData() always holds the internal English key that gets stored in
-    WritingStyle and sent to the model.  Fields left at '— auto —' are
-    omitted from the prompt; the model infers them from the synopsis.
-
-    "Generate Full Book" later writes exactly one chapter per outline heading, so
-    the chapter count set here determines the length of the finished novel.
-    """
-
-    # Keep these as class-level references so AuthorProfilePanel can reuse them.
+  
     _POV_TABLE    = _POV_TABLE
     _PACING_TABLE = _PACING_TABLE
     _DENSITY_TABLE = _DENSITY_TABLE
@@ -603,7 +554,7 @@ class GenerateOutlineDialog(QDialog):
         return self.chapters_spin.value()
 
     def get_author_intent(self) -> AuthorIntent:
-        """Return an AuthorIntent populated from the dialog's intent fields."""
+
         return AuthorIntent(
             emotional_journey=self.emotional_journey.toPlainText().strip(),
             lasting_impression=self.lasting_impression.toPlainText().strip(),
@@ -614,9 +565,7 @@ class GenerateOutlineDialog(QDialog):
         )
 
     def get_writing_style(self) -> WritingStyle:
-        """Return a WritingStyle from the dialog's combo selections.
-        itemData() holds the internal English key; empty string = auto.
-        """
+
         return WritingStyle(
             genre_tags=self.genre_tags.text().strip(),
             narrator_pov=_combo_value(self.narrator_pov),
@@ -630,15 +579,6 @@ class GenerateOutlineDialog(QDialog):
 
 
 class ExtendOutlineDialog(QDialog):
-    """
-    Extend-outline dialog.
-
-    Mirrors GenerateOutlineDialog's structural pattern (a QGroupBox holding a
-    QFormLayout, with a QSpinBox for the chapter count) so the number of new
-    chapters is a first-class, explicit, user-set constraint — never left
-    solely to the model's discretion — plus a free-text field describing
-    what the new chapters should cover.
-    """
 
     def __init__(
         self,
@@ -709,8 +649,7 @@ class ExtendOutlineDialog(QDialog):
 class OutlineTab(QWidget):
     task_requested = Signal(TaskType, str)
     content_changed = Signal(str)
-    # Emitted after the user confirms the dialog so MainWindow can persist
-    # the updated AuthorIntent and WritingStyle before the task starts.
+
     profile_updated = Signal()
 
     def __init__(self, parent=None) -> None:
@@ -772,11 +711,10 @@ class OutlineTab(QWidget):
         existing = outline_chapter_numbers(self.editor.get_text())
         default_n = max(existing) if existing else 12
 
-        # Read the configured response language so the dialog can localize
-        # its labels and combo options for the author.
+
         lang = storage.load_settings().response_language
 
-        # Pre-fill the wizard with whatever the project already has saved.
+
         current_intent = self._project.author_intent if self._project else None
         current_style = self._project.writing_style if self._project else None
 
@@ -790,17 +728,14 @@ class OutlineTab(QWidget):
         if dialog.exec() != QDialog.Accepted:
             return
 
-        # Persist the new intent/style back into the project object so the
-        # worker can read them from project.author_intent / project.writing_style.
+
         if self._project is not None:
             self._project.author_intent = dialog.get_author_intent()
             self._project.writing_style = dialog.get_writing_style()
             self.profile_updated.emit()
 
         n = dialog.chapter_count()
-        # Build the requirement string the worker appends to its base_prompt.
-        # The intent/style now travel via project fields — only the chapter
-        # count (a structural constraint) goes in the requirement string.
+
         requirement = (
             f"The outline must contain EXACTLY {n} chapters, "
             f"numbered sequentially from 1 to {n}."
@@ -895,7 +830,6 @@ class OutlineTab(QWidget):
 
 
 class _ClickableImageLabel(QLabel):
-    """A QLabel that emits a clicked signal when the user presses it."""
     clicked = Signal()
 
     def mousePressEvent(self, event):
@@ -1219,8 +1153,7 @@ class CharactersTab(QWidget):
 
 
 class CharacterDialog(QDialog):
-    # Predefined relationship types (label shown in the combo-box).
-    # The user can also type a custom value by selecting "other".
+
     _RELATIONSHIP_TYPES = [
         "father of", "mother of", "son of", "daughter of",
         "brother of", "sister of",
@@ -1474,11 +1407,7 @@ class ChapterListItem(QListWidgetItem):
 
 
 class ChangeChapterDialog(QDialog):
-    """
-    Modal dialog that collects the author's change instructions for a chapter.
-    Shows the chapter title for context and provides a multi-line text area
-    for the user to describe what they want the AI to change.
-    """
+
 
     def __init__(self, chapter: Chapter, parent=None) -> None:
         super().__init__(parent)
@@ -1539,12 +1468,7 @@ def _escape_book_text(text: str) -> str:
 
 
 def _split_chapter_paragraphs(content: str) -> list[str]:
-    """
-    Splits raw chapter text into paragraphs on blank lines, preserving any
-    single newlines *within* a paragraph (e.g. short dialogue exchanges)
-    as soft line breaks. Purely a presentation transform for the book
-    reader — it never reads back into or mutates chapter.content.
-    """
+
     normalized = (content or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     if not normalized:
         return []
@@ -1562,13 +1486,7 @@ def _serif_font(point_size: int, bold: bool = False) -> QFont:
 
 
 def _serif_font_px(pixel_size: int, bold: bool = False) -> QFont:
-    """
-    Same as _serif_font but sized in device pixels via setPixelSize
-    instead of setPointSize. This is what lets the *measuring* document
-    match the QTextEdit's CSS `font-size: Npx` exactly — mixing pt-sized
-    measurement fonts with a px-sized display stylesheet is what was
-    causing the pagination to under-fill each page.
-    """
+
     font = QFont()
     families = [f.strip(" '\"") for f in FONT_SERIF.split(",")]
     font.setFamilies(families)
@@ -1580,22 +1498,10 @@ def _serif_font_px(pixel_size: int, bold: bool = False) -> QFont:
 def _render_book_fragment(
     segment: str, is_title: bool, is_continuation: bool, title_font: QFont, spacing_value: int
 ) -> str:
-    """
-    Builds the HTML for one already-measured block (or block segment) for
-    on-screen rendering. `spacing_value` must be the exact same *rounded*
-    integer pixel value that was fed into the height accumulator during
-    `_paginate_book_pages` for this same block — using an unrounded float
-    here (or a differently-rounded one) would make the rendered page a
-    fraction of a pixel taller/shorter than what pagination measured,
-    which is exactly the kind of drift that causes clipped text.
-    """
+
     text_html = _escape_book_text(segment).replace("\u2028", "<br>")
     if is_title:
-        # font-weight must match the *measuring* QFont's setBold(True)
-        # (effectively CSS 700/"bold") rather than an arbitrary 600 —
-        # a different weight can resolve to a different font face with
-        # different metrics, which would desync measured vs rendered
-        # title height.
+
         return (
             f"<p style='margin:0 0 {spacing_value}px 0; "
             f"font-family:\"{title_font.family()}\"; font-size:{title_font.pixelSize()}px; "
@@ -1615,59 +1521,13 @@ def _paginate_book_pages(
     paragraph_spacing: float = 4.0,
     height_safety_px: float = 1.0,
 ) -> list[str]:
-    """
-    Lays out the chapter title + paragraphs at the given fonts and page
-    width using a QTextDocument, then walks the resulting line boxes to
-    slice the flow into pages of at most `page_height`. Breaks only ever
-    fall between lines — never mid-word — and a paragraph that doesn't
-    fit on one page simply continues, unbroken, onto the next, exactly
-    like a printed book. Purely a presentation transform: never reads or
-    writes chapter.content, only paginates already-loaded text for
-    display.
 
-    This function is the single source of truth for "how much fits on a
-    page" — `page_text_edit` is only ever fed pages built here, and it
-    must render each one without any vertical scrolling. To guarantee
-    that, every measurement here has to agree pixel-for-pixel with how
-    the real QTextEdit will lay the same HTML out:
-
-      * `body_font` / `title_font` must be the exact QFont (family +
-        pixel size + weight) the QTextEdit's stylesheet resolves to —
-        callers build these with `_serif_font_px`, matched to the
-        widget's `font-size: Npx` rule.
-      * `page_width` / `page_height` must be the real, already-resized
-        `page_text_edit.viewport()` width/height, not a value derived
-        from outer layout math — margins, borders, or scrollbar policy
-        can shave a few px off of what a naive "card size minus padding"
-        calculation predicts.
-      * the wrap mode set on this throwaway measuring document must
-        match the QTextEdit's (both default to
-        WrapAtWordBoundaryOrAnywhere, but it's set explicitly on both
-        ends so a future change to one can't silently desync from the
-        other).
-      * spacing values are rounded to whole pixels *once*, here, and
-        that same integer is what both the height accumulator and the
-        rendered CSS margin use (via `_render_book_fragment`) — mixing
-        an unrounded accumulator with rounded CSS output is what
-        previously let pages drift out of sync with what they measured.
-
-    `height_safety_px` is a small conservative margin subtracted from
-    `page_height` before packing lines. It exists purely as a guard
-    against residual sub-pixel differences between two independently
-    laid-out QTextDocuments (the throwaway one here and the QTextEdit's
-    real one) — it can never make a page overflow, only make a page very
-    slightly less full than the absolute theoretical maximum.
-
-    Returns a list of ready-to-render HTML fragments, one per page.
-    """
     usable_height = max(page_height - max(height_safety_px, 0.0), 1.0)
 
     doc = QTextDocument()
     doc.setDocumentMargin(0)
     doc.setDefaultFont(body_font)
-    # Explicit wrap mode so this throwaway measuring document can never
-    # silently drift from whatever QTextEdit's own default happens to be
-    # on a given Qt version — both are pinned to the same value.
+
     text_option = doc.defaultTextOption()
     text_option.setWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
     doc.setDefaultTextOption(text_option)
@@ -1702,24 +1562,7 @@ def _paginate_book_pages(
     pages: list[list[str]] = []
     current_page: list[str] = []
     current_height = 0.0
-    # Whether the page being built already has any line placed on it.
-    # This is deliberately tracked separately from `current_page` (the
-    # list of *committed* HTML fragments): a block's lines accumulate
-    # into current_height as they're measured, but only get committed to
-    # current_page once a break or the block's end is reached. Gating the
-    # overflow check on `current_page` instead of this flag meant a
-    # block's own earlier lines — measured but not yet committed — never
-    # counted as "this page already has content", so a single long block
-    # (e.g. the chapter's first paragraph) could never break internally
-    # and would silently overflow the page instead of splitting.
     page_has_content = False
-    # Spacing owed *before* the next block, if that block ends up sharing
-    # this page. Deferred rather than added immediately after each block,
-    # so a paragraph that doesn't fit doesn't force its predecessor's
-    # trailing gap onto the page that's about to close — that gap was
-    # never actually needed once nothing follows it on that page, and
-    # counting it anyway used to end pages a few pixels earlier than the
-    # real available height allowed.
     pending_spacing = 0.0
 
     block = doc.firstBlock()
@@ -1727,9 +1570,7 @@ def _paginate_book_pages(
     while block.isValid():
         is_title_block = has_title and block_idx == 0
         spacing_value = spacings[block_idx] if block_idx < len(spacings) else body_spacing
-        # QTextDocument lays blocks out lazily — force this block's layout
-        # before reading its line boxes, or lineCount() comes back 0 for
-        # any block beyond the first handful.
+
         doc_layout.blockBoundingRect(block)
         layout = block.layout()
         text = block.text()
@@ -1739,16 +1580,11 @@ def _paginate_book_pages(
             block_idx += 1
             continue
         seg_start = 0
-        # Only the block's very first line (li == 0) can carry the gap
-        # owed from the previous block, and only if this page already has
-        # content above it (a fresh page never starts with a leading gap).
+
         carry = pending_spacing if page_has_content else 0.0
         for li in range(line_count):
             line = layout.lineAt(li)
-            # Round up: a fractional line height still occupies a full
-            # pixel row once painted, so treating it as smaller than it
-            # renders is exactly what lets the last line on a page get
-            # visually clipped.
+
             lh = math.ceil(line.height())
             extra = carry if li == 0 else 0.0
             if page_has_content and current_height + extra + lh > usable_height:
@@ -1772,9 +1608,7 @@ def _paginate_book_pages(
             current_page.append(
                 _render_book_fragment(remainder, is_title_block, seg_start > 0, title_font, spacing_value)
             )
-        # Don't fold this block's trailing spacing into current_height
-        # yet — hold it until we know whether another block will actually
-        # land on this same page.
+
         pending_spacing = spacing_value
         block = block.next()
         block_idx += 1
@@ -1788,11 +1622,7 @@ def _paginate_book_pages(
 
 
 class _BookPageTextEdit(QTextEdit):
-    """
-    Fixed presentation viewport for a book page. It must never become a
-    vertically scrollable reading surface: pagination is responsible for
-    fitting the complete page into the viewport.
-    """
+
 
     def wheelEvent(self, event) -> None:  # noqa: N802 — Qt override
         event.ignore()
@@ -1803,12 +1633,6 @@ class _BookPageTextEdit(QTextEdit):
 
 
 class _ReadPane(QWidget):
-    """
-    Thin container for the whole book-reading pane. Exists so page
-    navigation can respond to Left/Right/Home/End while the reading pane
-    has focus, without interfering with any other widget's key handling
-    (the chapter list, the plain-text editor, etc).
-    """
 
     page_key_pressed = Signal(str)  # "prev" | "next" | "first" | "last"
 
@@ -2074,12 +1898,6 @@ class ChaptersTab(QWidget):
         layout.addWidget(splitter)
 
     def _build_read_view(self) -> None:
-        """
-        Builds the book-style reading pane: chapter nav header, a single
-        paper-like page with paginated text, and a page nav footer. This
-        never touches chapter.content — it only ever displays a
-        pagination of whatever text is already loaded.
-        """
         self.read_view = _ReadPane()
         self.read_view.page_key_pressed.connect(self._on_page_key)
         read_layout = QVBoxLayout(self.read_view)
@@ -2208,12 +2026,7 @@ class ChaptersTab(QWidget):
         return card_w, card_h
 
     def _refresh_read_view(self, preserve_fraction: bool = False) -> None:
-        """
-        Recomputes the current chapter's pagination for the pane's current
-        size and re-renders the page. Called on chapter switch, mode
-        switch, after a save, and (debounced) on resize. Never modifies
-        chapter.content — it only re-derives the on-screen pages from it.
-        """
+
         if not self._current_chapter:
             self._pages = []
             self._current_page_index = 0
@@ -2233,22 +2046,9 @@ class ChaptersTab(QWidget):
             100,
         )
         self.page_text_edit.setFixedSize(content_w, content_h)
-
-        # Measure against the actual text viewport, not the theoretical
-        # card geometry, for BOTH dimensions. Qt can shave a few pixels
-        # off of a naive "card size minus padding" calculation for either
-        # axis — not just height — even with scrollbars hidden and no
-        # frame, so pagination has to read the real viewport rect (after
-        # the fixed-size resize above has already taken effect) to stay
-        # in exact agreement with what will actually be rendered.
         viewport_size = self.page_text_edit.viewport().size()
         measured_w = max(viewport_size.width(), 100)
         measured_h = max(viewport_size.height(), 100)
-
-        # Fonts sized in device pixels (setPixelSize, not setPointSize) so
-        # this measuring pass matches the QTextEdit's `font-size: Npx`
-        # stylesheet exactly — otherwise the pagination under- or
-        # over-estimates how much text actually fits per page.
         body_font = _serif_font_px(self.BODY_FONT_PX)
         title_font = _serif_font_px(self.TITLE_FONT_PX, bold=True)
         paragraphs = _split_chapter_paragraphs(self._current_chapter.content)
@@ -2292,7 +2092,6 @@ class ChaptersTab(QWidget):
             self._set_current_page(index)
 
     def _animate_page_change(self, new_index: int) -> None:
-        """Quick, elegant fade transition between pages — no 3D flip."""
         effect = self._page_opacity_effect
         if self._page_anim is not None:
             self._page_anim.stop()
@@ -2800,17 +2599,7 @@ class MemoryTab(QWidget):
 
 
 class AuthorProfilePanel(QWidget):
-    """
-    Permanent tab for editing the AuthorIntent and WritingStyle that live in
-    the project. Changes are saved immediately when the user clicks Save.
 
-    This is the persistent counterpart to the wizard fields in
-    GenerateOutlineDialog: the wizard pre-fills from here and writes back
-    here on accept. The author can also edit the profile directly at any
-    time without going through Generate Outline.
-
-    Labels and combo options are shown in the configured response language.
-    """
 
     profile_changed = Signal()
 
@@ -3024,13 +2813,7 @@ class AuthorProfilePanel(QWidget):
     # ── Load from another project ───────────────────────────────────────
 
     def _on_load_from_other_project(self) -> None:
-        """
-        Copy Creative Intent + Writing Style from another project into
-        this form, so the user doesn't have to retype a profile they've
-        already written once. This only fills the fields shown on
-        screen — nothing is written to disk until the user clicks
-        "Save Profile", so they get a chance to review first.
-        """
+
         if not self._project:
             return
         lang = self._lang
@@ -3107,10 +2890,6 @@ class AuthorProfilePanel(QWidget):
 
 
 class StoryPanel(QWidget):
-    """
-    Main story panel containing all story-related tabs.
-    Emits task_requested(task, extra_input) for the chat panel to execute.
-    """
 
     task_requested = Signal(TaskType, str)
     project_changed = Signal()
@@ -3182,7 +2961,7 @@ class StoryPanel(QWidget):
         self.search_tab.load(project)
 
     def refresh_after_task(self, project: Project) -> None:
-        """Called after an AI task finishes to refresh content."""
+
         self._project = project
         self.synopsis_tab.load(project)
         self.outline_tab.load(project)
@@ -3195,7 +2974,7 @@ class StoryPanel(QWidget):
         self.search_tab.load(project)
 
     def set_busy(self, busy: bool, project_name: str = "") -> None:
-        """Disable/enable all AI-trigger buttons across every story sub-tab."""
+
         self.synopsis_tab.set_busy(busy, project_name)
         self.outline_tab.set_busy(busy, project_name)
         self.world_tab.set_busy(busy, project_name)
@@ -3227,5 +3006,5 @@ class StoryPanel(QWidget):
             self._save_project()
 
     def _on_profile_updated(self) -> None:
-        """AuthorIntent/WritingStyle changed — persist immediately."""
+
         self._save_project()

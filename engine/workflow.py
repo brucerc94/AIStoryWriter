@@ -1,12 +1,3 @@
-"""
-Story Workflow Engine.
-
-Orchestrates the full novel-writing pipeline:
-  Synopsis → Outline → Review → Chapters → Review → Memory → repeat
-
-All heavy work runs in a background QThread so the UI stays responsive.
-"""
-
 from __future__ import annotations
 
 import json
@@ -45,13 +36,6 @@ from engine.character_dedup import find_existing_character, merge_nonempty_field
 
 
 logger = logging.getLogger("workflow")
-
-# Marker prefixes for structured requests piggybacked onto `extra_input`.
-# Only the matching _run_* handler inspects each marker.
-
-# ── Markdown section utilities ──
-# Text-processing helpers for merging world facts into the World & Setting
-# document by section heading. No SEARCH/REPLACE logic.
 
 import re as _re
 
@@ -279,8 +263,7 @@ WRITE_CHAPTER_TARGET_MARKER = "__AI_STORY_WRITER_WRITE_CHAPTER_TARGET__"
 
 
 class _StepTimer:
-    """
-Context manager that logs elapsed time for a labeled block."""
+
     def __init__(self, label: str):
         self.label = label
         self._start = 0.0
@@ -315,7 +298,7 @@ DEFAULT_WORLD_SECTIONS = ["Geography", "Kingdoms", "Factions", "Magic", "History
 
 
 class WorkflowWorker(QObject):
-    """Runs inside a QThread. Emits signals back to the UI."""
+
 
     token_received = Signal(str)          # streaming token
     step_started = Signal(str)            # step description
@@ -361,8 +344,7 @@ class WorkflowWorker(QObject):
         return bool(self._approval_result)
 
     def _log_prompt_if_enabled(self, label: str, messages: list[dict]) -> None:
-        """
-Log the full prompt when the "Show full prompt in log" setting is enabled; no-op otherwise."""
+
         if not (self.settings and getattr(self.settings, "log_full_prompts", False)):
             return
         parts = [f"[prompt:{label}]"]
@@ -430,15 +412,15 @@ Log the full prompt when the "Show full prompt in log" setting is enabled; no-op
             return False
 
     def _task_temperature(self, task: TaskType) -> float:
-        """Per-task temperature, set from the Models tab next to that task's model."""
+
         return self.project.task_temperatures.get(task)
 
     def _task_top_p(self, task: TaskType) -> float:
-        """Per-task Top P, set from the Models tab next to that task's model."""
+
         return self.project.task_temperatures.get_top_p(task)
 
     def _task_top_k(self, task: TaskType) -> int:
-        """Per-task Top K, set from the Models tab next to that task's model."""
+
         return self.project.task_temperatures.get_top_k(task)
 
     def _model_context_limit(self) -> int:
@@ -642,8 +624,7 @@ Log the full prompt when the "Show full prompt in log" setting is enabled; no-op
         return result
 
     def _content_max_tokens(self) -> int:
-        """
-Max tokens per generation pass for outline and chapter tasks. Falls back to 4000."""
+
         if self.settings is not None:
             value = getattr(self.settings, "content_max_tokens", 4000)
             if isinstance(value, int) and value > 0:
@@ -669,9 +650,7 @@ Max tokens per generation pass for outline and chapter tasks. Falls back to 4000
         return False
 
     def _extract_and_merge_characters(self, source_text: str) -> None:
-        """
-Extract named characters from generated text and add new ones to project.characters.
-        Emits step_started to keep the status bar active; adds no chat bubble."""
+
         if not source_text or not source_text.strip():
             return
         _t_start = time.monotonic()
@@ -746,9 +725,7 @@ Extract named characters from generated text and add new ones to project.charact
             logger.info(f"[timing] extract_and_merge_characters (total): {time.monotonic() - _t_start:.2f}s")
 
     def _merge_extracted_characters(self, raw_json: str) -> int:
-        """
-Merge model-extracted character candidates into project.characters.
-        Uses character_dedup to avoid duplicates; matched candidates enrich existing records."""
+
         text = raw_json.strip()
         # Strip markdown code fences some models add around JSON.
         if text.startswith("```"):
@@ -813,10 +790,7 @@ Merge model-extracted character candidates into project.characters.
         return added
 
     def _update_world_incremental(self, source_text: str, source_type: str = "chapter") -> None:
-        """
-Extract stable world facts from generated text and merge them into World & Setting.
-        Do NOT call on synopsis text (synopsis is plot summary, not worldbuilding).
-        New facts are returned as Markdown bullets and merged structurally — no SEARCH/REPLACE."""
+
         if not source_text or not source_text.strip():
             return
         _t_start = time.monotonic()
@@ -894,9 +868,7 @@ Extract stable world facts from generated text and merge them into World & Setti
         user_content: str,
         max_tokens: int = 500,
     ) -> str:
-        """
-Minimal-context inference: sends only the caller-built system/user pair,
-        without Synopsis, Outline, Characters, Memory, or chat history."""
+
         if self._cancelled:
             logger.info(f"[{task.value}] lean inference cancelled before start.")
             return ""
@@ -989,9 +961,7 @@ Minimal-context inference: sends only the caller-built system/user pair,
     # ──────────────────────────────────────────────
 
     def _detect_chapter_continuation_request(self, message: str) -> Optional[int]:
-        """
-Detect continuation requests ("continue chapter 3", "sigue escribiendo", etc.).
-        Returns the target chapter number, or None if not a continuation request."""
+
         if not self.project.chapters:
             return None
 
@@ -1096,8 +1066,7 @@ Detect continuation requests ("continue chapter 3", "sigue escribiendo", etc.).
             self.step_finished.emit("Chat", result)
 
     def _run_chat_with_chapter_attachment(self) -> None:
-        """
-Handle a chat message with a chapter attachment (CHAT_CHAPTER_ATTACHMENT_MARKER format)."""
+
         body = self.extra_input[len(CHAT_CHAPTER_ATTACHMENT_MARKER):].lstrip("\n")
         try:
             header, rest = body.split("===ATTACHMENT_CONTENT===\n", 1)
@@ -1128,7 +1097,7 @@ Handle a chat message with a chapter attachment (CHAT_CHAPTER_ATTACHMENT_MARKER 
         if not result:
             return
 
-        # Save only the short human-visible message, not the full inserted chapter text.
+  
         self.project.chat_messages.append(ChatMessage(
             role=MessageRole.USER,
             content=f"[Chapter {chapter_num} attached] {user_request.strip()}",
@@ -1154,9 +1123,7 @@ Handle a chat message with a chapter attachment (CHAT_CHAPTER_ATTACHMENT_MARKER 
             self.step_finished.emit("Synopsis", result)
 
     def _run_generate_outline(self) -> None:
-        """
-        Generate the full outline, continuing until the requested chapter count is reached.
-        Completion is checked deterministically: does "## Chapter N" exist in the text?"""
+
         self.step_started.emit("Generating outline...")
         if self.extra_input.startswith(OUTLINE_EXTEND_MARKER):
             self._run_extend_outline()
@@ -1164,7 +1131,7 @@ Handle a chat message with a chapter attachment (CHAT_CHAPTER_ATTACHMENT_MARKER 
         if self.extra_input.startswith(OUTLINE_SUGGESTION_MARKER):
             self._run_regenerate_outline_with_suggestion()
             return
-        # extra_input carries the chapter-count and optional author notes from the Generate dialog.
+
         base_prompt = (
             f"Generate a complete chapter-by-chapter outline for '{self.project.title}'.\n"
             "Use the structured format with Objective, Story Progression, and Continuity for each chapter."
@@ -1292,8 +1259,7 @@ Handle a chat message with a chapter attachment (CHAT_CHAPTER_ATTACHMENT_MARKER 
                 prompts._cache[_outline_template_key] = _original_cached
 
     def _run_regenerate_outline_with_suggestion(self) -> None:
-        """
-Apply one targeted suggestion to the existing outline without full regeneration."""
+
         suggestion = self.extra_input.split(OUTLINE_SUGGESTION_MARKER, 1)[1].strip()
         if not suggestion:
             self.error_occurred.emit("No outline suggestion was provided.")
@@ -1340,9 +1306,7 @@ Apply one targeted suggestion to the existing outline without full regeneration.
     # ------------------------------------------------------------------
 
     def _parse_extend_plan(self, plan_text: str, next_chapter: int, requested_count: int) -> list[str]:
-        """
-Parse planning output ("Chapter N → description" lines) into a list of descriptions.
-        Returns an empty list if parsing fails or count doesn't match."""
+
         descriptions: list[str] = []
         seen_chapters: set[int] = set()
         for line in plan_text.splitlines():
@@ -1389,10 +1353,7 @@ Parse planning output ("Chapter N → description" lines) into a list of descrip
         return existing_part or accumulated_part or "(none — this is the first chapter)"
 
     def _run_extend_outline(self) -> None:
-        """
-Two-phase Extend Outline: Phase 1 plans chapter distribution, Phase 2 generates each
-        chapter independently via lean inference. project.outline is only updated after all
-        chapters pass validation."""
+
         payload = self.extra_input.split(OUTLINE_EXTEND_MARKER, 1)[1].strip("\n")
         # Format: "<count>\n<request>" — count is a hard constraint, validated here.
         count_line, _, rest = payload.partition("\n")
@@ -1714,9 +1675,7 @@ Two-phase Extend Outline: Phase 1 plans chapter distribution, Phase 2 generates 
 
     @staticmethod
     def _drop_incomplete_trailing_chapter(text: str) -> str:
-        """
-Drop the last "## Chapter N" block if it appears truncated (missing "Continuity:" or
-        ending without terminal punctuation). Earlier blocks are always complete by construction."""
+
         if not text.strip():
             return text
         matches = list(re.finditer(r"(?m)^\s*##\s*Chapter\s+\d+\b.*$", text))
@@ -1736,10 +1695,7 @@ Drop the last "## Chapter N" block if it appears truncated (missing "Continuity:
 
     @staticmethod
     def _extract_new_outline_chapters(generated: str, highest_already: int) -> str:
-        """
-Strip any chapters <= highest_already from a continuation response.
-        Returns the text starting from the first genuinely new chapter heading,
-        or "" if no new chapters were found."""
+
         if not generated.strip():
             return ""
         lines = generated.split("\n")
@@ -1759,11 +1715,7 @@ Strip any chapters <= highest_already from a continuation response.
         return "\n".join(new_lines).strip()
 
     def _build_outline_continuation_prompt(self, outline_so_far: str, requested_n: Optional[int]) -> str:
-        """
-Build the continuation prompt for generate-outline passes 2+.
-        Embeds the full accumulated outline in the user message so the model
-        doesn't restart from Chapter 1 (the system prompt omits project.outline
-        for GENERATE_OUTLINE to avoid contaminating fresh generations)."""
+
         numbers = self._chapter_numbers_in_text(outline_so_far)
         highest_so_far = max(numbers) if numbers else 0
         next_num = highest_so_far + 1
@@ -1820,8 +1772,7 @@ Build the continuation prompt for generate-outline passes 2+.
             self.step_finished.emit("World & Setting", result)
 
     def _extract_chapter_outline_section(self, chapter_number: int) -> str:
-        """
-Return this chapter's outline entry ("## Chapter N: Title" block), or "" if not found."""
+
         outline = self.project.outline
         if not outline:
             return ""
@@ -1844,8 +1795,8 @@ Return this chapter's outline entry ("## Chapter N: Title" block), or "" if not 
 
     @staticmethod
     def _strip_preamble_before_heading(text: str) -> str:
-        """
-Discard any model preamble before the first "## Chapter N" heading."""
+
+
         if not text:
             return text
         match = re.search(r"(?m)^\s*##\s*Chapter\s+\d+\b", text, re.IGNORECASE)
@@ -1855,10 +1806,7 @@ Discard any model preamble before the first "## Chapter N" heading."""
 
     @staticmethod
     def _normalize_chapter_headings(text: str) -> str:
-        """
-Normalise any near-miss chapter heading style into the canonical "## Chapter N: Title" form.
-        Extend Outline one-shot calls often drift to bare/bold/wrongly-leveled headings;
-        this fixes them before validation runs rather than rejecting correct content."""
+
         if not text:
             return text
 
@@ -1879,9 +1827,7 @@ Normalise any near-miss chapter heading style into the canonical "## Chapter N: 
         return heading_re.sub(_canonicalize, text)
 
     def _tail_outline_chapters(self, outline_text: str, keep_last_n: int) -> str:
-        """
-Return the last keep_last_n chapter entries from outline_text.
-        Keeps Extend Outline passes from re-sending the full existing outline on each iteration."""
+
         if keep_last_n <= 0 or not outline_text:
             return outline_text
         numbers = self._chapter_numbers_in_text(outline_text)
@@ -1897,8 +1843,7 @@ Return the last keep_last_n chapter entries from outline_text.
 
     @staticmethod
     def _chapter_numbers_in_text(text: str) -> list[int]:
-        """
-Return sorted chapter numbers from "## Chapter N" headings in text."""
+
         numbers = set()
         for match in re.finditer(r"^\s*##\s*Chapter\s+(\d+)\b", text or "", re.IGNORECASE | re.MULTILINE):
             try:
@@ -1908,8 +1853,7 @@ Return sorted chapter numbers from "## Chapter N" headings in text."""
         return sorted(numbers)
 
     def _outline_chapter_title(self, chapter_number: int) -> str:
-        """
-Return the chapter title from its "## Chapter N: Title" heading, or "" if not found."""
+
         section = self._extract_chapter_outline_section(chapter_number)
         if not section:
             return ""
@@ -1930,8 +1874,7 @@ Return the chapter title from its "## Chapter N: Title" heading, or "" if not fo
         return chapter_number in set(self._outline_chapter_numbers())
 
     def _next_chapter_number(self) -> int:
-        """
-Return the next chapter number to write, based on the highest chapter number saved."""
+
         highest_existing = max((c.number for c in self.project.chapters), default=0)
         return max(self.project.current_chapter, highest_existing) + 1
 
@@ -1940,8 +1883,7 @@ Return the next chapter number to write, based on the highest chapter number sav
         storage.save_project(self.project)
 
     def _clear_chat_messages_for_continuation(self) -> None:
-        """
-Clear transient chat history between continuation passes."""
+
         if self.project.chat_messages:
             self.project.chat_messages = []
             storage.save_project(self.project)
@@ -1979,13 +1921,10 @@ Clear transient chat history between continuation passes."""
         checklist: str = "",
         missing: "list[str] | None" = None,
     ) -> str:
-        # Use a longer tail so the model has more overlap context and is
-        # less likely to invent a scene-break or repeat a sentence already
-        # written just before the cut-off point.
+
         tail = chapter_text[-2000:].strip()
 
-        # List already-completed chapters so the model cannot confuse which
-        # chapter is currently in progress or restart from Chapter 1.
+
         completed = sorted(c.number for c in self.project.chapters if c.number != chapter_num and c.content)
         if completed:
             completed_note = (
@@ -2016,16 +1955,7 @@ Clear transient chat history between continuation passes."""
         )
 
     def _parse_completion_evaluation(self, text: str) -> dict:
-        """
-        Robust true/false parser. Accepts any response that unambiguously
-        contains 'true' or 'false' — handles trailing punctuation, leading
-        spaces, markdown backticks, and sentence-cased output that some models
-        emit despite the prompt instructions.
 
-        Returns {"valid": True/False, "completed": True/False, "raw": text}.
-        "valid" is True whenever the response is unambiguous. It is False only
-        when the response contains neither keyword or contains both (contradictory).
-        """
         raw = text.strip()
         normalized = raw.lower()
         # Strip common noise characters the model may wrap the token in
@@ -2046,8 +1976,7 @@ Clear transient chat history between continuation passes."""
         chapter_goal: str,
         generation_pass: int = 0,
     ) -> dict:
-        """
-Ask the model whether the chapter draft is complete. Logs each attempt."""
+
         word_count = len(chapter_text.split())
         logger.info(
             "[eval] ── Chapter %d completion check (after pass %d) ──  "
@@ -2098,8 +2027,7 @@ Ask the model whether the chapter draft is complete. Logs each attempt."""
         return final
 
     def _build_chapter_generation_prompt(self, chapter_num: int, outline_entry: str, checklist: str) -> str:
-        """
-Build the WRITE_CHAPTER first-draft user prompt by assembling applicable context sections."""
+
         sections = []
 
         if outline_entry:
@@ -2412,8 +2340,7 @@ Build the WRITE_CHAPTER first-draft user prompt by assembling applicable context
             self.step_finished.emit(f"Review of Chapter {chapter_num}", result)
 
     def _run_rewrite_chapter(self) -> None:
-        """
-Rewrite the current chapter based on review feedback via full regeneration."""
+
         chapter_num = self.project.current_chapter
         if chapter_num == 0:
             chapter_num = len(self.project.chapters)
@@ -2484,20 +2411,14 @@ Rewrite the current chapter based on review feedback via full regeneration."""
         self.step_finished.emit(f"Rewrote Chapter {chapter_num}", chapter.content)
 
     def _finalize_changed_chapter(self, chapter_num: int, chapter: Chapter) -> None:
-        """Refresh continuity data after a Change Chapter edit."""
+
         self._extract_and_merge_characters(chapter.content)
         self._update_world_incremental(chapter.content, source_type="chapter")
         self.project.current_chapter = chapter_num
         self._run_update_memory()
 
     def _run_change_chapter(self) -> None:
-        """
-        CHANGE_CHAPTER orchestration lives in engine.change_chapter — see
-        that module for the full flow (continuity summary -> checklist plan
-        -> full rewrite with clean context -> checklist verification ->
-        continuation). This stays a thin delegator so _dispatch's mapping
-        of TaskType -> handler is uniform across every workflow.
-        """
+
         change_chapter.run(self)
 
     def _run_update_memory(self) -> None:
@@ -2521,9 +2442,7 @@ Rewrite the current chapter based on review feedback via full regeneration."""
         characters = format_characters_block(self.project.characters) or "(none)"
         chapter_content = chapter.content
 
-        # Use _run_lean_inference to avoid injecting World/Characters/Memory twice
-        # (they are already embedded manually below). Cap each section keeping the end,
-        # since Memory cares about the chapter's conclusion more than its opening.
+
         WORLD_CAP, CHAR_CAP, MEMORY_CAP, CHAPTER_CAP = 2000, 1500, 2500, 14000
         if len(world) > WORLD_CAP:
             world = "[...]\n" + world[-WORLD_CAP:]
@@ -2738,7 +2657,7 @@ def _test_phase2_makes_separate_inferences() -> None:
 
 
 def _test_each_inference_receives_only_its_chapter_plan() -> None:
-    """Each chapter prompt must contain its own plan line."""
+
     import unittest
     from unittest.mock import patch
 
@@ -2771,7 +2690,7 @@ def _test_each_inference_receives_only_its_chapter_plan() -> None:
 
 
 def _test_temporary_history_cleared_between_chapters() -> None:
-    """Each chapter must be an independent lean inference; verify no accumulated chat is forwarded."""
+
     import unittest
     from unittest.mock import patch
 
@@ -2781,7 +2700,7 @@ def _test_temporary_history_cleared_between_chapters() -> None:
     all_responses = [_tb_make_plan(9, 4)] + [_tb_chapter_block(n) for n in range(9, 13)]
     call_args_list: list[tuple] = []
 
-    # Patch _run_lean_inference at engine.workflow level to capture args
+
     original = WorkflowWorker._run_lean_inference
 
     def _capture(self_inner, task, system, user, max_tokens=500):
@@ -2798,28 +2717,19 @@ def _test_temporary_history_cleared_between_chapters() -> None:
         worker._run_extend_outline()
 
     case.assertEqual(errors, [], f"unexpected error: {errors}")
-    # 5 total calls: 1 plan + 4 chapters
+
     case.assertEqual(len(call_args_list), 5)
-    # Each chapter call (indices 1-4) must generate exactly ONE chapter number
+
     for i, n in enumerate(range(9, 13)):
         _, _, user_prompt = call_args_list[i + 1]
         # Prompt must target this chapter
         case.assertIn(f"Chapter {n}", user_prompt)
-        # Prompt must NOT contain generation markers from other chapters
-        # (i.e., it must not include the model's generated chapter blocks from
-        # other chapters as a multi-turn assistant message — only the outline
-        # tail reference context is allowed)
+
         for other_n in range(9, 13):
             if other_n != n and other_n < n:
-                # Generated chapter text sent as assistant role would look like
-                # two consecutive chapter entries in the user prompt without a
-                # clear "EXISTING OUTLINE" label; verify the prompt doesn't
-                # contain chapter content generated in this session as if it
-                # were a prior assistant turn
+
                 marker = f"Objective for chapter {other_n}."
-                # This text may appear in the outline REFERENCE section (tail),
-                # but NOT as the primary chapter being generated, i.e. the
-                # "=== THIS CHAPTER ===" block must name chapter n, not other_n
+
                 this_chapter_section = user_prompt.split("=== THIS CHAPTER ===")[1].split("===")[0]
                 case.assertNotIn(
                     f"Chapter {other_n}",
@@ -2830,7 +2740,7 @@ def _test_temporary_history_cleared_between_chapters() -> None:
 
 
 def _test_saves_exactly_n_new_entries() -> None:
-    """project.outline must contain exactly the original 8 + 4 new chapters."""
+
     import unittest
     from unittest.mock import patch
 
@@ -2867,7 +2777,7 @@ def _test_saves_exactly_n_new_entries() -> None:
 
 
 def _test_existing_chapters_not_modified() -> None:
-    """The original outline text must be preserved byte-for-byte."""
+
     import unittest
     from unittest.mock import patch
 
@@ -2894,7 +2804,7 @@ def _test_existing_chapters_not_modified() -> None:
 
 
 def _test_fifth_chapter_never_generated() -> None:
-    """When user requests 4, the model must never be called for a 5th chapter."""
+
     import unittest
     from unittest.mock import patch
 
