@@ -155,9 +155,9 @@ You do not have to fill every field manually before generating content. The appl
 
 Open **Story → Synopsis**.
 
-You can type the synopsis yourself or click **Generate Synopsis**. A synopsis should establish the premise, main characters, central conflict, and stakes.
+You can write a synopsis manually. **If you already have a draft synopsis, write or paste it into the editor and click `Save` first. You can then use `Generate Synopsis` to have the AI work from the synopsis already stored in the project instead of starting with an empty synopsis.**
 
-After generation, read through it and edit anything you want before continuing.
+You can also click **Generate Synopsis** directly when you want the AI to draft one for you. After generation, read through the result and edit or refine it as needed. Whenever you manually change the synopsis, click **Save** so the project keeps those changes before moving to the next step.
 
 ### 5. Build the Outline
 
@@ -165,7 +165,7 @@ Open **Story → Outline**.
 
 Click **Generate Outline** to open the outline setup dialog. There you can choose the number of chapters and optionally define the author's creative intent and writing-style preferences used for the generation.
 
-The outline is then shown in the editor and can still be edited manually.
+The outline is then shown in the editor and can still be edited manually. When you manually edit the outline, click **Save** to store the changes before using another workflow action that depends on the updated outline.
 
 You can also use **Extend Outline** when you want to append additional chapters to an existing outline.
 
@@ -181,7 +181,7 @@ The outline uses chapter headings such as:
 
 Open **Story → Characters**.
 
-Click **+ Add Character** to create a character. You can provide:
+You can add characters manually with **+ Add Character**, providing:
 
 - Name
 - Role
@@ -190,7 +190,9 @@ Click **+ Add Character** to create a character. You can provide:
 - Traits
 - Relationships with other characters
 
-Characters can later be edited or deleted. A character can also have an AI-generated portrait.
+When you generate an outline, the application also extracts and adds characters found in the generated outline automatically. You can then open **Characters** to review, edit, or delete those characters, and you can always add new characters manually.
+
+Characters can also have AI-generated portraits. Existing character data is kept when you edit a character unless you explicitly change it.
 
 ### 7. Add World & Setting information
 
@@ -198,7 +200,7 @@ Open **Story → World**.
 
 Use this space for the information the story needs to remain consistent: locations, rules, history, politics, culture, technology, magic systems, or other setting details.
 
-This section is intentionally manual in the current UI.
+This section is intentionally manual in the current UI. **After writing or changing the world information, click `Save` at the bottom of the editor.** The changes are not persisted until you save them.
 
 ### 8. Define the Author profile
 
@@ -212,27 +214,36 @@ These settings are stored in the project and can also be used by the outline-gen
 
 Open **Story → Chapters**.
 
-After an outline exists, select a chapter from the chapter list.
+After an outline exists, select a chapter from the list on the left. The chapter's state determines which view you see:
 
-There are three different generation actions:
+- An **empty chapter** opens in **Edit** mode so you can write it or generate it.
+- A chapter that already has content opens in **Read** mode.
+
+The chapter workspace provides these main actions:
 
 | Action | What it does |
 |---|---|
-| **Generate Chapter** | Generates the **currently selected chapter**. |
-| **Generate Next Chapter** | Finds the first chapter in the outline that still has no content and generates it. |
-| **Generate Full Book** | Generates all remaining chapters from the outline in order. |
+| **Generate Chapter** | Generates the **currently selected chapter**. It does not create the next numbered chapter. |
+| **Generate Next Chapter** | Finds the first chapter in the outline that still has no content and generates that chapter. |
+| **Generate Full Book** | Generates all remaining chapters from the outline in order, one after another. |
+| **Change Chapter** | Opens a dialog where you describe a targeted change for the current chapter; it requires existing chapter content. |
+| **Mark as Ready** | Marks the current chapter as reviewed/ready. This does not call the AI. |
+| **Save** | Saves manual edits to the chapter content. |
+| **Delete** | Deletes the current chapter from the project. |
 
-This distinction is important. **Generate Chapter** works on the chapter you selected; it does not mean “create the next chapter.”
+For example, if your outline has Chapters 1–5 but Chapter 3 is still empty, **Generate Next Chapter** targets Chapter 3. If Chapter 4 is selected and you press **Generate Chapter**, it generates Chapter 4 regardless of which other chapters are empty.
 
-Once a chapter has content, you can switch between **Read** and **Edit** mode, save changes, use **Change Chapter**, mark it ready, or delete it.
+Use **Read** mode to review the chapter as a book page. You can move between chapters with **Previous Chapter / Next Chapter** and through pages with **Previous Page / Next Page**. Use **Edit** mode when you need to change the title or text manually.
 
-The book-style reader lets you move between chapters and pages without modifying the stored chapter text.
+The editor also shows a live word count, character count, and estimated reading time. After an AI generation finishes, the generated chapter is opened in the book reader automatically.
+
+**Generate Full Book** is useful when you want the application to work through the remaining outline automatically. It confirms how many chapters remain before starting and updates story memory between generated chapters.
 
 ### 10. Use Story Memory
 
 Open **Story → Memory** to inspect the story memory maintained by the application.
 
-During chapter generation, the application can update memory automatically. The memory page also allows manual editing when needed.
+During chapter generation, the application can update memory automatically. You can also edit the memory manually when needed. **After making manual changes, click `Save` at the bottom of the Memory editor to persist them.**
 
 ### 11. Use Chat when you want assistance
 
@@ -452,14 +463,15 @@ On Windows, `run.bat` is also available as a convenience launcher.
 ### First setup in the app
 
 1. Open **Settings** and choose the **Models Directory**.
-2. Open **Models** and assign a GGUF model to the tasks you plan to use.
-3. Create a project from **Projects → + New**.
-4. Open **Story → Synopsis** and write or generate the synopsis.
-5. Open **Story → Outline** and generate or write the outline.
-6. Add **Characters**, **World**, and an **Author Profile** as needed.
-7. Open **Story → Chapters** and generate chapters from the outline.
-8. Use **Chat**, **Images**, **Stats**, **Search**, and **Console** as needed.
-9. Export the finished manuscript with **Export Book**.
+2. After changing the Models Directory, scroll to the bottom of **Settings** and click **Save App Settings**. This is required to persist the directory and other application-level settings.
+3. Open **Models** and assign a GGUF model to the tasks you plan to use. Per-task model assignments are saved to the current project automatically.
+4. Create a project from **Projects → + New**.
+5. Open **Story → Synopsis** and write or generate the synopsis. Click **Save** after manual edits.
+6. Open **Story → Outline** and generate or write the outline. Click **Save** after manual edits.
+7. Add **Characters**, **World**, and an **Author Profile** as needed. Click **Save** after manual World or Memory edits.
+8. Open **Story → Chapters** and generate chapters from the outline.
+9. Use **Chat**, **Images**, **Stats**, **Search**, and **Console** as needed.
+10. Export the finished manuscript with **Export Book**.
 
 ---
 
