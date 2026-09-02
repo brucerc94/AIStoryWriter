@@ -1155,7 +1155,7 @@ Handle a chat message with a chapter attachment (CHAT_CHAPTER_ATTACHMENT_MARKER 
 
     def _run_generate_outline(self) -> None:
         """
-Generate the full outline, continuing until the requested chapter count is reached.
+        Generate the full outline, continuing until the requested chapter count is reached.
         Completion is checked deterministically: does "## Chapter N" exist in the text?"""
         self.step_started.emit("Generating outline...")
         if self.extra_input.startswith(OUTLINE_EXTEND_MARKER):
@@ -1227,6 +1227,14 @@ Generate the full outline, continuing until the requested chapter count is reach
                 outline_text = (
                     (outline_text.rstrip() + "\n\n" + generated.strip()).strip()
                     if outline_text else generated.strip()
+                )
+    
+                # Normalize chapter headings.
+                outline_text = re.sub(
+                    r"^\s*#{3,}\s*(Chapter\s+\d+\b.*)$",
+                    r"## \1",
+                    outline_text,
+                    flags=re.IGNORECASE | re.MULTILINE,
                 )
 
                 # Keep project.outline in sync so the next pass sees what's already written.
