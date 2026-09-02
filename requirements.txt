@@ -1,18 +1,14 @@
-# Required at application startup
+# Required
 PySide6>=6.5.0
 cryptography>=41.0.0
+sympy>=1.14.0
 
-# Optional — required for local language-model inference
-# Install a build appropriate for your platform and GPU setup.
-# llama-cpp-python
+# Local LLM inference
+llama-cpp-python>=0.3.33,<0.4
 
-# Optional — required for DOCX export
-# python-docx>=1.1.0
+# Local image generation
+stable-diffusion-cpp-python>=0.4.7,<0.5
 
-# Optional — required for PDF export
-# reportlab>=4.0.0
-
-# Optional — required for local image generation
-# The package provides the `stable_diffusion_cpp` Python binding.
-# Install a build appropriate for your platform.
-# stable-diffusion-cpp-python
+# Export
+python-docx>=1.1.0
+reportlab>=4.0.0
