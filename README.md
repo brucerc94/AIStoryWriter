@@ -12,7 +12,7 @@
     <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+" />
     <img src="https://img.shields.io/badge/UI-PySide6-41CD52?style=flat-square&logo=qt&logoColor=white" alt="PySide6" />
     <img src="https://img.shields.io/badge/LLM-GGUF-111827?style=flat-square" alt="GGUF" />
-    <img src="https://img.shields.io/badge/License-MIT-0F766E?style=flat-square" alt="MIT License" />
+    <img src="https://img.shields.io/badge/License-MIT-0F7660" alt="MIT License" />
   </p>
 
   <p>
@@ -65,33 +65,35 @@ The application handles the underlying AI context and generation process for you
 
 ---
 
-## Screenshots
-
-Add screenshots to `docs/screenshots/` using the names below. The README is already laid out as a product showcase.
+## Demo
 
 <div align="center">
-  <img src="docs/screenshots/story.png" alt="AI Story Studio — Story workspace" width="900" />
+  <img src="docs/screenshots/Animation.gif" alt="AI Story Studio demo" width="900" />
+</div>
+
+<p align="center"><sub>A quick look at the writing workflow inside AI Story Studio.</sub></p>
+
+---
+
+## Screenshots
+
+<div align="center">
+  <img src="docs/screenshots/story.jpg" alt="AI Story Studio — Story workspace" width="900" />
 </div>
 
 <p align="center"><sub>Story workspace — build the story from synopsis and outline through chapters.</sub></p>
 
 <div align="center">
-  <img src="docs/screenshots/chat.png" alt="AI Story Studio — Chat" width="900" />
+  <img src="docs/screenshots/chat.jpg" alt="AI Story Studio — Chat" width="900" />
 </div>
 
-<p align="center"><sub>Chat with optional project context and chapter attachment.</sub></p>
+<p align="center"><sub>Chat with project context and chapter-aware assistance.</sub></p>
 
 <div align="center">
-  <img src="docs/screenshots/images.png" alt="AI Story Studio — Image generation" width="900" />
+  <img src="docs/screenshots/book.jpg" alt="AI Story Studio — Book reader" width="900" />
 </div>
 
-<p align="center"><sub>Local image generation for covers, scenes, locations, objects and character portraits.</sub></p>
-
-<div align="center">
-  <img src="docs/screenshots/settings.png" alt="AI Story Studio — Settings" width="900" />
-</div>
-
-<p align="center"><sub>Model, generation, hardware and image-generation configuration.</sub></p>
+<p align="center"><sub>Book-style reader for reviewing generated chapters as a finished manuscript.</sub></p>
 
 ---
 
@@ -334,10 +336,10 @@ For the final product page, keep screenshots organized here:
 ```text
 docs/
 └── screenshots/
-    ├── story.png
-    ├── chat.png
-    ├── images.png
-    └── settings.png
+    ├── Animation.gif
+    ├── story.jpg
+    ├── chat.jpg
+    └── book.jpg
 ```
 
 Use consistent crops and dimensions so the README looks like a product page instead of a debug gallery.
