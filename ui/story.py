@@ -57,7 +57,7 @@ from PySide6.QtWidgets import (
 from engine import storage
 from engine.image_workflow import generate_character_image
 from engine.models import AuthorIntent, Chapter, Character, CharacterRelationship, Project, TaskType, WritingStyle
-from engine.workflow import OUTLINE_EXTEND_MARKER, OUTLINE_SUGGESTION_MARKER
+from engine.workflow import OUTLINE_EXTEND_MARKER, OUTLINE_SUGGESTION_MARKER, WRITE_CHAPTER_TARGET_MARKER
 from ui.styles import (
     COLOR_ACCENT,
     COLOR_ACCENT_DIM,
@@ -1892,6 +1892,10 @@ class ChaptersTab(QWidget):
         )
         add_ch_btn.clicked.connect(self._add_chapter)
         ch_header.addWidget(add_ch_btn)
+        self.write_next_btn = QPushButton("✨ Generate Next Chapter")
+        self.write_next_btn.setToolTip("Writes the first chapter in the outline that doesn't have content yet.")
+        self.write_next_btn.clicked.connect(self._write_next_chapter)
+        ch_header.addWidget(self.write_next_btn)
         left_layout.addLayout(ch_header)
 
         self.chapter_list = QListWidget()
@@ -2027,7 +2031,7 @@ class ChaptersTab(QWidget):
 
         self.write_btn = QPushButton("✍ Generate Chapter")
         self.write_btn.setObjectName("accent")
-        self.write_btn.setToolTip("Writes the next chapter in the story.")
+        self.write_btn.setToolTip("Writes the currently selected chapter.")
         self.write_btn.clicked.connect(self._write_chapter)
         action_row.addWidget(self.write_btn)
 
@@ -2494,14 +2498,17 @@ class ChaptersTab(QWidget):
 
     def set_busy(self, busy: bool, project_name: str = "") -> None:
         tip = f"Generating content for \"{project_name}\"…" if busy and project_name else ""
-        for btn in (self.write_btn, self.write_book_btn, self.change_btn):
+        for btn in (self.write_btn, self.write_book_btn, self.write_next_btn, self.change_btn):
             btn.setEnabled(not busy)
             if busy:
                 btn.setToolTip(tip)
         if not busy:
-            self.write_btn.setToolTip("Writes the next chapter in the story.")
+            self.write_btn.setToolTip("Writes the currently selected chapter.")
             self.write_book_btn.setToolTip(
                 "Writes every remaining chapter in the outline, one after another."
+            )
+            self.write_next_btn.setToolTip(
+                "Writes the first chapter in the outline that doesn't have content yet."
             )
             self.change_btn.setToolTip(
                 "Tell the AI what you want to change in this chapter and it will apply your instructions."
@@ -2533,20 +2540,37 @@ class ChaptersTab(QWidget):
         self._read_time_label.setText(rt)
 
     def _write_chapter(self) -> None:
-        """
-        Always writes the NEXT chapter in the story — regardless of which
-        chapter happens to be selected/open in the editor. Previously this
-        used the *selected* chapter's number when one was open, which meant
-        that after writing Chapter 1 (which then stayed selected), clicking
-        "Write Chapter" again silently regenerated Chapter 1 instead of
-        moving on to Chapter 2.
-        """
+        if not self._project or not self._current_chapter:
+            return
+        chapter_num = self._current_chapter.number
+        self._project.current_chapter = chapter_num
+        self.task_requested.emit(
+            TaskType.WRITE_CHAPTER, f"{WRITE_CHAPTER_TARGET_MARKER}{chapter_num}"
+        )
+
+    def _write_next_chapter(self) -> None:
         if not self._project:
             return
-        next_num = max((c.number for c in self._project.chapters), default=0) + 1
-
-        self._project.current_chapter = next_num - 1  # worker adds 1
-        self.task_requested.emit(TaskType.WRITE_CHAPTER, "")
+        outline_numbers = outline_chapter_numbers(self._project.outline)
+        if not outline_numbers:
+            QMessageBox.information(
+                self, "No Outline Yet",
+                "Generate an outline first (Outline tab) — \"Generate Next Chapter\" "
+                "needs one to know which chapter comes next.",
+            )
+            return
+        written_numbers = {c.number for c in self._project.chapters if c.content.strip()}
+        next_num = next((n for n in outline_numbers if n not in written_numbers), None)
+        if next_num is None:
+            QMessageBox.information(
+                self, "Book Complete",
+                f"All {len(outline_numbers)} chapter(s) in the outline already have content.",
+            )
+            return
+        self._project.current_chapter = next_num
+        self.task_requested.emit(
+            TaskType.WRITE_CHAPTER, f"{WRITE_CHAPTER_TARGET_MARKER}{next_num}"
+        )
 
     def _write_book(self) -> None:
         if not self._project:

@@ -275,6 +275,7 @@ def _wf_merge_markdown_document(existing: str, new_text: str, default_sections: 
 OUTLINE_SUGGESTION_MARKER = "__AI_STORY_WRITER_OUTLINE_SUGGESTION__"
 OUTLINE_EXTEND_MARKER = "__AI_STORY_WRITER_OUTLINE_EXTEND__"
 CHAT_CHAPTER_ATTACHMENT_MARKER = "__AI_STORY_WRITER_CHAT_CHAPTER_ATTACHMENT__"
+WRITE_CHAPTER_TARGET_MARKER = "__AI_STORY_WRITER_WRITE_CHAPTER_TARGET__"
 
 
 class _StepTimer:
@@ -2139,8 +2140,11 @@ Build the WRITE_CHAPTER first-draft user prompt by assembling applicable context
         )
 
     def _run_write_chapter(self) -> None:
-        # Derive chapter number from disk, not project.current_chapter (may be stale).
-        chapter_num = self._next_chapter_number()
+        if self.extra_input.startswith(WRITE_CHAPTER_TARGET_MARKER):
+            chapter_num = int(self.extra_input[len(WRITE_CHAPTER_TARGET_MARKER):].strip())
+        else:
+            # Derive chapter number from disk, not project.current_chapter (may be stale).
+            chapter_num = self._next_chapter_number()
         self.step_started.emit(f"Writing Chapter {chapter_num}...")
 
         outline_entry = self._extract_chapter_outline_section(chapter_num)
