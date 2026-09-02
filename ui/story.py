@@ -1220,19 +1220,18 @@ class CharactersTab(QWidget):
 
 class CharacterDialog(QDialog):
     # Predefined relationship types (label shown in the combo-box).
-    # The user can also type a custom value by selecting "otro".
+    # The user can also type a custom value by selecting "other".
     _RELATIONSHIP_TYPES = [
-        "padre de", "madre de", "hijo de", "hija de",
-        "hermano de", "hermana de",
-        "abuelo de", "abuela de", "nieto de", "nieta de",
-        "tío de", "tía de", "sobrino de", "sobrina de",
-        "primo de", "prima de",
-        "esposo de", "esposa de", "pareja de", "expareja de",
-        "amigo de", "amiga de",
-        "enemigo de", "enemiga de",
-        "rival de", "mentor de", "alumno de",
-        "jefe de", "subordinado de",
-        "otro",
+        "father of", "mother of", "son of", "daughter of",
+        "brother of", "sister of",
+        "grandfather of", "grandmother of", "grandson of", "granddaughter of",
+        "uncle of", "aunt of", "nephew of", "niece of",
+        "cousin of",
+        "husband of", "wife of", "partner of", "ex-partner of",
+        "friend of", "enemy of", "rival of",
+        "mentor of", "student of",
+        "boss of", "subordinate of",
+        "other",
     ]
 
     def __init__(
