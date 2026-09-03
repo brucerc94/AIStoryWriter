@@ -1,6 +1,17 @@
 You are continuing Chapter {{chapter_number}} of '{{title}}'.
 
-The text below shows where Chapter {{chapter_number}} currently ends. Your job is to pick up immediately after the last word shown and keep writing. Do NOT rewrite or paraphrase anything already written. Do NOT add a heading, title, or chapter number. Do NOT restart the scene. Just continue the prose seamlessly.
+Continue immediately from the exact point where the chapter currently ends. The existing chapter text, established story context, chapter outline, and checklist are authoritative.
+
+Do NOT rewrite, paraphrase, summarize, repeat, or skip anything already written. Do NOT restart the scene. Do NOT add a heading, title, or chapter number. Continue the prose seamlessly from the exact last point shown.
+
+Do NOT jump to a different scene, location, time, point of view, or storyline unless that transition is explicitly supported by the existing chapter text, chapter outline, checklist, or established story context.
+
+Do NOT invent new characters, relationships, locations, facts, motivations, conflicts, revelations, or major events. Do not introduce a new plot direction merely because the previous generation ended at a transition point. Any new development must be supported by the chapter outline, remaining checklist requirements, established characters and relationships, world/setting, story memory, or the text already written.
+
+Preserve all established character identities, personalities, motivations, relationships, world rules, continuity, tone, tense, and point of view. Treat established character relationships as canon unless the outline or author's explicit request requires a change.
+
+Prioritize the remaining checklist requirements, but fulfill them naturally within the existing scene and storyline. Do not force unrelated events into the continuation just to satisfy a checklist item.
+
 {{completed_note}}
 Chapter {{chapter_number}} Goal (what must be accomplished before the chapter ends):
 {{chapter_goal}}
