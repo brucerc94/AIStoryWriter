@@ -24,6 +24,7 @@ from engine.context import (
 from engine.models import (
     Chapter,
     Character,
+    CharacterRelationship,
     ChatMessage,
     MessageRole,
     Project,
@@ -724,6 +725,31 @@ class WorkflowWorker(QObject):
         finally:
             logger.info(f"[timing] extract_and_merge_characters (total): {time.monotonic() - _t_start:.2f}s")
 
+    _ALLOWED_RELATIONSHIP_TYPES = (
+        "father of", "mother of", "son of", "daughter of",
+        "brother of", "sister of", "grandfather of", "grandmother of",
+        "grandson of", "granddaughter of", "uncle of", "aunt of",
+        "nephew of", "niece of", "cousin of", "husband of", "wife of",
+        "partner of", "ex-partner of", "friend of", "enemy of",
+        "rival of", "mentor of", "student of", "boss of",
+        "subordinate of",
+    )
+
+    @staticmethod
+    def _wf_norm_char_name(name: str) -> str:
+        return re.sub(r"\s+", " ", (name or "").strip()).lower()
+
+    @classmethod
+    def _relationship_already_exists(cls, character: "Character", related_name: str, relationship: str) -> bool:
+        target_name = cls._wf_norm_char_name(related_name)
+        target_rel = re.sub(r"\s+", " ", (relationship or "").strip()).lower()
+        for rel in (getattr(character, "relationships", None) or []):
+            existing_name = cls._wf_norm_char_name(getattr(rel, "related_character", ""))
+            existing_rel = re.sub(r"\s+", " ", (getattr(rel, "relationship", "") or "").strip()).lower()
+            if existing_name == target_name and existing_rel == target_rel:
+                return True
+        return False
+
     def _merge_extracted_characters(self, raw_json: str) -> int:
 
         text = raw_json.strip()
@@ -747,6 +773,11 @@ class WorkflowWorker(QObject):
             return 0
 
         added = 0
+        name_index = {
+            self._wf_norm_char_name(c.name): c for c in self.project.characters
+        }
+        pending_relationships: list[tuple[str, dict]] = []
+
         for entry in data:
             if not isinstance(entry, dict):
                 continue
@@ -762,31 +793,80 @@ class WorkflowWorker(QObject):
                     "candidate %r (identity score=%.2f).",
                     existing.name, name, score,
                 )
-                continue
-
-            role = str(entry.get("role", "supporting")).strip().lower()
-            if role not in ("protagonist", "antagonist", "supporting", "minor"):
-                role = "supporting"
-            description = str(entry.get("description", "")).strip()
-            backstory = str(entry.get("backstory", "") or "").strip()
-            traits_raw = entry.get("traits", [])
-            if isinstance(traits_raw, str):
-                traits = [t.strip() for t in traits_raw.split(",") if t.strip()]
-            elif isinstance(traits_raw, list):
-                traits = [str(t).strip() for t in traits_raw if str(t).strip()]
+                character = existing
             else:
-                traits = []
-            self.project.characters.append(
-                Character(
+                role = str(entry.get("role", "supporting")).strip().lower()
+                if role not in ("protagonist", "antagonist", "supporting", "minor"):
+                    role = "supporting"
+                description = str(entry.get("description", "")).strip()
+                backstory = str(entry.get("backstory", "") or "").strip()
+                traits_raw = entry.get("traits", [])
+                if isinstance(traits_raw, str):
+                    traits = [t.strip() for t in traits_raw.split(",") if t.strip()]
+                elif isinstance(traits_raw, list):
+                    traits = [str(t).strip() for t in traits_raw if str(t).strip()]
+                else:
+                    traits = []
+                character = Character(
                     name=name,
                     role=role,
                     description=description,
                     backstory=backstory,
                     traits=traits,
                 )
+                self.project.characters.append(character)
+                added += 1
+                logger.info("Character extraction: added new character %r.", name)
+
+            name_index[self._wf_norm_char_name(character.name)] = character
+
+            rel_entries = entry.get("relationships", [])
+            if isinstance(rel_entries, list):
+                for rel_entry in rel_entries:
+                    if isinstance(rel_entry, dict):
+                        pending_relationships.append((character.name, rel_entry))
+
+        for source_name, rel_entry in pending_relationships:
+            related_name = str(rel_entry.get("related_character", "")).strip()
+            relationship = str(rel_entry.get("relationship", "")).strip().lower()
+            if not related_name or not relationship:
+                continue
+            if relationship not in self._ALLOWED_RELATIONSHIP_TYPES:
+                logger.info(
+                    "Character extraction: skipped relationship with unrecognized type %r.",
+                    relationship,
+                )
+                continue
+
+            source_character = name_index.get(self._wf_norm_char_name(source_name))
+            target_character = name_index.get(self._wf_norm_char_name(related_name))
+            if source_character is None or target_character is None:
+                logger.info(
+                    "Character extraction: skipped relationship %r -> %r -> %r "
+                    "(related character is not a known project character).",
+                    source_name, relationship, related_name,
+                )
+                continue
+            if source_character is target_character:
+                continue
+
+            if getattr(source_character, "relationships", None) is None:
+                source_character.relationships = []
+
+            if self._relationship_already_exists(source_character, target_character.name, relationship):
+                continue
+
+            source_character.relationships.append(
+                CharacterRelationship(
+                    related_character=target_character.name,
+                    relationship=relationship,
+                )
             )
-            added += 1
-            logger.info("Character extraction: added new character %r.", name)
+            logger.info(
+                "Character extraction: added relationship %r -> %r -> %r.",
+                source_character.name, relationship, target_character.name,
+            )
+
         return added
 
     def _update_world_incremental(self, source_text: str, source_type: str = "chapter") -> None:

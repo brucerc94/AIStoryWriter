@@ -6,6 +6,14 @@ Each array element must be an object with exactly these keys (keep these key nam
   "description": a single, vivid sentence written specifically for image generation, using this exact visual-only structure: "Age: X. [ethnicity or race]. [height/build]. [hair color/length/style]. [eye color]. [skin tone]. [facial features]. [notable marks/scars]. [clothing/style]." It must include the character's age, ethnicity or race, body build, hair, eyes, skin tone, facial structure, distinct marks, and visible clothing/style. Do not include personality, backstory, memory, motivations, secrets, or inner emotions.
   "backstory": a short, factual summary of the character's history, upbringing, major past events, and personal context.
   "traits": an array of at most 4 short trait labels such as ["loyal", "guarded", "sharp-witted"]. Never include more than 4 traits. Pick only the most defining ones.
+  "relationships": an array of relationships explicitly stated in the text FOR THIS character (may be empty, []). Each element must be an object with exactly these keys:
+    "related_character": the exact name of another named character, as it appears either in "Characters already tracked" below or elsewhere in this same JSON output. Never invent a name that isn't a real character.
+    "relationship": one of exactly these values (English, lowercase): "father of", "mother of", "son of", "daughter of", "brother of", "sister of", "grandfather of", "grandmother of", "grandson of", "granddaughter of", "uncle of", "aunt of", "nephew of", "niece of", "cousin of", "husband of", "wife of", "partner of", "ex-partner of", "friend of", "enemy of", "rival of", "mentor of", "student of", "boss of", "subordinate of". If the relationship doesn't clearly match one of these, omit it instead of guessing.
+  Rules for "relationships":
+  - Only include a relationship if the text EXPLICITLY states it. Never infer a relationship from characters simply appearing together, traveling together, talking, or being in the same scene.
+  - The relationship is directional and must match exactly what the text says about THIS character. E.g. if the text says "Ana is Carlos's daughter," then for Ana add {"related_character": "Carlos", "relationship": "daughter of"}. Do NOT also add the reverse ("father of") to Carlos unless the text separately and explicitly states that too.
+  - If you are not certain the text explicitly supports a relationship, omit it. It is better to return no relationships than to guess.
+  - If nothing is explicitly stated, use "relationships": [].
 
 {{language_note}}
 
