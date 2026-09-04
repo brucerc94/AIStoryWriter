@@ -68,6 +68,28 @@ _WORLD_DISALLOWED_SECTIONS = {
 }
 
 
+def _wf_salvage_json_array(text: str) -> "Optional[list]":
+    start = text.find("[")
+    if start == -1:
+        return None
+    decoder = json.JSONDecoder()
+    idx = start + 1
+    n = len(text)
+    items = []
+    while idx < n:
+        while idx < n and text[idx] in " \t\r\n,":
+            idx += 1
+        if idx >= n or text[idx] == "]":
+            break
+        try:
+            obj, end = decoder.raw_decode(text, idx)
+        except json.JSONDecodeError:
+            break
+        items.append(obj)
+        idx = end
+    return items if items else None
+
+
 def _wf_is_world_document(document: str) -> bool:
     return bool(_re.search(r"^#\s+World\s*$", document or "", _re.MULTILINE | _re.IGNORECASE))
 
@@ -668,7 +690,7 @@ class WorkflowWorker(QObject):
                 if language else ""
             )
 
-            CHUNK_SIZE = 16000
+            CHUNK_SIZE = 6000
             text_chunks = [
                 source_text[i:i + CHUNK_SIZE]
                 for i in range(0, max(1, len(source_text)), CHUNK_SIZE)
@@ -697,7 +719,7 @@ class WorkflowWorker(QObject):
 
                 context_limit = self._model_context_limit()
                 prompt_tokens = estimate_messages_tokens(messages)
-                effective_max_tokens = min(1500, max(64, context_limit - prompt_tokens - 32))
+                effective_max_tokens = min(4000, max(512, context_limit - prompt_tokens - 32))
 
                 engine = get_engine()
                 self._log_prompt_if_enabled(f"characters chunk {chunk_idx + 1}/{len(text_chunks)}", messages)
@@ -763,11 +785,17 @@ class WorkflowWorker(QObject):
         try:
             data = json.loads(text)
         except Exception:
+            data = _wf_salvage_json_array(text)
+            if data is None:
+                logger.warning(
+                    f"Character extraction: model didn't return valid JSON, skipping. "
+                    f"Raw (truncated): {text[:200]!r}"
+                )
+                return 0
             logger.warning(
-                f"Character extraction: model didn't return valid JSON, skipping. "
-                f"Raw (truncated): {text[:200]!r}"
+                f"Character extraction: response was truncated or malformed; "
+                f"recovered {len(data)} complete character entrie(s) from it."
             )
-            return 0
 
         if not isinstance(data, list):
             return 0
