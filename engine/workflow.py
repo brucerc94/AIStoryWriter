@@ -1242,7 +1242,7 @@ class WorkflowWorker(QObject):
 
         base_prompt = (
             f"Generate a complete chapter-by-chapter outline for '{self.project.title}'.\n"
-            "Use the structured format with Objective, Story Progression, and Continuity for each chapter."
+            "Use the structured format with Chapter Plan and Continuity for each chapter."
         )
         if self.extra_input:
             base_prompt += f"\n\n{self.extra_input}"
@@ -1837,7 +1837,7 @@ class WorkflowWorker(QObject):
             f"until Chapter {requested_n} is complete." if requested_n else
             f'Pick up exactly at "## Chapter {next_num}" and continue.',
             "Use the same structured format for each chapter: "
-            "Objective, Story Progression, Continuity.",
+            "Chapter Plan, Continuity.",
             "",
             f"Outline written so far (do not repeat this):\n{outline_so_far.strip()}",
         ]
