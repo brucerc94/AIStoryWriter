@@ -1,7 +1,11 @@
 Review this chapter. Check for:
 - Consistency with established characters and world
+- Consistency with established character relationships
 - Prose quality and readability
 - Pacing and scene structure
 - Dialogue authenticity
 - Continuity errors
+
+When checking character relationships, verify that the chapter does not contradict established relationships between characters. Treat the relationships in the established character data as canon. Flag contradictions such as changing a family relationship, friendship, rivalry, mentorship, partnership, or other established relationship. Do not invent relationships that are not established in the character data.
+
 Give specific feedback and suggest improvements.

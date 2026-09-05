@@ -23,7 +23,7 @@ Story Progression:
 Two to five connected paragraphs describing concretely what happens, in what order, who does what, what each character discovers, what decisions are made, what consequences those decisions produce, how the scene evolves, and how the chapter ends. Preserve the author's requested events explicitly and accurately — do not compress them into vague summary language.
 
 Continuity:
-The facts that must be established by this chapter and must hold true for the chapters that follow.
+The facts that must be established by this chapter and must hold true for the chapters that follow, including established character relationships and any event, action, outcome, or development that must not occur yet.
 
 CRITICAL FORMAT RULE: Each chapter entry ends after Continuity. Do NOT add any further section after Continuity. The following section headings are FORBIDDEN and must never appear in the outline:
 - Restrictions

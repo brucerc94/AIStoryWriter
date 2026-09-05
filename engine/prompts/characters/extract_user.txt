@@ -1,11 +1,24 @@
-Extract every named character mentioned in the text below. Respond with ONLY a JSON array — no markdown fences, no commentary, nothing before or after it. If there are no named characters, respond with exactly: []
+Extract every named character mentioned in the text below. Respond with ONLY a valid JSON array — no markdown fences, commentary, or extra text. If there are no named characters, respond with exactly: []
 
-Each array element must be an object with exactly these keys (keep these key names and the role value in English — only the description text should be translated):
+Each array element must have exactly these keys:
   "name": the character's name
   "role": one of "protagonist", "antagonist", "supporting", "minor"
-  "description": a single, vivid sentence written specifically for image generation, using this exact visual-only structure: "Age: X. [ethnicity or race]. [height/build]. [hair color/length/style]. [eye color]. [skin tone]. [facial features]. [notable marks/scars]. [clothing/style]." It must include the character's age, ethnicity or race, body build, hair, eyes, skin tone, facial structure, distinct marks, and visible clothing/style. Do not include personality, backstory, memory, motivations, secrets, or inner emotions.
-  "backstory": a short, factual summary of the character's history, upbringing, major past events, and personal context.
-  "traits": an array of at most 4 short trait labels such as ["loyal", "guarded", "sharp-witted"]. Never include more than 4 traits. Pick only the most defining ones.
+  "description": one concise visual-only sentence for image generation. Include age, ethnicity or race when stated, build, hair, eyes, skin tone, facial features, notable marks/scars, and visible clothing/style. Do not include personality, backstory, motivations, secrets, or emotions.
+  "backstory": a concise factual summary of the character's relevant history or personal context.
+  "traits": an array of at most 4 short trait labels.
+  "relationships": an array of explicitly stated relationships for THIS character; use [] when none are explicitly stated.
+
+Each relationship object must have exactly these keys:
+  "related_character": the exact name of another named character in this output or in "Characters already tracked". Never invent a character name.
+  "relationship": exactly one of: "father of", "mother of", "son of", "daughter of", "brother of", "sister of", "grandfather of", "grandmother of", "grandson of", "granddaughter of", "uncle of", "aunt of", "nephew of", "niece of", "cousin of", "husband of", "wife of", "partner of", "ex-partner of", "friend of", "enemy of", "rival of", "mentor of", "student of", "boss of", "subordinate of".
+
+Relationship rules:
+- Only include a relationship when the text explicitly states it. Never infer one from characters appearing together, talking, traveling together, or sharing a scene.
+- Preserve direction exactly. Example: if the text says "Ana is Carlos's daughter", add the relationship only to Ana as {"related_character":"Carlos","relationship":"daughter of"}. Do not add the reverse unless the text explicitly states it too.
+- If the relationship type is unclear or unsupported, omit it.
+- Never use "other" for automatic extraction.
+
+Output must remain valid JSON even when many characters are present. Keep description, backstory, and traits concise enough that the complete array can be returned without truncation. Do not omit characters merely to save tokens.
 
 {{language_note}}
 
