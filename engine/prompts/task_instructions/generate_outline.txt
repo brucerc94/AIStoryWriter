@@ -6,9 +6,13 @@ Do not soften, euphemize, generalize, omit, replace, or reinterpret explicit sto
 
 The outline is the binding narrative blueprint for the chapter writer. It must specify the concrete story events that the chapter writer is required to depict, not merely the chapter's theme, purpose, or a high-level summary.
 
-Plan the complete story first, then distribute it across the requested chapters. For every chapter, explicitly define what happens and in what order. Include the characters who are present, their concrete actions, important dialogue or information that must be conveyed when specified by the author, discoveries, decisions, conflicts, reactions, consequences, setting changes, relationship changes, and the exact situation in which the chapter ends.
+Plan the complete story first, then distribute it across the requested chapters. For every chapter, explicitly define what happens and in what order. Include the characters who are present, where the chapter begins, their concrete actions, important interactions and dialogue content that must occur when relevant, discoveries, decisions, conflicts, reactions, consequences, setting changes, relationship changes, transitions between important events, and the exact situation in which the chapter ends.
 
 A chapter entry must contain enough concrete narrative information that the chapter writer can write the chapter accurately without having to invent the missing core events. Do not use placeholders such as "something happens", "they discuss the issue", "a conflict occurs", or "the situation changes" when the underlying event can be stated directly.
+
+Use the author's requested writing style and level of detail as a planning-depth constraint. If the author's style requests detailed, rich, immersive, highly descriptive, emotionally deep, highly visual, or otherwise elaborate writing, increase the amount of useful concrete narrative information in the chapter plan accordingly. Add more relevant story beats, character actions, interactions, reactions, discoveries, decisions, consequences, setting information, relationship developments, and transitions rather than merely making the wording longer or more elaborate. The goal is to give the chapter writer a rich factual blueprint that supports the requested level of narrative depth.
+
+Do not turn the chapter plan into finished literary prose. Do not add stylistic flourishes, atmospheric filler, sensory embellishment, or polished dialogue merely to imitate the final writing style. Style controls the depth and richness of the underlying plan; the chapter writer later applies the literary style to that plan.
 
 When two or more characters appear in the same chapter, refer to them by their exact established names whenever there is any possibility of ambiguity about who is doing what. Do not rely on pronouns such as "he", "she", "they", "him", "her", or "them" if more than one character could be the referent, or if the referent could otherwise be unclear to a reader. Every action, decision, and discovery must be attributed unambiguously to the correct named character.
 
@@ -20,18 +24,17 @@ For each chapter, use exactly this structure:
 
 ## Chapter N: Title
 
-Objective:
-One brief paragraph stating the concrete narrative purpose of the chapter.
-
-Story Progression:
-Write a detailed, connected account of the chapter's actual events in chronological order. State who is present, where the chapter begins, what each named character does, the important interactions and dialogue content that must occur, what information is revealed or discovered, what decisions are made, what conflicts or actions occur, what consequences follow, how the situation changes, and how the chapter ends. Preserve the author's requested events explicitly and accurately. This section must describe concrete events rather than themes or broad summaries. Do not compress important events into vague wording.
+Chapter Plan:
+A detailed, connected account of everything that must happen in this chapter, in chronological order. State where the chapter begins, which named characters are present, what each character does, the important interactions and dialogue content that must occur when relevant, what information is revealed or discovered, what decisions are made, what conflicts or actions occur, what reactions and consequences follow, how relationships or the situation change, what relevant setting details must be established, how the chapter transitions between major events, and the exact state in which the chapter ends. Include enough concrete story beats that the chapter writer does not need to invent the chapter's core events. When the author's style requests high detail, increase the amount of concrete narrative information rather than repeating the same ideas with more words.
 
 Continuity:
 State the concrete story state established by the end of the chapter and required for later chapters. Include character states, relationship states, new information known by specific characters, important objects, locations, unresolved problems, consequences that are now in effect, and any event, revelation, relationship change, or outcome that must not happen yet.
 
-The chapter outline is a planning document, not finished prose. Do not write literary narration, sensory embellishment, stylistic flourishes, or dialogue merely for atmosphere unless the author's request specifically requires that content. Focus on exact story information and sequence so the chapter writer can later expand it into prose.
+The chapter plan is a planning document, not finished prose. Keep it factual, direct, and information-dense. Do not duplicate the same information across multiple sections. Do not summarize events that can instead be stated concretely. The Chapter Plan should contain the narrative information; Continuity should contain only the resulting state and constraints that matter after the chapter ends.
 
 CRITICAL FORMAT RULE: Each chapter entry ends after Continuity. Do NOT add any further section after Continuity. The following section headings are FORBIDDEN and must never appear in the outline:
+- Objective
+- Story Progression
 - Restrictions
 - Restricciones
 - Restrictions/Focus
@@ -46,7 +49,7 @@ Every character who appears must have a proper name. Use established character n
 
 Character descriptions must contain only visual information such as age, appearance, physical traits, scars, visible features, and clothing. Do not place personality, backstory, secrets, motivations, or other narrative facts inside a character's visual description.
 
-If the author's request contains explicit narrative details, preserve those details in the appropriate chapter's Story Progression rather than hiding them behind general wording.
+If the author's request contains explicit narrative details, preserve those details in the appropriate chapter's Chapter Plan rather than hiding them behind general wording.
 
 Do not invent major events, resolutions, revelations, or plot turns that are unrelated to the author's request or the established story.
 
