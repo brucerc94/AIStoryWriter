@@ -2,13 +2,17 @@ Generate a detailed chapter-by-chapter outline for this novel.
 
 The author's explicit story request is authoritative. Preserve every concrete event, action, outcome, consequence, relationship change, setting change, and sequence that the author requests.
 
-Do not soften, euphemize, generalize, omit, replace, or reinterpret explicit story events. If the author specifies that a character kills someone, dies, is injured, uses violence, causes destruction, reveals a secret, or performs any other concrete action, the outline must state that event clearly and accurately. Do not replace a concrete event with a vague description such as "a violent confrontation", "a serious incident", or "a major conflict".
+Do not soften, euphemize, generalize, omit, replace, or reinterpret explicit story events. If the author specifies that a character kills someone, dies, is injured, uses violence, causes destruction, reveals a secret, or performs any other concrete action, the outline must state that event clearly and accurately. Do not replace a concrete event with vague wording such as "a violent confrontation", "a serious incident", or "a major conflict".
 
-The outline is a concrete narrative plan for the chapter writer, not a thematic synopsis. It must preserve concrete events, concrete actions, decisions, discoveries, consequences, the order events occur in, specific information the author requested, the evolution of relationships, and the state each chapter ends in.
+The outline is the binding narrative blueprint for the chapter writer. It must specify the concrete story events that the chapter writer is required to depict, not merely the chapter's theme, purpose, or a high-level summary.
+
+Plan the complete story first, then distribute it across the requested chapters. For every chapter, explicitly define what happens and in what order. Include the characters who are present, their concrete actions, important dialogue or information that must be conveyed when specified by the author, discoveries, decisions, conflicts, reactions, consequences, setting changes, relationship changes, and the exact situation in which the chapter ends.
+
+A chapter entry must contain enough concrete narrative information that the chapter writer can write the chapter accurately without having to invent the missing core events. Do not use placeholders such as "something happens", "they discuss the issue", "a conflict occurs", or "the situation changes" when the underlying event can be stated directly.
 
 When two or more characters appear in the same chapter, refer to them by their exact established names whenever there is any possibility of ambiguity about who is doing what. Do not rely on pronouns such as "he", "she", "they", "him", "her", or "them" if more than one character could be the referent, or if the referent could otherwise be unclear to a reader. Every action, decision, and discovery must be attributed unambiguously to the correct named character.
 
-Never turn a pronoun, title, epithet, or physical description into a new character. Only write actions for established named characters, or for a genuinely new character the story requires — do not invent a separate character out of a description like "the traveler" or "the old man" unless that description IS the character's established name.
+Never turn a pronoun, title, epithet, or physical description into a new character. Only write actions for established named characters, or for a genuinely new character the story requires. Do not invent a separate character out of a description like "the traveler" or "the old man" unless that description is the character's established name.
 
 Use only established characters unless introducing a new one is genuinely necessary. Respect Character Relationships, World, and Memory exactly as given, and do not contradict established continuity.
 
@@ -17,13 +21,15 @@ For each chapter, use exactly this structure:
 ## Chapter N: Title
 
 Objective:
-One brief paragraph on the chapter's narrative purpose.
+One brief paragraph stating the concrete narrative purpose of the chapter.
 
 Story Progression:
-Two to five connected paragraphs describing concretely what happens, in what order, who does what, what each character discovers, what decisions are made, what consequences those decisions produce, how the scene evolves, and how the chapter ends. Preserve the author's requested events explicitly and accurately — do not compress them into vague summary language.
+Write a detailed, connected account of the chapter's actual events in chronological order. State who is present, where the chapter begins, what each named character does, the important interactions and dialogue content that must occur, what information is revealed or discovered, what decisions are made, what conflicts or actions occur, what consequences follow, how the situation changes, and how the chapter ends. Preserve the author's requested events explicitly and accurately. This section must describe concrete events rather than themes or broad summaries. Do not compress important events into vague wording.
 
 Continuity:
-The facts that must be established by this chapter and must hold true for the chapters that follow, including established character relationships and any event, action, outcome, or development that must not occur yet.
+State the concrete story state established by the end of the chapter and required for later chapters. Include character states, relationship states, new information known by specific characters, important objects, locations, unresolved problems, consequences that are now in effect, and any event, revelation, relationship change, or outcome that must not happen yet.
+
+The chapter outline is a planning document, not finished prose. Do not write literary narration, sensory embellishment, stylistic flourishes, or dialogue merely for atmosphere unless the author's request specifically requires that content. Focus on exact story information and sequence so the chapter writer can later expand it into prose.
 
 CRITICAL FORMAT RULE: Each chapter entry ends after Continuity. Do NOT add any further section after Continuity. The following section headings are FORBIDDEN and must never appear in the outline:
 - Restrictions
@@ -36,14 +42,13 @@ CRITICAL FORMAT RULE: Each chapter entry ends after Continuity. Do NOT add any f
 - Summary
 Or any variant of the above. Continuity is always the final section of every chapter entry.
 
-
-Keep the outline concrete and binding. Do not turn Story Progression into a vague summary.
-
 Every character who appears must have a proper name. Use established character names whenever they exist. Only invent a new name when a new character is genuinely necessary.
 
 Character descriptions must contain only visual information such as age, appearance, physical traits, scars, visible features, and clothing. Do not place personality, backstory, secrets, motivations, or other narrative facts inside a character's visual description.
 
 If the author's request contains explicit narrative details, preserve those details in the appropriate chapter's Story Progression rather than hiding them behind general wording.
+
+Do not invent major events, resolutions, revelations, or plot turns that are unrelated to the author's request or the established story.
 
 If the user's request specifies an exact number of chapters, produce precisely that many chapters, numbered sequentially. If no number is given, generate enough chapters to tell the complete planned story.
 
@@ -74,7 +79,5 @@ a formatting requirement.
 Before returning the outline, internally verify that there are exactly
 {{requested_count}} chapter headings, numbered sequentially from 1 to
 {{requested_count}} with no gaps or duplicates.
-
-Do not invent major events, resolutions, revelations, or plot turns that are unrelated to the author's request or the established story.
 
 Return only the complete outline in the required Markdown format.
