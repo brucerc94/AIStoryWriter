@@ -32,6 +32,8 @@ State the concrete story state established by the end of the chapter and require
 
 The chapter plan is a planning document, not finished prose. Keep it factual, direct, and information-dense. Do not duplicate the same information across multiple sections. Do not summarize events that can instead be stated concretely. The Chapter Plan should contain the narrative information; Continuity should contain only the resulting state and constraints that matter after the chapter ends.
 
+The required format above is authoritative. If any other workflow instruction refers to the older headings "Objective" or "Story Progression", ignore those older labels and use "Chapter Plan" and "Continuity" exactly as specified above.
+
 CRITICAL FORMAT RULE: Each chapter entry ends after Continuity. Do NOT add any further section after Continuity. The following section headings are FORBIDDEN and must never appear in the outline:
 - Objective
 - Story Progression
