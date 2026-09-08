@@ -1,0 +1,67 @@
+name: Disable Change Chapter Memory Update
+
+on:
+  push:
+    branches: [bugfixes]
+    paths:
+      - .github/workflows/_disable_change_memory_update.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: bugfixes
+          fetch-depth: 0
+
+      - name: Remove Change Chapter memory update
+        shell: python
+        run: |
+          from pathlib import Path
+          import subprocess
+
+          workflow = Path('engine/workflow.py')
+          text = workflow.read_text(encoding='utf-8')
+
+          start = text.index('    def _finalize_changed_chapter(')
+          end = text.index('\n    def _run_change_chapter', start)
+          block = text[start:end]
+
+          old = '        self.project.current_chapter = chapter_num\n        self._run_update_memory()\n'
+          new = '        self.project.current_chapter = chapter_num\n'
+          if old not in block:
+              raise SystemExit('Expected _run_update_memory() call not found in _finalize_changed_chapter().')
+          block = block.replace(old, new, 1)
+          text = text[:start] + block + text[end:]
+          workflow.write_text(text, encoding='utf-8')
+
+          change = Path('engine/change_chapter.py')
+          ctext = change.read_text(encoding='utf-8')
+          old_doc = 'Characters/World/Memory are refreshed only once the chapter is accepted.'
+          new_doc = 'Characters/World are refreshed only once the chapter is accepted.'
+          if old_doc in ctext:
+              ctext = ctext.replace(old_doc, new_doc, 1)
+              change.write_text(ctext, encoding='utf-8')
+
+          for path in ('engine/workflow.py', 'engine/change_chapter.py'):
+              compile(Path(path).read_text(encoding='utf-8'), path, 'exec')
+
+          final_block = workflow.read_text(encoding='utf-8')
+          final_start = final_block.index('    def _finalize_changed_chapter(')
+          final_end = final_block.index('\n    def _run_change_chapter', final_start)
+          final_block = final_block[final_start:final_end]
+          if '_run_update_memory()' in final_block:
+              raise SystemExit('Change Chapter still updates Memory.')
+
+          helper = Path('.github/workflows/_disable_change_memory_update.yml')
+          helper.unlink()
+
+          subprocess.run(['git', 'config', 'user.name', 'github-actions[bot]'], check=True)
+          subprocess.run(['git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], check=True)
+          subprocess.run(['git', 'add', 'engine/workflow.py', 'engine/change_chapter.py', str(helper)], check=True)
+          subprocess.run(['git', 'commit', '-m', 'fix: stop change chapter from updating memory'], check=True)
+          subprocess.run(['git', 'push', 'origin', 'HEAD:bugfixes'], check=True)
