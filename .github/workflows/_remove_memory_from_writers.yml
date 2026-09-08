@@ -25,7 +25,7 @@ jobs:
           import re
           import subprocess
 
-          # Context builder: disable Story Memory only for WRITE_CHAPTER and CHANGE_CHAPTER.
+          # 1) Global context: Story Memory is disabled only for chapter writing/editing.
           p = Path('engine/context.py')
           text = p.read_text(encoding='utf-8')
           old = '"Memory": max(100, min(450, max_context_tokens // 10)),'
@@ -35,7 +35,7 @@ jobs:
           text = text.replace(old, new, 1)
           p.write_text(text, encoding='utf-8')
 
-          # Write Chapter continuation: remove Memory from its dedicated continuity anchors.
+          # 2) Write Chapter continuation: remove Story Memory from its dedicated anchors.
           p = Path('engine/workflow.py')
           text = p.read_text(encoding='utf-8')
           start = text.index('    def _build_chapter_continuation_prompt(')
@@ -50,13 +50,18 @@ jobs:
           fn, n = re.subn(r'^\s*f"Story memory:.*\n', '', fn, flags=re.MULTILINE)
           if n != 1:
               raise SystemExit(f'workflow.py expected one continuation Story memory line, found {n}')
-          fn = fn.replace(' memory=%d', '', 1)
-          fn = fn.replace('len(allocated["world"]), len(allocated["memory"]), len(allocated["prose_tail"])',
-                          'len(allocated["world"]), len(allocated["prose_tail"])', 1)
+          logger_start = fn.find('        logger.debug(\n')
+          if logger_start < 0:
+              raise SystemExit('workflow.py continuation logger block not found')
+          logger_end = fn.find('\n        return prompts.render(', logger_start)
+          if logger_end < 0:
+              raise SystemExit('workflow.py continuation logger block end not found')
+          logger_block = '''        logger.debug(\n            "[write_chapter] continuation budget: ctx=%d reply=%d prompt_budget=%d chars "\n            "outline=%d chars=%d world=%d prev=%d tail=%d",\n            ctx_tokens, reply_tokens, total_chars,\n            len(allocated["outline"]), len(allocated["characters"]),\n            len(allocated["world"]), len(allocated["prev_tail"]), len(allocated["prose_tail"]),\n        )\n\n'''
+          fn = fn[:logger_start] + logger_block + fn[logger_end + 1:]
           text = text[:start] + fn + text[end:]
           p.write_text(text, encoding='utf-8')
 
-          # Change Chapter: remove Memory from the target-chapter context and continuation anchors.
+          # 3) Change Chapter main context + continuation: remove Story Memory from both.
           p = Path('engine/change_chapter.py')
           text = p.read_text(encoding='utf-8')
 
@@ -74,29 +79,32 @@ jobs:
           start = text.index('def _build_continuation_prompt(')
           end = text.index('\ndef trim_leading_overlap', start)
           fn = text[start:end]
-          fn, n = re.subn(r'^\s*memory_raw\s*=.*\n', '', fn, flags=re.MULTILINE)
-          if n != 1:
-              raise SystemExit(f'change_chapter.py expected one continuation memory_raw assignment, found {n}')
-          fn, n = re.subn(r'^\s*\("memory".*\n', '', fn, flags=re.MULTILINE)
-          if n != 1:
-              raise SystemExit(f'change_chapter.py expected one continuation memory slot, found {n}')
-          fn, n = re.subn(r'^\s*f"Story memory:.*\n', '', fn, flags=re.MULTILINE)
-          if n != 1:
-              raise SystemExit(f'change_chapter.py expected one continuation Story memory line, found {n}')
-          fn = fn.replace(' memory=%d', '', 1)
-          fn = fn.replace('len(allocated["world"]), len(allocated["memory"]),\n        len(allocated["prose_tail"])',
-                          'len(allocated["world"]), len(allocated["prose_tail"])', 1)
+          for pattern, label in [
+              (r'^\s*memory_raw\s*=.*\n', 'continuation memory_raw assignment'),
+              (r'^\s*\("memory".*\n', 'continuation memory slot'),
+              (r'^\s*f"Story memory:.*\n', 'continuation Story memory line'),
+          ]:
+              fn, n = re.subn(pattern, '', fn, flags=re.MULTILINE)
+              if n != 1:
+                  raise SystemExit(f'change_chapter.py expected one {label}, found {n}')
+          logger_start = fn.find('    logger.debug(\n')
+          if logger_start < 0:
+              raise SystemExit('change_chapter.py continuation logger block not found')
+          logger_end = fn.find('\n    system = prompts.render', logger_start)
+          if logger_end < 0:
+              raise SystemExit('change_chapter.py continuation logger block end not found')
+          logger_block = '''    logger.debug(\n        "[change_chapter] continuation budget: ctx=%d reply=%d prompt_budget=%d chars "\n        "outline=%d chars=%d world=%d tail=%d",\n        ctx_tokens, reply_tokens, total_chars,\n        len(allocated["outline"]), len(allocated["characters"]),\n        len(allocated["world"]), len(allocated["prose_tail"]),\n    )\n\n'''
+          fn = fn[:logger_start] + logger_block + fn[logger_end + 1:]
           text = text[:start] + fn + text[end:]
           p.write_text(text, encoding='utf-8')
 
-          # Validate the exact scopes we changed and keep other workflows untouched.
+          # Validate syntax and only the exact target functions.
           for path in ('engine/context.py', 'engine/workflow.py', 'engine/change_chapter.py'):
               compile(Path(path).read_text(encoding='utf-8'), path, 'exec')
 
           context_text = Path('engine/context.py').read_text(encoding='utf-8')
           workflow_text = Path('engine/workflow.py').read_text(encoding='utf-8')
           change_text = Path('engine/change_chapter.py').read_text(encoding='utf-8')
-
           assert '"Memory": (0 if task in (TaskType.WRITE_CHAPTER, TaskType.CHANGE_CHAPTER)' in context_text
 
           ws = workflow_text[workflow_text.index('    def _build_chapter_continuation_prompt('):]
@@ -109,6 +117,9 @@ jobs:
           cc = change_text[change_text.index('def _build_continuation_prompt('):]
           cc = cc[:cc.index('\ndef trim_leading_overlap')]
           assert 'memory_raw' not in cc and 'allocated["memory"]' not in cc and 'Story memory:' not in cc
+
+          # Leave planning contexts untouched: Generate/Extend Outline still use their own Memory handling.
+          assert 'Memory' in context_text
 
           helper = Path('.github/workflows/_remove_memory_from_writers.yml')
           helper.unlink()
