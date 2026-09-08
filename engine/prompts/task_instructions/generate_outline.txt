@@ -1,54 +1,66 @@
 Generate a detailed, complete chapter-by-chapter outline for this novel.
 
-The author's explicit story request and the Synopsis are the authoritative source material. Preserve every concrete event, action, outcome, consequence, relationship change, setting change, revelation, decision, and sequence they establish.
+SOURCE AUTHORITY
 
-The outline is the binding narrative blueprint for the chapter writer. Its purpose is to provide enough concrete information that the chapter writer can develop the story into full literary scenes without having to invent the core events, character behavior, important interactions, or major transitions.
+The author's current story request and the Synopsis are the authoritative source of story facts for this outline. Existing project Characters, World, Memory, and previously established chapters may provide additional continuity facts, but they must not be used to invent unrelated new story material.
+
+The outline is the binding narrative blueprint for the chapter writer. Its purpose is to preserve and organize the story the author actually described, with enough concrete information that the chapter writer can develop it into full literary scenes without having to invent the core events, character behavior, important interactions, or major transitions.
 
 DEPTH REQUIREMENT
 
-Make the outline as detailed and information-dense as the story requires. Do NOT compress the story into a high-level summary merely because it is called an outline. For every chapter, describe the complete progression of the chapter from opening state to ending state.
+Make the outline as detailed and information-dense as the source material supports. Do NOT compress the story into a high-level summary merely because it is called an outline. The goal is maximum useful narrative detail, not brevity.
 
-For each chapter, explicitly include whenever relevant:
+For every chapter, explicitly preserve and develop all source-supported details that belong there, including whenever relevant:
 - where and when the chapter begins;
 - which established characters are present and what each is doing;
 - the important physical actions and reactions of each relevant character;
-- the sequence and causal relationship of major events;
+- the sequence and causal relationship of events;
 - important interactions between characters;
-- important dialogue content, questions, answers, statements, arguments, revelations, promises, refusals, or decisions that the chapter must contain;
+- important dialogue CONTENT that must occur, such as questions, answers, statements, arguments, revelations, promises, refusals, or decisions, when the source defines them;
 - discoveries and exactly what information becomes known, by whom, and when;
 - conflicts, obstacles, attempts, responses, and consequences;
 - emotional or psychological changes that materially affect the story;
 - relationship changes and what causes them;
 - relevant setting details needed for the scene or story logic;
-- important objects, symbols, powers, rules, or resources involved in the events;
+- important objects, symbols, powers, rules, resources, or conditions that are established by the source;
 - transitions between locations, scenes, time periods, or points of view when needed;
-- what remains unresolved;
+- unresolved threads and constraints that carry forward;
 - the exact narrative situation at the end of the chapter.
 
-Treat the Synopsis as a full source of story material. When the Synopsis already specifies a concrete event, preserve it explicitly in the appropriate chapter instead of replacing it with a vague summary.
+Treat the Synopsis as a full source of story material. Every concrete event, character, relationship, setting, mechanism, revelation, conflict, decision, consequence, and resolution stated in the Synopsis must be preserved and assigned to an appropriate chapter when compatible with the requested chapter count.
 
-Do not merely repeat the Synopsis chapter by chapter. Distribute its events deliberately across the requested chapters and add useful connective detail so that every chapter has a concrete beginning, progression, and ending.
+When the requested chapter count is small, do NOT omit or replace source events merely because there is not much room. Compress only the chapter distribution, not the underlying story information.
 
-Do not leave core events for the chapter writer to invent. Avoid vague phrases such as "a conflict occurs", "they discuss the issue", "something happens", "the situation changes", or "they have an emotional conversation" when the underlying event is known from the Synopsis or established story context. State the actual event.
+Do not merely repeat the Synopsis verbatim chapter by chapter. Organize the source events into a coherent chronological progression and make each chapter operationally useful to the writer. Any additional detail must be a direct, non-canonical staging elaboration of source-supported events, not a new story fact.
 
-Do NOT turn the outline into finished literary prose. Use factual, direct, information-dense planning language. The chapter writer will later apply the requested literary style, scene writing, sensory detail, dialogue prose, pacing, and emotional texture.
+NO-INVENTION BOUNDARY
 
-SOURCE FIDELITY / NO INVENTED CANON
+This rule is strict: DETAIL MUST COME FROM THE SOURCE. Do not create new canon merely to make the outline longer, richer, more dramatic, more romantic, more atmospheric, or more complete.
 
-Do not invent facts merely to make the outline sound more detailed.
+Do NOT invent or introduce:
+- new named characters not required by the source;
+- names for unnamed children or minor people unless the story genuinely requires a new named character;
+- exact quotations not supplied by the author or already established;
+- arbitrary dialogue lines presented as mandatory facts when the source does not define their content;
+- exact temperatures, times, measurements, distances, quantities, colors, physical effects, or numerical values not established by the source;
+- new locations, rooms, buildings, objects, symbols, magical abilities, rules, mechanisms, diagnoses, causes, secrets, motives, histories, or backstory;
+- new romantic, sexual, dominance/submission, fetish, intimacy, or relationship dynamics not explicitly established by the author or existing canon;
+- new deaths, injuries, betrayals, reconciliations, revelations, plot twists, or resolutions;
+- new psychological interpretations that change the established characterization;
+- new consequences that materially change what happens later.
 
-In particular, do NOT invent:
-- new named characters that are not required by the story;
-- arbitrary names for unnamed children or minor people unless a genuinely new named character is necessary;
-- exact quotations that were not provided by the author or already established in the story;
-- exact measurements, temperatures, times, distances, quantities, or numerical values not established by the source material;
-- new magical rules, powers, objects, locations, causes, mechanisms, diagnoses, secrets, motives, or backstory not supported by the source material;
-- new plot twists, revelations, relationships, deaths, injuries, resolutions, betrayals, or major events not supported by the source material;
-- new causal explanations that change the meaning of the author's story.
+Do not infer a new fact merely because it would be plausible. Plausibility is NOT authorization.
 
-You may add connective scene details only when they are a natural elaboration of an already established event and do not create new canon. Prefer neutral phrasing over invented specifics when the source does not define the detail.
+When the source leaves a detail unspecified, use neutral language or omit the detail. Do not fill the gap with a specific invention.
 
-Do not convert an inference into a hard fact unless the source supports that inference.
+Examples:
+- If the source says "a child," do not invent the child's name.
+- If the source says Elena whispers Malkor's sigils, do not invent the exact syllables she whispers.
+- If the source says the air becomes oppressive, do not invent a specific temperature.
+- If the source says characters struggle emotionally, do not invent a new romantic or sexual dynamic.
+- If the source says an object is beneath the baptismal font, do not invent additional chambers, rituals, symbols, or powers around it.
+
+You MAY expand an established event into a sequence of concrete planning beats when doing so does not add new canon. For example, you may specify that a character notices something, reacts, approaches another character, asks about it, and then acts, but only when those are natural connective steps that do not create a new fact, revelation, relationship, or plot direction.
 
 CHARACTERS AND CONTINUITY
 
@@ -56,9 +68,9 @@ Use exact established character names whenever they exist. Do not use a title, e
 
 When multiple characters are present, attribute actions, decisions, discoveries, and reactions to the correct named character. Avoid ambiguous pronouns when the referent could be unclear.
 
-Use only established characters unless a genuinely new character is necessary for the story. Respect established relationships, character identities, world rules, and Memory exactly. Do not contradict established continuity.
+Use only established characters unless a genuinely new character is necessary for the source story. Respect established relationships, identities, world rules, and Memory exactly. Do not contradict established continuity.
 
-If a chapter changes a relationship, state the cause and resulting state explicitly.
+If a chapter changes a relationship, state the source-supported cause and resulting state explicitly.
 
 CHAPTER STRUCTURE
 
@@ -67,12 +79,12 @@ For each chapter, use exactly this structure and no additional top-level chapter
 ## Chapter N: Title
 
 Chapter Plan:
-A detailed, chronological account of the chapter. Include the chapter opening state, location/time, characters present, concrete actions, important interactions and dialogue content, discoveries, decisions, conflicts, reactions, consequences, emotional developments, relationship changes, relevant setting information, transitions between major events, unresolved issues, and the exact situation at the end of the chapter. Include all important concrete story beats required by the Synopsis and established story context. The Chapter Plan should be detailed enough that the writer can turn it into complete scenes without inventing the chapter's core events.
+A detailed chronological account of everything that must happen in this chapter. Include the opening state, location/time, relevant characters and their roles, concrete actions and reactions, important interactions, source-supported dialogue content, discoveries, decisions, conflicts, emotional developments, consequences, transitions, unresolved matters, and the exact situation at the end. Preserve all important source events. Make this section detailed enough that the writer can turn it into complete scenes without inventing the chapter's core events.
 
 Continuity:
-State the concrete story state established by the end of the chapter and required for later chapters. Include relevant character states, relationship states, information known by specific characters, important objects or statuses, locations, active consequences, unresolved problems, and any event, revelation, relationship change, or outcome that must not happen yet.
+State the concrete story state established by the end of the chapter and required for later chapters. Include relevant character states, relationship states, information known by specific characters, important objects or statuses, locations, active consequences, unresolved problems, and any event or outcome that must not happen yet.
 
-Do not duplicate the entire Chapter Plan inside Continuity. Continuity records the resulting state and constraints that matter after the chapter ends.
+Do not duplicate the entire Chapter Plan inside Continuity. Continuity records only the resulting canon/state and forward-looking constraints.
 
 FORMAT RULES
 
@@ -85,13 +97,13 @@ Return ONLY the complete outline. Do NOT add:
 - a conclusion after the final chapter;
 - meta-commentary about the outline.
 
-Do not add sections such as "Characters Present", "Beginning", "Sequence of Events", "Rising Action", "Climax", "Resolution", "Summary", "Notes", "Focus", "Objective", "Story Progression", "Restrictions", or any other extra section inside a chapter. Put that information directly inside Chapter Plan or Continuity.
+Do not add sections such as "Characters Present", "Beginning", "Sequence of Events", "Rising Action", "Climax", "Resolution", "Summary", "Notes", "Focus", "Objective", "Story Progression", "Restrictions", "Continuity Progression", "Emotional Arc", "Dominance/Submission Dynamic", "Intimacy/Passionate Hint", or any other extra section inside a chapter. Put that information directly inside Chapter Plan or Continuity when it is source-supported.
 
 Do not wrap the outline in Markdown code fences.
 
 Each chapter entry ends after its Continuity section. Do not append any text after the final chapter.
 
-The chapter title may be descriptive, but do not insert information into the title that changes the story's facts.
+The chapter title may be descriptive, but it must not introduce new facts or events not supported by the source.
 
 REQUESTED CHAPTER COUNT
 
@@ -101,19 +113,20 @@ This is a HARD CONSTRAINT.
 
 Generate exactly {{requested_count}} chapters numbered sequentially from Chapter 1 through Chapter {{requested_count}}, with no gaps, repeats, or extra chapters.
 
-If {{requested_count}} is 1, place the entire complete story described by the Synopsis into Chapter 1. Do not respond by explaining that one chapter must contain the whole story. Do not add an extra chapter merely because the requested count is small.
+If {{requested_count}} is 1, place the entire story described by the Synopsis into Chapter 1. Do not explain that one chapter is being used for the whole story. Do not add an extra chapter. Preserve the full source story inside the single allowed chapter.
 
-If the Synopsis contains a complete beginning, escalation, climax, and resolution, and the requested chapter count is small, distribute all of those story elements inside the allowed chapters rather than omitting them.
+If the Synopsis contains a complete beginning, escalation, climax, and resolution, and the requested chapter count is small, distribute ALL of those source-established story elements inside the allowed chapters rather than replacing them with a generic summary.
 
-The requested chapter count is a planning constraint, not a reason to reduce detail.
+The requested chapter count is a planning constraint, not a reason to reduce source fidelity or narrative detail.
 
 Before returning the outline, internally verify that:
 1. there are exactly {{requested_count}} chapter headings;
 2. they are numbered sequentially from 1 to {{requested_count}};
 3. no chapter is duplicated or missing;
 4. every major story event from the Synopsis has been assigned to a chapter;
-5. no major event has been invented without support;
-6. each chapter contains both a concrete progression and a concrete ending state;
-7. the final chapter contains the story's intended resolution only if the source material establishes that resolution.
+5. no major event, character, relationship, mechanism, or resolution has been invented without source support;
+6. no forbidden extra section appears inside or after a chapter;
+7. each chapter contains a concrete chronological progression and a concrete ending state;
+8. the final chapter contains the intended resolution only when the Synopsis or established canon provides that resolution.
 
 Return only the complete outline in the required Markdown format.
