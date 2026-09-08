@@ -58,15 +58,16 @@ Continuity:
 Do not add Objective, Story Progression, Key Events, Characters Present, Beginning, Middle, Climax, Resolution, Emotional Arc, Notes, Summary, Focus, Theme, or any other section.
 Do not add an introduction, preamble, explanation, disclaimer, or text after the final Continuity section.
 
-CHAPTER COUNT
-Generate exactly {{requested_count}} NEW chapters.
-Start at Chapter {{next_chapter}} and end at Chapter {{last_new_chapter}}.
+CHAPTER COUNT AND BOUNDARIES
+The required number of new chapters, the required first chapter number, and the required final chapter number are supplied in the task/user context for this generation.
+Follow those values exactly.
 Never renumber, rewrite, summarize, or repeat existing chapters.
+Stop immediately after the final requested new chapter's Continuity section.
 
 FINAL INTERNAL CHECK
 Before returning the response, verify internally:
-1. exactly {{requested_count}} new chapters are present;
-2. numbering starts at {{next_chapter}} and ends at {{last_new_chapter}} with no gaps or duplicates;
+1. the number of new chapters exactly matches the requested count supplied in the task/user context;
+2. numbering starts at the required next chapter and ends at the required final new chapter with no gaps or duplicates;
 3. each chapter has exactly Chapter Plan and Continuity;
 4. Chapter Plans preserve every concrete requested event assigned to that chapter;
 5. Chapter Plans contain multiple concrete beats when the source provides enough material;
