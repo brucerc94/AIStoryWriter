@@ -1,0 +1,124 @@
+name: Remove Change Chapter Previous Summary
+
+on:
+  push:
+    branches: [bugfixes]
+    paths:
+      - .github/workflows/_remove_change_prev_summary.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: bugfixes
+          fetch-depth: 0
+
+      - name: Patch Change Chapter
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          import subprocess
+
+          path = Path('engine/change_chapter.py')
+          text = path.read_text(encoding='utf-8')
+
+          # Remove the dedicated previous-chapter summary call and constant.
+          text, n = re.subn(
+              r'\nPREV_CHAPTER_CAP = 14000\n',
+              '\n',
+              text,
+              count=1,
+          )
+          if n != 1:
+              raise SystemExit('PREV_CHAPTER_CAP not found')
+
+          text, n = re.subn(
+              r'\nNO_PREVIOUS_CHAPTER = .*?\n\ndef plan_change',
+              '\n\ndef plan_change',
+              text,
+              count=1,
+              flags=re.S,
+          )
+          if n != 1:
+              raise SystemExit('summarize_previous_chapter block not found')
+
+          # Remove the previous-summary argument and section from rewrite context.
+          text = text.replace(
+              'def build_clean_context_sections(worker, chapter_num: int, prev_summary: str) -> str:',
+              'def build_clean_context_sections(worker, chapter_num: int) -> str:',
+              1,
+          )
+          text, n = re.subn(
+              r'\n    sections = \[\n        prompts\.render\("change_chapter/section", heading="STORY CONTINUITY", body=f"Previous Chapter Summary:\\n\{prev_summary\}"\),\n        prompts\.render\("change_chapter/section", heading="CHARACTERS", body=characters\),\n    \]',
+              '\n    sections = [\n        prompts.render("change_chapter/section", heading="CHARACTERS", body=characters),\n    ]',
+              text,
+              count=1,
+          )
+          if n != 1:
+              raise SystemExit('STORY CONTINUITY section not found')
+
+          text = text.replace(
+              'worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str, prev_summary: str,',
+              'worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str,',
+              1,
+          )
+          text = text.replace(
+              'context_sections=build_clean_context_sections(worker, chapter_num, prev_summary),',
+              'context_sections=build_clean_context_sections(worker, chapter_num),',
+              1,
+          )
+
+          # Do not calculate or pass previous chapter summary during Change Chapter.
+          text, n = re.subn(
+              r'\n\s*prev_summary = summarize_previous_chapter\(worker, chapter_num\)\n',
+              '\n',
+              text,
+              count=1,
+          )
+          if n != 1:
+              raise SystemExit('prev_summary runtime assignment not found')
+
+          text = text.replace(
+              'build_full_rewrite_prompt(worker, chapter_num, original_content, instruction, checklist, prev_summary)',
+              'build_full_rewrite_prompt(worker, chapter_num, original_content, instruction, checklist)',
+              1,
+          )
+
+          text = text.replace(
+              'CHANGE_CHAPTER workflow: continuity summary → checklist plan → full rewrite',
+              'CHANGE_CHAPTER workflow: checklist plan → full rewrite',
+              1,
+          )
+          path.write_text(text, encoding='utf-8')
+
+          for p in [
+              Path('engine/prompts/change_chapter/summarize_previous_chapter_system.txt'),
+              Path('engine/prompts/change_chapter/summarize_previous_chapter_user.txt'),
+          ]:
+              if p.exists():
+                  p.unlink()
+
+          remaining = subprocess.run(
+              ['git', 'grep', '-n', '-E', 'summarize_previous_chapter|prev_summary|PREV_CHAPTER_CAP'],
+              capture_output=True, text=True
+          )
+          if remaining.returncode == 0 and remaining.stdout.strip():
+              raise SystemExit('Old previous-summary references remain:\n' + remaining.stdout)
+
+          compile_targets = ['engine/change_chapter.py']
+          for target in compile_targets:
+              compile(target)
+
+          subprocess.run(['git', 'config', 'user.name', 'github-actions[bot]'], check=True)
+          subprocess.run(['git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], check=True)
+          subprocess.run(['git', 'add', 'engine/change_chapter.py',
+                          'engine/prompts/change_chapter/summarize_previous_chapter_system.txt',
+                          'engine/prompts/change_chapter/summarize_previous_chapter_user.txt'], check=True)
+          subprocess.run(['git', 'commit', '-m', 'fix: remove previous chapter summary from change chapter'], check=True)
+          subprocess.run(['git', 'push', 'origin', 'HEAD:bugfixes'], check=True)
