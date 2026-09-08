@@ -1,0 +1,67 @@
+name: Apply continuity code fix
+
+on:
+  push:
+    branches: [bugfixes]
+    paths:
+      - .github/workflows/_apply_continuity_codefix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: bugfixes
+          fetch-depth: 0
+      - name: Patch continuation state
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          wf = Path("engine/workflow.py")
+          text = wf.read_text()
+          old = '''        tail = chapter_text[-2000:].strip()\n\n\n        completed = sorted(c.number for c in self.project.chapters if c.number != chapter_num and c.content)\n'''
+          new = '''        # Continuations must retain enough local prose to identify the active scene and\n        # enough authoritative project state to prevent character/location/POV drift.\n        tail = chapter_text[-5000:].strip()\n\n        outline_context = self._extract_chapter_outline_section(chapter_num) or chapter_goal\n        outline_context = outline_context.strip()[-3500:]\n        characters_context = format_characters_block(self.project.characters[:12]) or "(none)"\n        characters_context = characters_context.strip()[-1800:]\n        world_context = (self.project.world or "").strip() or "(none)"\n        world_context = world_context[-1000:]\n        memory_context = (self.project.memory or "").strip() or "(none)"\n        memory_context = memory_context[-1000:]\n        previous_chapter_tail = "(none)"\n        if chapter_num > 1:\n            previous = next((c for c in self.project.chapters if c.number == chapter_num - 1), None)\n            if previous and previous.content:\n                previous_chapter_tail = previous.content[-800:].strip()\n\n        continuity_context = prompts.render(\n            "change_chapter/section",\n            heading="CONTINUITY ANCHORS — AUTHORITATIVE",\n            body=(\n                f"Chapter outline:\\n{outline_context or '(none)'}\\n\\n"\n                f"Established characters:\\n{characters_context}\\n\\n"\n                f"World/setting anchors:\\n{world_context}\\n\\n"\n                f"Story memory:\\n{memory_context}\\n\\n"\n                f"End of previous chapter (continuity only):\\n{previous_chapter_tail}"\n            ),\n        )\n\n        completed = sorted(c.number for c in self.project.chapters if c.number != chapter_num and c.content)\n'''
+          if old not in text:
+              raise SystemExit("workflow.py continuation target not found")
+          text = text.replace(old, new, 1)
+
+          old = '''            checklist_block=checklist_block,\n            chapter_tail=tail,\n        )\n'''
+          new = '''            checklist_block=checklist_block,\n            continuity_context=continuity_context,\n            chapter_tail=tail,\n        )\n'''
+          if old not in text:
+              raise SystemExit("workflow.py prompt-call target not found")
+          text = text.replace(old, new, 1)
+          wf.write_text(text)
+
+          cc = Path("engine/change_chapter.py")
+          text = cc.read_text()
+          pattern = re.compile(r'def _build_continuation_prompt\(worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str, missing: list\[str\] \| None\) -> tuple\[str, str\]:\n.*?\n    return system, user\n', re.S)
+          match = pattern.search(text)
+          if not match:
+              raise SystemExit("change_chapter.py continuation function not found")
+          new_func = '''def _build_continuation_prompt(worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str, missing: list[str] | None) -> tuple[str, str]:\n    # Keep a larger local prose window and pair it with compact authoritative state.\n    # This prevents character/location/POV drift after a token-limit continuation.\n    tail = chapter_content[-7000:].strip()\n    missing_text = "\\n".join(f"- {item}" for item in (missing or [])) or "(none identified; verify the original request yourself)"\n    language = worker._response_language()\n\n    project = worker.project\n    characters = format_characters_block(project.characters[:12]) or "(none)"\n    characters = characters.strip()[-1800:]\n    world = _cap(project.world, 1200, "world notes") or "(none)"\n    memory = _cap(project.memory, 1200, "story memory") or "(none)"\n    outline = extract_outline_section(project.outline, chapter_num) or "(none)"\n    outline = outline.strip()[-3000:]\n\n    continuity_context = prompts.render(\n        "change_chapter/section",\n        heading="CONTINUITY ANCHORS — AUTHORITATIVE",\n        body=(\n            f"Current chapter plan:\\n{outline}\\n\\n"\n            f"Established characters:\\n{characters}\\n\\n"\n            f"World/setting anchors:\\n{world}\\n\\n"\n            f"Story memory:\\n{memory}"\n        ),\n    )\n\n    system = prompts.render("change_chapter/continue_system", language_note=f" Continue in {language}." if language else "")\n    user = prompts.render(\n        "change_chapter/continue_user",\n        chapter_number=chapter_num,\n        chapter_title=_chapter_title(worker, chapter_num),\n        instruction=instruction.strip(),\n        checklist=checklist.strip() or "(none)",\n        missing_text=missing_text,\n        continuity_context=continuity_context,\n        chapter_tail=tail,\n    )\n    return system, user\n'''
+          text = text[:match.start()] + new_func + text[match.end():]
+          cc.write_text(text)
+
+          py = Path("tests/test_continuity.py")
+          if not py.exists():
+              raise SystemExit("tests/test_continuity.py missing")
+
+          import ast
+          ast.parse(wf.read_text())
+          ast.parse(cc.read_text())
+
+          git = __import__("subprocess")
+          git.run(["git", "config", "user.name", "github-actions[bot]"], check=True)
+          git.run(["git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"], check=True)
+          git.run(["git", "add", "engine/workflow.py", "engine/change_chapter.py"], check=True)
+          if git.run(["git", "diff", "--cached", "--quiet"]).returncode == 0:
+              print("No code changes needed")
+          else:
+              git.run(["git", "commit", "-m", "fix: preserve chapter state across continuation passes"], check=True)
+              git.run(["git", "push", "origin", "HEAD:bugfixes"], check=True)
