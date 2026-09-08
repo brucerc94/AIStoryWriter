@@ -45,3 +45,5 @@ jobs:
           git add engine/workflow.py engine/change_chapter.py .github/workflows/_remove_chapter_world_update.yml
           git commit -m 'fix: keep chapter workflows from updating world' || exit 0
           git push origin HEAD:bugfixes
+
+# trigger cleanup
