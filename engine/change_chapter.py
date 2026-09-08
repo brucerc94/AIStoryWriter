@@ -100,15 +100,17 @@ def _build_remaining_checklist(checklist: str, completed_ids: set[int] | None = 
 
 
 def _reconcile_checklist_progress(result: dict, checklist: str, prior_done_ids: set[int] | None = None) -> dict:
-    """Keep checklist progress monotonic across append-only continuation passes."""
+    """Reconcile checklist progress without allowing stale state to override the current draft."""
     expected = dict(parse_checklist_items(checklist))
-    confirmed = set(prior_done_ids or ())
-    confirmed.update(int(value) for value in result.get("done_ids", []) if str(value).lstrip("-").isdigit())
+    prior = set(prior_done_ids or ())
+    current_done = set(result.get("done_ids", []))
+    current_missing = set(result.get("missing_ids", []))
 
-    missing_ids = set(result.get("missing_ids", []))
-    # Once a checklist item has been confirmed complete, later evaluators
-    # must not regress it to pending because continuation passes only append.
-    missing_ids = {item_id for item_id in missing_ids if item_id not in confirmed or item_id == 0}
+    # The evaluator sees the full accumulated chapter and is authoritative.
+    # Prior confirmations are only a fallback when the latest evaluator did
+    # not account for an ID at all. An explicit current missing ID revokes a
+    # stale prior confirmation, preventing false-positive future completion.
+    confirmed = current_done | (prior - current_missing - current_done)
 
     filtered_missing: list[str] = []
     for entry in result.get("missing", []) or []:
@@ -117,26 +119,25 @@ def _reconcile_checklist_progress(result: dict, checklist: str, prior_done_ids: 
             continue
         filtered_missing.append(str(entry).strip())
 
-    # Every still-pending checklist item must remain explicit even if an
-    # evaluator omitted it from its latest JSON response.
+    missing_ids = set(current_missing)
     for item_id, label in expected.items():
         if item_id not in confirmed and item_id not in missing_ids:
             missing_ids.add(item_id)
             filtered_missing.append(f"{item_id}: {label}")
 
-    deduped_missing = []
-    seen = set()
+    deduped_missing: list[str] = []
+    seen: set[str] = set()
     for entry in filtered_missing:
         if entry and entry not in seen:
             deduped_missing.append(entry)
             seen.add(entry)
 
+    confirmed -= (missing_ids - {0})
     result["done_ids"] = sorted(confirmed)
     result["missing_ids"] = sorted(missing_ids)
     result["missing"] = deduped_missing
     result["completed"] = bool(expected) and set(expected).issubset(confirmed) and not missing_ids and not deduped_missing
     return result
-
 
 def build_clean_context_sections(worker, chapter_num: int, selection_source: str = "") -> str:
     """Assemble scoped canon context for the target chapter only."""
