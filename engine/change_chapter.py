@@ -17,7 +17,7 @@ import logging
 import re
 
 from engine import prompts
-from engine.context import extract_outline_section, format_characters_block
+from engine.context import budget_allocate, extract_outline_section, format_characters_block
 from engine.models import ChatMessage, MessageRole, TaskType
 
 logger = logging.getLogger("workflow")
@@ -340,32 +340,72 @@ def ends_abruptly(text: str) -> bool:
 
 
 def _build_continuation_prompt(worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str, missing: list[str] | None) -> tuple[str, str]:
-    # Preserve enough recent prose for scene continuity and pair it with compact
-    # authoritative anchors so a continuation cannot silently swap characters,
-    # location, POV, or established relationships.
-    # 3500 chars keeps ~875 tokens of prose while leaving room for the anchors
-    # within a ctx=8192 context.
-    tail = chapter_content[-3500:].strip()
+    """
+    Build the system + user prompt for a Change Chapter continuation pass.
+
+    Uses a dynamic budget so continuity anchors are never silently truncated
+    before the recent prose tail: the available character budget is derived
+    from the live model context size and the configured reply reservation,
+    then distributed across slots in priority order via budget_allocate().
+    """
+    # ------------------------------------------------------------------
+    # Dynamic budget
+    # ------------------------------------------------------------------
+    CHARS_PER_TOKEN = 4
+    FIXED_OVERHEAD_TOKENS = 700   # system prompt + template skeleton + instruction/checklist
+    try:
+        ctx_tokens = worker._model_context_limit()
+    except Exception:
+        ctx_tokens = 4096
+    reply_tokens = worker._content_max_tokens()
+    prompt_token_budget = max(256, ctx_tokens - reply_tokens - FIXED_OVERHEAD_TOKENS)
+    total_chars = prompt_token_budget * CHARS_PER_TOKEN
+
     missing_text = "\n".join(f"- {item}" for item in (missing or [])) or "(none identified; verify the original request yourself)"
     language = worker._response_language()
 
     project = worker.project
-    characters = format_characters_block(project.characters[:12]) or "(none)"
-    characters = characters.strip()[-1800:]
-    world = _cap(project.world, 1200, "world notes") or "(none)"
-    memory = _cap(project.memory, 1200, "story memory") or "(none)"
-    outline = extract_outline_section(project.outline, chapter_num) or "(none)"
-    outline = outline.strip()[-3000:]
+    outline_raw    = (extract_outline_section(project.outline, chapter_num) or "").strip() or "(none)"
+    characters_raw = (format_characters_block(project.characters[:12]) or "(none)").strip()
+    world_raw      = _cap(project.world, 8000, "world notes") or "(none)"
+    memory_raw     = _cap(project.memory, 8000, "story memory") or "(none)"
+    prose_tail_raw = chapter_content.strip()
+
+    # Fixed text that doesn't participate in budget allocation.
+    fixed_chars = len(instruction) + len(checklist) + len(missing_text)
+    variable_budget = max(400, total_chars - fixed_chars)
+
+    # Priority order: outline > characters > world > memory > prose tail.
+    # Prose tail gets the largest minimum (scene-state continuity), but
+    # anchors always appear first and are never bumped off by the tail.
+    slots = [
+        # (name,         full_text,      min_chars)
+        ("outline",     outline_raw,    min(len(outline_raw),    800)),
+        ("characters",  characters_raw, min(len(characters_raw), 600)),
+        ("world",       world_raw,      min(len(world_raw),      400)),
+        ("memory",      memory_raw,     min(len(memory_raw),     400)),
+        ("prose_tail",  prose_tail_raw, min(len(prose_tail_raw), 1600)),
+    ]
+    allocated = budget_allocate(variable_budget, slots)
 
     continuity_context = prompts.render(
         "change_chapter/section",
         heading="CONTINUITY ANCHORS — AUTHORITATIVE",
         body=(
-            f"Current chapter plan:\n{outline}\n\n"
-            f"Established characters:\n{characters}\n\n"
-            f"World/setting anchors:\n{world}\n\n"
-            f"Story memory:\n{memory}"
+            f"Current chapter plan:\n{allocated['outline']}\n\n"
+            f"Established characters:\n{allocated['characters']}\n\n"
+            f"World/setting anchors:\n{allocated['world']}\n\n"
+            f"Story memory:\n{allocated['memory']}"
         ),
+    )
+
+    logger.debug(
+        "[change_chapter] continuation budget: ctx=%d reply=%d prompt_budget=%d chars "
+        "outline=%d chars=%d world=%d memory=%d tail=%d",
+        ctx_tokens, reply_tokens, total_chars,
+        len(allocated["outline"]), len(allocated["characters"]),
+        len(allocated["world"]), len(allocated["memory"]),
+        len(allocated["prose_tail"]),
     )
 
     system = prompts.render("change_chapter/continue_system", language_note=f" Continue in {language}." if language else "")
@@ -377,7 +417,7 @@ def _build_continuation_prompt(worker, chapter_num: int, chapter_content: str, i
         checklist=checklist.strip() or "(none)",
         missing_text=missing_text,
         continuity_context=continuity_context,
-        chapter_tail=tail,
+        chapter_tail=allocated["prose_tail"],
     )
     return system, user
 

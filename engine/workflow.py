@@ -17,6 +17,7 @@ from engine.context import (
     build_system_prompt,
     estimate_messages_tokens,
     build_summarization_prompt,
+    budget_allocate,
     format_characters_block,
     mark_old_messages_summarized,
     should_summarize,
@@ -2033,45 +2034,42 @@ class WorkflowWorker(QObject):
         checklist: str = "",
         missing: "list[str] | None" = None,
     ) -> str:
+        # ------------------------------------------------------------------
+        # Dynamic budget allocation
+        # ------------------------------------------------------------------
+        # Tokens available for the variable content in this continuation
+        # prompt.  We subtract a generous estimate for the fixed prose in the
+        # template itself (~350 tokens) and the system prompt (~300 tokens).
+        CHARS_PER_TOKEN = 4
+        FIXED_OVERHEAD_TOKENS = 650          # system prompt + template skeleton
+        try:
+            ctx_tokens = self._model_context_limit()
+        except Exception:
+            ctx_tokens = 4096
+        reply_tokens = self._content_max_tokens()
+        prompt_token_budget = max(256, ctx_tokens - reply_tokens - FIXED_OVERHEAD_TOKENS)
+        total_chars = prompt_token_budget * CHARS_PER_TOKEN
 
-        # Tail: enough recent prose to maintain scene state, but compact so the
-        # continuity anchors (Characters/World/Memory/outline) are not crowded out.
-        tail = chapter_text[-3500:].strip()
-
-        outline_context = self._extract_chapter_outline_section(chapter_num) or chapter_goal
-        outline_context = outline_context.strip()[-2500:]
-        characters_context = format_characters_block(self.project.characters[:12]) or "(none)"
-        characters_context = characters_context.strip()[-1500:]
-        world_context = (self.project.world or "").strip() or "(none)"
-        world_context = world_context[-800:]
-        memory_context = (self.project.memory or "").strip() or "(none)"
-        memory_context = memory_context[-800:]
-        previous_chapter_tail = "(none)"
+        # Collect raw content for each slot (un-capped).
+        outline_raw   = (self._extract_chapter_outline_section(chapter_num) or chapter_goal or "").strip()
+        chars_raw     = (format_characters_block(self.project.characters[:12]) or "(none)").strip()
+        world_raw     = (self.project.world or "").strip() or "(none)"
+        memory_raw    = (self.project.memory or "").strip() or "(none)"
+        prev_tail_raw = "(none)"
         if chapter_num > 1:
-            previous = next((c for c in self.project.chapters if c.number == chapter_num - 1), None)
-            if previous and previous.content:
-                previous_chapter_tail = previous.content[-800:].strip()
+            prev = next((c for c in self.project.chapters if c.number == chapter_num - 1), None)
+            if prev and prev.content:
+                prev_tail_raw = prev.content[-1200:].strip()
+        prose_tail_raw = chapter_text.strip()
 
-        continuity_context = prompts.render(
-            "change_chapter/section",
-            heading="CONTINUITY ANCHORS — AUTHORITATIVE",
-            body=(
-                f"Chapter outline:\n{outline_context or '(none)'}\n\n"
-                f"Established characters:\n{characters_context}\n\n"
-                f"World/setting anchors:\n{world_context}\n\n"
-                f"Story memory:\n{memory_context}\n\n"
-                f"End of previous chapter (continuity only):\n{previous_chapter_tail}"
-            ),
-        )
-
+        # Build checklist block (fixed text – not dynamically budgeted).
+        completed_note = ""
         completed = sorted(c.number for c in self.project.chapters if c.number != chapter_num and c.content)
         if completed:
             completed_note = (
                 f"\nChapters already fully written and saved: {', '.join(str(n) for n in completed)}. "
-                f"Do NOT rewrite any of them.\n"
+                "Do NOT rewrite any of them.\n"
             )
-        else:
-            completed_note = ""
 
         checklist_block = ""
         if checklist:
@@ -2080,8 +2078,54 @@ class WorkflowWorker(QObject):
             checklist_block = "\n" + prompts.render(
                 "change_chapter/section",
                 heading="INTERNAL REQUIREMENTS CHECKLIST — STILL-MISSING ITEMS MUST BE ADDRESSED FIRST",
-                body=f"Full checklist (internal — never expose to the reader):\n{checklist}\n\nStill missing:\n{missing_text}",
+                body=(
+                    f"Full checklist (internal — never expose to the reader):\n{checklist}"
+                    f"\n\nStill missing:\n{missing_text}"
+                ),
             )
+
+        # Subtract fixed text from the budget before allocating variable slots.
+        fixed_chars = len(completed_note) + len(checklist_block)
+        variable_budget = max(400, total_chars - fixed_chars)
+
+        # Priority order (highest → lowest).  Minimums guarantee the model
+        # always sees something in each slot; surplus fills remaining space.
+        #
+        # Priority:  outline > characters > world+memory > prev_tail > prose_tail
+        # The prose tail gets the largest minimum because scene-state continuity
+        # depends on it, but outline and characters always appear in full when
+        # the budget permits.
+        slots = [
+            # (name,         full_text,     min_chars)
+            ("outline",     outline_raw,   min(len(outline_raw),  800)),
+            ("characters",  chars_raw,     min(len(chars_raw),    600)),
+            ("world",       world_raw,     min(len(world_raw),    400)),
+            ("memory",      memory_raw,    min(len(memory_raw),   400)),
+            ("prev_tail",   prev_tail_raw, min(len(prev_tail_raw), 300)),
+            ("prose_tail",  prose_tail_raw, min(len(prose_tail_raw), 1600)),
+        ]
+        allocated = budget_allocate(variable_budget, slots)
+
+        continuity_context = prompts.render(
+            "change_chapter/section",
+            heading="CONTINUITY ANCHORS — AUTHORITATIVE",
+            body=(
+                f"Chapter outline:\n{allocated['outline'] or '(none)'}\n\n"
+                f"Established characters:\n{allocated['characters'] or '(none)'}\n\n"
+                f"World/setting anchors:\n{allocated['world'] or '(none)'}\n\n"
+                f"Story memory:\n{allocated['memory'] or '(none)'}\n\n"
+                f"End of previous chapter (continuity only):\n{allocated['prev_tail'] or '(none)'}"
+            ),
+        )
+
+        logger.debug(
+            "[write_chapter] continuation budget: ctx=%d reply=%d prompt_budget=%d chars "
+            "outline=%d chars=%d world=%d memory=%d prev=%d tail=%d",
+            ctx_tokens, reply_tokens, total_chars,
+            len(allocated["outline"]), len(allocated["characters"]),
+            len(allocated["world"]), len(allocated["memory"]),
+            len(allocated["prev_tail"]), len(allocated["prose_tail"]),
+        )
 
         return prompts.render(
             "write_chapter/continuation_user",
@@ -2091,7 +2135,7 @@ class WorkflowWorker(QObject):
             chapter_goal=chapter_goal.strip() or "(none)",
             checklist_block=checklist_block,
             continuity_context=continuity_context,
-            chapter_tail=tail,
+            chapter_tail=allocated["prose_tail"],
         )
 
     def _parse_completion_evaluation(self, text: str) -> dict:

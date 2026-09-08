@@ -428,6 +428,85 @@ def estimate_messages_tokens(messages: list[dict]) -> int:
     return _messages_token_count(messages)
 
 
+# ---------------------------------------------------------------------------
+# Dynamic prompt-budget allocator for continuation prompts
+# ---------------------------------------------------------------------------
+
+def budget_allocate(
+    total_chars: int,
+    slots: "list[tuple[str, str, int]]",
+) -> "dict[str, str]":
+    """
+    Distribute *total_chars* across priority-ordered content slots.
+
+    Parameters
+    ----------
+    total_chars : int
+        Total character budget for all variable-length content combined.
+    slots : list of (name, full_text, min_chars)
+        Ordered from highest to lowest priority.  Each slot gets at least
+        *min_chars* (or the full text if shorter), then surplus is shared
+        proportionally by remaining length among slots that still have
+        content to fill.
+
+    Returns
+    -------
+    dict[str, str]  name -> (possibly truncated) text
+
+    Notes
+    -----
+    * A slot whose full_text fits within its minimum allocation is never
+      truncated further by the proportional pass.
+    * If total_chars is too small even for all minimums, higher-priority
+      slots consume the budget first; lower-priority slots get whatever
+      remains (possibly empty).
+    * The estimator uses 4 chars ~ 1 token, consistent with _estimate_tokens.
+    """
+    result: dict[str, str] = {}
+    remaining = max(0, total_chars)
+
+    # Pass 1: allocate minimums in priority order.
+    deferred: list[tuple[str, str, int]] = []  # (name, full_text, used_so_far)
+    for name, full_text, min_chars in slots:
+        text = (full_text or "").strip()
+        if not text:
+            result[name] = ""
+            continue
+        give = min(len(text), min(remaining, min_chars))
+        result[name] = text[:give]
+        remaining -= give
+        if give < len(text):
+            deferred.append((name, text, give))
+
+    # Pass 2: distribute surplus proportionally among slots with leftover.
+    if remaining > 0 and deferred:
+        total_leftover = sum(len(t) - used for _, t, used in deferred)
+        for name, text, used in deferred:
+            if total_leftover <= 0:
+                break
+            leftover = len(text) - used
+            share = int(remaining * leftover / total_leftover)
+            share = min(share, leftover)
+            result[name] = text[: used + share]
+            remaining -= share
+            total_leftover -= leftover
+
+        # Give any rounding remainder to the last deferred slot that still has room.
+        if remaining > 0:
+            for name, text, _ in reversed(deferred):
+                current_len = len(result.get(name, ""))
+                extra = min(remaining, len(text) - current_len)
+                if extra > 0:
+                    result[name] = text[: current_len + extra]
+                    break
+
+    # Ensure every slot has an entry.
+    for name, _, _ in slots:
+        result.setdefault(name, "")
+
+    return result
+
+
 def should_summarize(project: Project, threshold: int = 30) -> bool:
     unsummarized = [
         m for m in project.chat_messages
