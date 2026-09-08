@@ -343,7 +343,9 @@ def _build_continuation_prompt(worker, chapter_num: int, chapter_content: str, i
     # Preserve enough recent prose for scene continuity and pair it with compact
     # authoritative anchors so a continuation cannot silently swap characters,
     # location, POV, or established relationships.
-    tail = chapter_content[-7000:].strip()
+    # 3500 chars keeps ~875 tokens of prose while leaving room for the anchors
+    # within a ctx=8192 context.
+    tail = chapter_content[-3500:].strip()
     missing_text = "\n".join(f"- {item}" for item in (missing or [])) or "(none identified; verify the original request yourself)"
     language = worker._response_language()
 

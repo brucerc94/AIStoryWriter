@@ -502,7 +502,11 @@ class WorkflowWorker(QObject):
             allow_nsfw=self._allow_nsfw(),
         )
         context_limit = self._model_context_limit()
-        reply_reserved = max(256, min(4096, context_limit // 3))
+        # Use the user's configured content_max_tokens as the reply budget so the
+        # prompt-builder reserves exactly that much space — not context_limit // 3,
+        # which silently caps to ~2730 at ctx=8192 and prevents the model from
+        # reaching the requested token limit.
+        reply_reserved = max(256, min(context_limit - 512, self._content_max_tokens()))
 
         candidate_budgets = [context_limit]
         for factor in (0.85, 0.70, 0.55, 0.40):
@@ -2030,18 +2034,18 @@ class WorkflowWorker(QObject):
         missing: "list[str] | None" = None,
     ) -> str:
 
-        # Keep substantially more recent prose so scene/character state survives a
-        # continuation pass, then reinforce it with compact authoritative anchors.
-        tail = chapter_text[-5000:].strip()
+        # Tail: enough recent prose to maintain scene state, but compact so the
+        # continuity anchors (Characters/World/Memory/outline) are not crowded out.
+        tail = chapter_text[-3500:].strip()
 
         outline_context = self._extract_chapter_outline_section(chapter_num) or chapter_goal
-        outline_context = outline_context.strip()[-3500:]
+        outline_context = outline_context.strip()[-2500:]
         characters_context = format_characters_block(self.project.characters[:12]) or "(none)"
-        characters_context = characters_context.strip()[-1800:]
+        characters_context = characters_context.strip()[-1500:]
         world_context = (self.project.world or "").strip() or "(none)"
-        world_context = world_context[-1000:]
+        world_context = world_context[-800:]
         memory_context = (self.project.memory or "").strip() or "(none)"
-        memory_context = memory_context[-1000:]
+        memory_context = memory_context[-800:]
         previous_chapter_tail = "(none)"
         if chapter_num > 1:
             previous = next((c for c in self.project.chapters if c.number == chapter_num - 1), None)

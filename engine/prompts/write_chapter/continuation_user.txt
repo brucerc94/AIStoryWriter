@@ -14,6 +14,8 @@ Preserve all established character identities, personalities, motivations, relat
 
 Prioritize the remaining checklist requirements, but fulfill them naturally within the existing scene and storyline. Do not force unrelated events into the continuation just to satisfy a checklist item.
 
+{{continuity_context}}
+
 {{completed_note}}
 Chapter {{chapter_number}} Goal (what must be accomplished before the chapter ends):
 {{chapter_goal}}
