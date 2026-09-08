@@ -2411,12 +2411,10 @@ class WorkflowWorker(QObject):
                 )
                 self.project.chapters.append(ch)
 
-            if chapter_accepted:
-                self._update_world_incremental(chapter_text, source_type="chapter")
-            else:
+            if not chapter_accepted:
                 logger.warning(
                     f"[write_chapter] Chapter {chapter_num} saved as INCOMPLETE — "
-                    "skipping character/world/memory updates to avoid state contamination."
+                    "skipping canon updates because chapter generation was not accepted."
                 )
             storage.save_project(self.project)
             self.step_finished.emit(f"Chapter {chapter_num}", chapter_text)
@@ -2634,7 +2632,6 @@ class WorkflowWorker(QObject):
 
     def _finalize_changed_chapter(self, chapter_num: int, chapter: Chapter) -> None:
 
-        self._update_world_incremental(chapter.content, source_type="chapter")
         self.project.current_chapter = chapter_num
 
     def _run_change_chapter(self) -> None:
