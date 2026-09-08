@@ -1,0 +1,144 @@
+name: Fix continuation checklist state
+on:
+  push:
+    branches:
+      - bugfixes
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: bugfixes
+          fetch-depth: 0
+      - name: Patch continuation checklist state
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          cc = Path('engine/change_chapter.py')
+          text = cc.read_text(encoding='utf-8')
+
+          marker = '''def build_clean_context_sections(worker, chapter_num: int, selection_source: str = "") -> str:\n'''
+          helper = '''def _build_remaining_checklist(checklist: str, completed_ids: set[int] | None = None) -> str:\n    completed = set(completed_ids or ())\n    remaining = [\n        f"{item_id}. {text}"\n        for item_id, text in parse_checklist_items(checklist)\n        if item_id not in completed\n    ]\n    return "\\n".join(remaining) or "(none)"\n\n\ndef _reconcile_checklist_progress(result: dict, checklist: str, prior_done_ids: set[int] | None = None) -> dict:\n    \"\"\"Keep checklist progress monotonic across append-only continuation passes.\"\"\"\n    expected = dict(parse_checklist_items(checklist))\n    confirmed = set(prior_done_ids or ())\n    confirmed.update(int(value) for value in result.get("done_ids", []) if str(value).lstrip("-").isdigit())\n\n    missing_ids = set(result.get("missing_ids", []))\n    # Once a checklist item has been confirmed complete, later evaluators\n    # must not regress it to pending because continuation passes only append.\n    missing_ids = {item_id for item_id in missing_ids if item_id not in confirmed or item_id == 0}\n\n    filtered_missing: list[str] = []\n    for entry in result.get("missing", []) or []:\n        match = re.match(r"^\\s*(\\d+)\\s*:", str(entry))\n        if match and int(match.group(1)) in confirmed and int(match.group(1)) != 0:\n            continue\n        filtered_missing.append(str(entry).strip())\n\n    # Every still-pending checklist item must remain explicit even if an\n    # evaluator omitted it from its latest JSON response.\n    for item_id, label in expected.items():\n        if item_id not in confirmed and item_id not in missing_ids:\n            missing_ids.add(item_id)\n            filtered_missing.append(f"{item_id}: {label}")\n\n    deduped_missing = []\n    seen = set()\n    for entry in filtered_missing:\n        if entry and entry not in seen:\n            deduped_missing.append(entry)\n            seen.add(entry)\n\n    result["done_ids"] = sorted(confirmed)\n    result["missing_ids"] = sorted(missing_ids)\n    result["missing"] = deduped_missing\n    result["completed"] = bool(expected) and set(expected).issubset(confirmed) and not missing_ids and not deduped_missing\n    return result\n\n\n'''
+          if helper not in text:
+              if marker not in text:
+                  raise SystemExit('change_chapter insertion marker not found')
+              text = text.replace(marker, helper + marker, 1)
+
+          text = text.replace(
+              'def _build_eval_prompt(worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str) -> tuple[str, str]:',
+              'def _build_eval_prompt(worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str, prior_done_ids: set[int] | None = None) -> tuple[str, str]:'
+          )
+          text = text.replace(
+              '        chapter_content=chapter_content,\n        id_list=id_list,\n',
+              '        chapter_content=chapter_content,\n        id_list=id_list,\n        prior_done_ids=", ".join(str(i) for i in sorted(prior_done_ids or set())) or "(none)",\n',
+              1,
+          )
+          text = text.replace(
+              '            completed = all_items_complete if expected_items else (model_said_complete and not missing_ids)\n',
+              '            completed = all_items_complete if expected_items else (model_said_complete and not missing_ids and not missing)\n',
+              1,
+          )
+          text = text.replace(
+              'def evaluate_change(worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str, pass_number: int) -> dict:',
+              'def evaluate_change(worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str, pass_number: int, prior_done_ids: set[int] | None = None) -> dict:'
+          )
+          text = text.replace(
+              '    system, user = _build_eval_prompt(worker, chapter_num, chapter_content, instruction, checklist)\n',
+              '    system, user = _build_eval_prompt(worker, chapter_num, chapter_content, instruction, checklist, prior_done_ids)\n',
+              1,
+          )
+          text = text.replace(
+              '        if parsed["valid"]:\n            final = parsed\n',
+              '        if parsed["valid"]:\n            final = _reconcile_checklist_progress(parsed, checklist, prior_done_ids)\n',
+              1,
+          )
+
+          text = text.replace(
+              'def _build_continuation_prompt(worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str, missing: list[str] | None) -> tuple[str, str]:',
+              'def _build_continuation_prompt(worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str, missing: list[str] | None, completed_ids: set[int] | None = None, remaining_checklist: str = "") -> tuple[str, str]:'
+          )
+          text = text.replace(
+              '        checklist=checklist.strip() or "(none)",\n        missing_text=missing_text,\n',
+              '        checklist=checklist.strip() or "(none)",\n        completed_ids=", ".join(str(i) for i in sorted(completed_ids or set())) or "(none)",\n        remaining_checklist=remaining_checklist.strip() or _build_remaining_checklist(checklist, completed_ids),\n        missing_text=missing_text,\n',
+              1,
+          )
+          text = text.replace(
+              'def continue_rewrite(worker, chapter_num: int, chapter, instruction: str, checklist: str, pass_number: int, missing: list[str] | None = None) -> bool:',
+              'def continue_rewrite(worker, chapter_num: int, chapter, instruction: str, checklist: str, pass_number: int, missing: list[str] | None = None, completed_ids: set[int] | None = None, remaining_checklist: str = "") -> bool:'
+          )
+          text = text.replace(
+              '    system, user = _build_continuation_prompt(worker, chapter_num, chapter.content, instruction, checklist, missing)\n',
+              '    system, user = _build_continuation_prompt(worker, chapter_num, chapter.content, instruction, checklist, missing, completed_ids, remaining_checklist)\n',
+              1,
+          )
+          text = text.replace(
+              '    consecutive_invalid_evals = 0\n    for pass_number in range(1, MAX_CHANGE_PASSES + 1):\n        evaluation = evaluate_change(worker, chapter_num, chapter.content, instruction, checklist, pass_number)\n',
+              '    consecutive_invalid_evals = 0\n    confirmed_done_ids: set[int] = set()\n    for pass_number in range(1, MAX_CHANGE_PASSES + 1):\n        evaluation = evaluate_change(worker, chapter_num, chapter.content, instruction, checklist, pass_number, confirmed_done_ids)\n',
+              1,
+          )
+          text = text.replace(
+              '        consecutive_invalid_evals = 0\n\n\n\n        if ends_abruptly(chapter.content):\n',
+              '        consecutive_invalid_evals = 0\n        confirmed_done_ids.update(evaluation.get("done_ids", []))\n        remaining_checklist = _build_remaining_checklist(checklist, confirmed_done_ids)\n\n\n        if ends_abruptly(chapter.content):\n',
+              1,
+          )
+          text = text.replace(
+              'continued = continue_rewrite(worker, chapter_num, chapter, instruction, checklist, pass_number + 1, evaluation.get("missing", []))',
+              'continued = continue_rewrite(worker, chapter_num, chapter, instruction, checklist, pass_number + 1, evaluation.get("missing", []), confirmed_done_ids, remaining_checklist)',
+              1,
+          )
+
+          # The module has no reason to keep an obsolete memory cap now that
+          # Change Chapter never consumes story memory, but leave unrelated code alone.
+          cc.write_text(text, encoding='utf-8')
+
+          wf = Path('engine/workflow.py')
+          text = wf.read_text(encoding='utf-8')
+          text = text.replace(
+              '        checklist: str = "",\n        missing: "list[str] | None" = None,\n    ) -> str:',
+              '        checklist: str = "",\n        missing: "list[str] | None" = None,\n        completed_ids: set[int] | None = None,\n        remaining_checklist: str = "",\n    ) -> str:',
+              1,
+          )
+          text = text.replace(
+              '            checklist_block=checklist_block,\n            continuity_context=continuity_context,\n',
+              '            checklist_block=checklist_block,\n            completed_ids=", ".join(str(i) for i in sorted(completed_ids or set())) or "(none)",\n            remaining_checklist=remaining_checklist.strip() or change_chapter._build_remaining_checklist(checklist, completed_ids),\n            continuity_context=continuity_context,\n',
+              1,
+          )
+          text = text.replace(
+              '        missing_items: list[str] = []\n        evaluation = {"completed": True, "confidence": 100, "reason": "", "next": ""}\n',
+              '        missing_items: list[str] = []\n        confirmed_done_ids: set[int] = set()\n        remaining_checklist = change_chapter._build_remaining_checklist(checklist, confirmed_done_ids) if checklist else ""\n        evaluation = {"completed": True, "confidence": 100, "reason": "", "next": ""}\n',
+              1,
+          )
+          text = text.replace(
+              '                    checklist,\n                    missing_items,\n                )\n',
+              '                    checklist,\n                    missing_items,\n                    confirmed_done_ids,\n                    remaining_checklist,\n                )\n',
+              1,
+          )
+          text = text.replace(
+              '                    self, chapter_num, f"Chapter {chapter_num}", chapter_text, outline_entry, checklist, generation_pass,\n',
+              '                    self, chapter_num, f"Chapter {chapter_num}", chapter_text, outline_entry, checklist, generation_pass, confirmed_done_ids,\n',
+              1,
+          )
+          text = text.replace(
+              '                missing_items = evaluation.get("missing", [])\n',
+              '                confirmed_done_ids.update(evaluation.get("done_ids", []))\n                remaining_checklist = change_chapter._build_remaining_checklist(checklist, confirmed_done_ids)\n                missing_items = evaluation.get("missing", [])\n',
+              1,
+          )
+          wf.write_text(text, encoding='utf-8')
+
+          # Verify syntax.
+          compile(cc.read_text(encoding='utf-8'), 'engine/change_chapter.py', 'exec')
+          compile(wf.read_text(encoding='utf-8'), 'engine/workflow.py', 'exec')
+          print('syntax OK')
+          PY
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          rm -f .github/workflows/_fix_continuation_checklist.yml
+          git add engine/change_chapter.py engine/workflow.py .github/workflows/_fix_continuation_checklist.yml
+          git commit -m 'fix: preserve checklist progress across chapter continuations'
+          git push origin HEAD:bugfixes
