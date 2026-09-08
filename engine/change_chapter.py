@@ -34,6 +34,20 @@ MAX_CONSECUTIVE_INVALID_EVALS = 2
 
 
 
+
+def _chapter_title(worker, chapter_num: int) -> str:
+    return next(
+        (c.title for c in worker.project.chapters if c.number == chapter_num),
+        f"Chapter {chapter_num}",
+    )
+
+
+def _cap(text: str, limit: int, label: str) -> str:
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    return f"[... earlier {label} omitted for length ...]\n\n" + text[-limit:]
+
 def plan_change(worker, chapter_num: int, chapter_content: str, instruction: str) -> str:
     system = prompts.render("change_chapter/plan_system")
     user = prompts.render(
