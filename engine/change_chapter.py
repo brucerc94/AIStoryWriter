@@ -1,5 +1,5 @@
 """
-CHANGE_CHAPTER workflow: continuity summary → checklist plan → full rewrite
+CHANGE_CHAPTER workflow: checklist plan → full rewrite
 with clean context → checklist evaluation → continuation until complete.
 
 Characters/World/Memory are refreshed only once the chapter is accepted.
@@ -31,69 +31,6 @@ MAX_CHANGE_EVAL_TOKENS = 3072
 _DUPLICATE_OVERLAP_RATIO = 0.60
 
 MAX_CONSECUTIVE_INVALID_EVALS = 2
-
-
-PREV_CHAPTER_CAP = 14000
-WORLD_CAP = 6000
-MEMORY_CAP = 5000
-CHAPTER_CAP = 20000
-
-
-def _chapter_title(worker, chapter_num: int) -> str:
-    return next(
-        (c.title for c in worker.project.chapters if c.number == chapter_num),
-        f"Chapter {chapter_num}",
-    )
-
-
-def _cap(text: str, limit: int, label: str) -> str:
-    text = (text or "").strip()
-    if len(text) <= limit:
-        return text
-    return f"[... earlier {label} omitted for length ...]\n\n" + text[-limit:]
-
-
-
-
-
-
-NO_PREVIOUS_CHAPTER = "No previous chapter. This is the beginning of the story."
-
-
-def summarize_previous_chapter(worker, chapter_num: int) -> str:
-    """Summarise the previous chapter for continuity context. Not saved or shown in chat."""
-    if chapter_num <= 1:
-        return NO_PREVIOUS_CHAPTER
-
-    prev = next((c for c in worker.project.chapters if c.number == chapter_num - 1), None)
-    if not prev or not prev.content.strip():
-        return NO_PREVIOUS_CHAPTER
-
-    prev_content = _cap(prev.content, PREV_CHAPTER_CAP, "part of the chapter")
-    language = worker._response_language()
-
-    system = prompts.render(
-        "change_chapter/summarize_previous_chapter_system",
-        language_note=f" Write the summary in {language}." if language else "",
-    )
-    user = prompts.render(
-        "change_chapter/summarize_previous_chapter_user",
-        chapter_number=prev.number,
-        chapter_title=prev.title.strip() or "Untitled",
-        chapter_content=prev_content,
-    )
-
-    logger.info("[change_chapter] Stage 1: summarising Chapter %d for continuity.", prev.number)
-    worker.step_started.emit(f"Summarising Chapter {prev.number} for continuity context...")
-
-    summary = worker._run_lean_inference(TaskType.CHANGE_CHAPTER, system, user, max_tokens=1024)
-    if not summary or not summary.strip():
-        logger.warning("[change_chapter] Stage 1: summary call returned empty — using sentinel instead.")
-        return NO_PREVIOUS_CHAPTER
-    return summary.strip()
-
-
-
 
 
 
@@ -134,8 +71,8 @@ def parse_checklist_items(checklist: str) -> list[tuple[int, str]]:
 
 
 
-def build_clean_context_sections(worker, chapter_num: int, prev_summary: str) -> str:
-    """Assemble the clean context block (no full outline, chat history, or previous chapter text)."""
+def build_clean_context_sections(worker, chapter_num: int) -> str:
+    """Assemble clean context for the target chapter only."""
     project = worker.project
 
     characters = format_characters_block(project.characters[:12]) or "(none)"
@@ -146,7 +83,6 @@ def build_clean_context_sections(worker, chapter_num: int, prev_summary: str) ->
     chapter_outline = extract_outline_section(project.outline, chapter_num) or "(no outline entry for this chapter)"
 
     sections = [
-        prompts.render("change_chapter/section", heading="STORY CONTINUITY", body=f"Previous Chapter Summary:\n{prev_summary}"),
         prompts.render("change_chapter/section", heading="CHARACTERS", body=characters),
     ]
     if world != "(none)":
@@ -158,12 +94,11 @@ def build_clean_context_sections(worker, chapter_num: int, prev_summary: str) ->
     if style_frag:
         sections.append(prompts.render("change_chapter/section", heading="WRITING STYLE", body=style_frag))
     sections.append(prompts.render("change_chapter/section", heading="CURRENT CHAPTER PLAN", body=chapter_outline))
-
     return "\n\n".join(sections)
 
 
 def build_full_rewrite_prompt(
-    worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str, prev_summary: str,
+    worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str,
 ) -> tuple[str, str]:
     style_frag = worker.project.writing_style.to_prompt_fragment()
     language = worker._response_language()
@@ -179,14 +114,10 @@ def build_full_rewrite_prompt(
         chapter_title=_chapter_title(worker, chapter_num),
         instruction=instruction.strip(),
         checklist=checklist.strip() or "(none; follow the original request directly)",
-        context_sections=build_clean_context_sections(worker, chapter_num, prev_summary),
+        context_sections=build_clean_context_sections(worker, chapter_num),
         chapter_content=_cap(chapter_content, CHAPTER_CAP, "part of the chapter"),
     )
     return system, user
-
-
-
-
 
 
 def _build_eval_prompt(worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str) -> tuple[str, str]:
@@ -501,7 +432,6 @@ def run(worker) -> None:
     original_content = chapter.content
 
 
-    prev_summary = summarize_previous_chapter(worker, chapter_num)
 
 
     worker.step_started.emit(f"Planning Change Chapter {chapter_num}...")
@@ -509,7 +439,7 @@ def run(worker) -> None:
 
 
     worker.step_started.emit(f"Rewriting Chapter {chapter_num} with your changes...")
-    system, user = build_full_rewrite_prompt(worker, chapter_num, original_content, instruction, checklist, prev_summary)
+    system, user = build_full_rewrite_prompt(worker, chapter_num, original_content, instruction, checklist)
     rewritten = worker._run_lean_inference(TaskType.CHANGE_CHAPTER, system, user, max_tokens=worker._content_max_tokens())
     if not rewritten or not rewritten.strip():
         worker.error_occurred.emit("The model returned no rewritten chapter.")
