@@ -12,14 +12,23 @@ Do NOT invent new characters, relationships, locations, facts, motivations, conf
 
 Preserve all established character identities, personalities, motivations, relationships, world rules, continuity, tone, tense, and point of view. Treat established character relationships as canon unless the outline or author's explicit request requires a change.
 
-Prioritize the remaining checklist requirements, but fulfill them naturally within the existing scene and storyline. Do not force unrelated events into the continuation just to satisfy a checklist item.
+CHECKLIST STATE IS PERSISTENT: confirmed-complete checklist IDs from earlier passes are already satisfied. Do not regress them to pending. Work from the REMAINING CHECKLIST below in its original order. Address the earliest remaining item that fits naturally in the current scene before moving to later items. Do not skip a remaining item merely because another item is easier.
 
 {{continuity_context}}
 
 {{completed_note}}
 Chapter {{chapter_number}} Goal (what must be accomplished before the chapter ends):
 {{chapter_goal}}
-{{checklist_block}}
+
+CONFIRMED COMPLETE CHECKLIST IDs:
+{{completed_ids}}
+
+REMAINING CHECKLIST — EXECUTION ORDER:
+{{remaining_checklist}}
+
+LATEST EVALUATOR MISSING REQUIREMENTS:
+{{missing_text}}
+
 --- END OF CHAPTER {{chapter_number}} SO FAR ---
 {{chapter_tail}}
 --- CONTINUE FROM HERE ---
