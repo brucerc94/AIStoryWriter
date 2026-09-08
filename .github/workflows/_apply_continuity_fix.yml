@@ -1,0 +1,107 @@
+name: Apply continuity fix
+
+on:
+  push:
+    branches: [bugfixes]
+    paths-ignore:
+      - .github/workflows/_apply_continuity_fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: bugfixes
+          fetch-depth: 0
+      - name: Patch continuation context
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          wf = Path('engine/workflow.py')
+          text = wf.read_text()
+          old = '''        tail = chapter_text[-2000:].strip()\n\n\n        completed = sorted(c.number for c in self.project.chapters if c.number != chapter_num and c.content)\n'''
+          new = '''        # Keep substantially more recent prose so scene/character state survives a\n        # continuation pass, then reinforce it with compact authoritative anchors.\n        tail = chapter_text[-5000:].strip()\n\n        outline_context = self._extract_chapter_outline_section(chapter_num) or chapter_goal\n        outline_context = outline_context.strip()[-3500:]\n        characters_context = format_characters_block(self.project.characters[:12]) or \"(none)\"\n        characters_context = characters_context.strip()[-1800:]\n        world_context = (self.project.world or \"\").strip() or \"(none)\"\n        world_context = world_context[-1000:]\n        memory_context = (self.project.memory or \"\").strip() or \"(none)\"\n        memory_context = memory_context[-1000:]\n        previous_chapter_tail = \"(none)\"\n        if chapter_num > 1:\n            previous = next((c for c in self.project.chapters if c.number == chapter_num - 1), None)\n            if previous and previous.content:\n                previous_chapter_tail = previous.content[-800:].strip()\n\n        continuity_context = prompts.render(\n            \"change_chapter/section\",\n            heading=\"CONTINUITY ANCHORS — AUTHORITATIVE\",\n            body=(\n                f\"Chapter outline:\\n{outline_context or '(none)'}\\n\\n\"\n                f\"Established characters:\\n{characters_context}\\n\\n\"\n                f\"World/setting anchors:\\n{world_context}\\n\\n\"\n                f\"Story memory:\\n{memory_context}\\n\\n\"\n                f\"End of previous chapter (continuity only):\\n{previous_chapter_tail}\"\n            ),\n        )\n\n        completed = sorted(c.number for c in self.project.chapters if c.number != chapter_num and c.content)\n'''
+          if old not in text:
+              raise SystemExit('workflow.py target not found')
+          text = text.replace(old, new, 1)
+          old = '''            checklist_block=checklist_block,\n            chapter_tail=tail,\n        )\n'''
+          new = '''            checklist_block=checklist_block,\n            continuity_context=continuity_context,\n            chapter_tail=tail,\n        )\n'''
+          if old not in text:
+              raise SystemExit('workflow.py prompt call target not found')
+          text = text.replace(old, new, 1)
+          wf.write_text(text)
+
+          cc = Path('engine/change_chapter.py')
+          text = cc.read_text()
+          old = '''def _build_continuation_prompt(worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str, missing: list[str] | None) -> tuple[str, str]:\n    tail = chapter_content[-7000:].strip()\n    missing_text = \"\\n\".join(f\"- {item}\" for item in (missing or [])) or \"(none identified; verify the original request yourself)\"\n    language = worker._response_language()\n\n    system = prompts.render(\"change_chapter/continue_system\", language_note=f\" Continue in {language}.\" if language else \"\")\n    user = prompts.render(\n        \"change_chapter/continue_user\",\n        chapter_number=chapter_num,\n        chapter_title=_chapter_title(worker, chapter_num),\n        instruction=instruction.strip(),\n        checklist=checklist.strip() or \"(none)\",\n        missing_text=missing_text,\n        chapter_tail=tail,\n    )\n    return system, user\n'''
+          new = '''def _build_continuation_prompt(worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str, missing: list[str] | None) -> tuple[str, str]:\n    # Preserve enough recent prose for scene continuity and pair it with compact\n    # authoritative anchors so a continuation cannot silently swap characters,\n    # location, POV, or established relationships.\n    tail = chapter_content[-7000:].strip()\n    missing_text = \"\\n\".join(f\"- {item}\" for item in (missing or [])) or \"(none identified; verify the original request yourself)\"\n    language = worker._response_language()\n\n    project = worker.project\n    characters = format_characters_block(project.characters[:12]) or \"(none)\"\n    characters = characters.strip()[-1800:]\n    world = _cap(project.world, 1200, \"world notes\") or \"(none)\"\n    memory = _cap(project.memory, 1200, \"story memory\") or \"(none)\"\n    outline = extract_outline_section(project.outline, chapter_num) or \"(none)\"\n    outline = outline.strip()[-3000:]\n\n    continuity_context = prompts.render(\n        \"change_chapter/section\",\n        heading=\"CONTINUITY ANCHORS — AUTHORITATIVE\",\n        body=(\n            f\"Current chapter plan:\\n{outline}\\n\\n\"\n            f\"Established characters:\\n{characters}\\n\\n\"\n            f\"World/setting anchors:\\n{world}\\n\\n\"\n            f\"Story memory:\\n{memory}\"\n        ),\n    )\n\n    system = prompts.render(\"change_chapter/continue_system\", language_note=f\" Continue in {language}.\" if language else \"\")\n    user = prompts.render(\n        \"change_chapter/continue_user\",\n        chapter_number=chapter_num,\n        chapter_title=_chapter_title(worker, chapter_num),\n        instruction=instruction.strip(),\n        checklist=checklist.strip() or \"(none)\",\n        missing_text=missing_text,\n        continuity_context=continuity_context,\n        chapter_tail=tail,\n    )\n    return system, user\n'''
+          if old not in text:
+              raise SystemExit('change_chapter.py target not found')
+          text = text.replace(old, new, 1)
+          cc.write_text(text)
+          PY
+
+          cat > engine/prompts/write_chapter/continuation_user.txt <<'EOF'
+          You are continuing Chapter {{chapter_number}} of '{{title}}'.
+
+          Continue immediately from the exact point where the chapter currently ends. The existing chapter text, established story context, chapter outline, and checklist are authoritative.
+
+          Do NOT rewrite, paraphrase, summarize, repeat, or skip anything already written. Do NOT restart the scene. Do NOT add a heading, title, or chapter number. Continue the prose seamlessly from the exact last point shown.
+
+          CONTINUITY IS STRICT: the continuation is the SAME scene and the SAME local narrative state unless the text shown below explicitly completes a supported transition. Keep the active characters, their identities, relationships, location, point of view, tense, and immediate objective exactly consistent with the ending. Never replace an active character with another character merely because another character appears in the outline or reference context.
+
+          Do NOT jump to a different scene, location, time, point of view, or storyline unless that transition is explicitly supported by the existing chapter text, chapter outline, checklist, or established story context.
+
+          Do NOT invent new characters, relationships, locations, facts, motivations, conflicts, revelations, or major events. Do not introduce a new plot direction merely because the previous generation ended at a transition point. Any new development must be supported by the chapter outline, remaining checklist requirements, established characters and relationships, world/setting, story memory, or the text already written.
+
+          Preserve all established character identities, personalities, motivations, relationships, world rules, continuity, tone, tense, and point of view. Treat established character relationships as canon unless the outline or author's explicit request requires a change.
+
+          Prioritize the remaining checklist requirements, but fulfill them naturally within the existing scene and storyline. Do not force unrelated events into the continuation just to satisfy a checklist item.
+
+          {{completed_note}}
+          Chapter {{chapter_number}} Goal (what must be accomplished before the chapter ends):
+          {{chapter_goal}}
+          {{checklist_block}}
+          {{continuity_context}}
+          --- END OF CHAPTER {{chapter_number}} SO FAR ---
+          {{chapter_tail}}
+          --- CONTINUE FROM HERE ---
+          EOF
+
+          cat > engine/prompts/change_chapter/continue_user.txt <<'EOF'
+          Chapter {{chapter_number}}: '{{chapter_title}}'
+
+          AUTHOR'S ORIGINAL REQUEST — AUTHORITATIVE:
+          {{instruction}}
+
+          INTERNAL CHECKLIST — MANDATORY:
+          {{checklist}}
+
+          MISSING REQUIREMENTS (must be addressed in the continuation):
+          {{missing_text}}
+
+          {{continuity_context}}
+
+          CONTINUITY IS STRICT: continue the SAME scene and immediate narrative state shown at the end of the current rewrite. Preserve the exact active characters, their identities and relationships, location, POV, tense, and immediate objective. Do not substitute another character simply because that character appears in the chapter plan or continuity anchors.
+
+          Do not restart, summarize, rewrite, or repeat the existing prose. Do not introduce a new scene, location, time jump, POV, character, relationship, or plot direction unless the current ending and the authoritative chapter plan explicitly require it.
+
+          --- END OF CURRENT REWRITE (last ~7000 chars) ---
+          {{chapter_tail}}
+          --- CONTINUE IMMEDIATELY FROM EXACTLY HERE — NO REPETITION ---
+          EOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add engine/workflow.py engine/change_chapter.py engine/prompts/write_chapter/continuation_user.txt engine/prompts/change_chapter/continue_user.txt
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "fix: preserve continuity across chapter continuations"
+          git push origin HEAD:bugfixes
