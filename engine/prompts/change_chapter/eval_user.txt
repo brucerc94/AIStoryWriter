@@ -6,7 +6,11 @@ AUTHOR'S ORIGINAL REQUEST — AUTHORITATIVE:
 CHECKLIST — PRIMARY CONTRACT; EVERY ITEM IS MANDATORY:
 {{checklist_items}}
 
+PRIOR CHECKLIST STATE — PERSISTENT:
+Confirmed complete IDs from earlier passes: {{prior_done_ids}}
+These items were already satisfied in the current rewrite and must not be regressed to pending unless the current chapter text actually contradicts or removes them.
+
 CURRENT FULL CHAPTER:
 {{chapter_content}}
 
-Evaluate every checklist item one by one. Do not return complete=true unless EVERY ID in [{{id_list}}] is in done and missing is empty.
+Evaluate every checklist item one by one. Do not return complete=true unless EVERY ID in [{{id_list}}] is in done and missing is empty. Treat the prior confirmed IDs as already complete for this append-only continuation workflow, then identify only requirements that remain genuinely unsatisfied.
