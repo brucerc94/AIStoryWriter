@@ -18,7 +18,6 @@ Prioritize the remaining checklist requirements, but fulfill them naturally with
 Chapter {{chapter_number}} Goal (what must be accomplished before the chapter ends):
 {{chapter_goal}}
 {{checklist_block}}
-{{continuity_context}}
 --- END OF CHAPTER {{chapter_number}} SO FAR ---
 {{chapter_tail}}
 --- CONTINUE FROM HERE ---
