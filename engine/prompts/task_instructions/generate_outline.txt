@@ -4,46 +4,91 @@ SOURCE AUTHORITY
 
 The author's current story request and Synopsis are the authoritative source of story facts for this outline. Existing project Characters, World, Memory, and previously established chapters may provide additional continuity facts, but they must not be used to invent unrelated new story material.
 
-The outline is the binding narrative blueprint for the chapter writer. Its job is to tell the writer, in concrete terms, what each chapter needs to do. A strong outline is not a synopsis repeated with different wording; it is a detailed operational plan for the scenes and beats that will later become prose.
+The outline is the binding narrative blueprint for the chapter writer. Its job is to resolve the story into concrete, ordered, writable events so the chapter writer can focus on prose rather than deciding what happens.
 
 DEPTH REQUIREMENT
 
-Make every Chapter Plan substantially more detailed than a high-level summary. Use the source material to expand each major event into a sequence of concrete narrative beats.
+Make every Chapter Plan substantially more detailed than a high-level summary. The outline must function as a scene-and-beat blueprint, not as a compressed retelling of the Synopsis.
 
-For each major event from the Synopsis, develop as many source-supported beats as are useful. A beat may describe:
-- the current scene/location/time;
-- which established characters are present and their immediate purpose;
-- the concrete action that starts the beat;
-- what another character notices, says, asks, refuses, decides, or does in response;
-- important dialogue CONTENT when the source defines what must be communicated;
-- the immediate consequence of the action;
-- how the story moves into the next beat;
-- what the reader should understand by the end of the beat;
-- the resulting state before the next beat begins.
+For every major source event, break it into the smallest useful sequence of concrete narrative beats needed to write the scene. A beat should normally specify, when the source supports it:
+- the current scene, location, and relevant time progression;
+- the established characters participating and their role in the moment;
+- the concrete action or event that occurs;
+- the direct response from another character or the environment;
+- what is said, communicated, requested, refused, decided, or revealed when the source defines that information;
+- the immediate physical, emotional, relational, or plot consequence;
+- the transition or causal link into the next beat;
+- what important information becomes established by the end of the beat.
 
-Do not be afraid to use many beats. The goal is maximum useful detail, not brevity. If the Synopsis gives a sequence of five meaningful actions, the outline should preserve all five rather than compressing them into one sentence such as "the conflict escalates."
+Do not be afraid to use many beats. Prefer 8–20+ concrete beats for a chapter when the source contains enough material to support them. Use more when necessary for complex chapters. Do not pad the outline with decorative prose or empty detail merely to increase length.
 
-A Chapter Plan should make the chapter writable without requiring the chapter writer to invent the core events, character behavior, important interactions, discoveries, decisions, or major transitions.
+The goal is MAXIMUM USEFUL DETAIL, not maximum word count.
 
-Every concrete story element in the Synopsis that belongs in a chapter must remain visible somewhere in that chapter's Chapter Plan. Preserve the sequence and causal relationships between events. When the source provides a beginning, escalation, turning point, climax, resolution, or consequence, retain those elements when they belong to the requested chapter distribution.
+A Chapter Plan should be sufficiently explicit that the chapter writer does not need to invent any core event, scene purpose, character action, important interaction, discovery, decision, conflict escalation, turning point, or consequence.
 
-If the requested chapter count is small, compress the DISTRIBUTION across chapters, not the underlying story information. Do not replace several source events with a generic summary just because the chapter count is small.
+SOURCE-EVENT COVERAGE
 
-STRUCTURE OF EACH CHAPTER PLAN
+Map every meaningful story event from the Synopsis into the appropriate chapter. Preserve its order, causality, and consequence.
 
-Inside Chapter Plan, organize the material chronologically. You may use a numbered list of narrative beats, but do not create extra Markdown sections/headings inside the chapter.
+If the Synopsis contains a sequence such as:
+A notices X → A confronts B → B reacts → C intervenes → A learns Y → A makes decision Z
+then the outline must preserve those individual beats rather than compressing the sequence into "the conflict escalates" or "A learns what to do."
 
-A useful beat should read like an instruction to the writer, for example:
-"Raul notices Elena staring at the chipped wooden block. He approaches her and asks what she is whispering. Elena does not answer and continues tracing the block with her fingers. Raul recognizes that her behavior is abnormal and begins to question his belief that the village's condition is merely seasonal."
+Expand the source into concrete beats, but do not create new canon while doing so.
 
-This is preferred over:
-"Raul discovers something is wrong with Elena."
+If the requested chapter count is small, compress the DISTRIBUTION across chapters, not the underlying story information. The story may be dense inside a chapter. Do not discard meaningful source events merely because there are few chapters.
 
-The detailed version must still remain faithful to established facts. It may expand connective actions and reactions, but it must not create new canon.
+RESOLVE THE BEAT — DO NOT OFFER OPTIONS
+
+Every important outline beat must be written as a decided event, not as a possibility.
+
+NEVER use speculative planning language such as:
+- likely
+- perhaps
+- maybe
+- might
+- could
+- e.g.
+- for example, when presenting the actual event
+- "or"
+- "such as" when it leaves the event undecided
+- placeholders like "a child", "someone", or "an object" when the source already provides the identity
+
+Do not give the chapter writer alternatives to choose from.
+
+Bad:
+"Raul is likely painting or supervising the toddlers."
+
+Bad:
+"He perhaps consults an old sketch or digs beneath the font."
+
+Good:
+"Raul paints with the toddlers while remaining alert to the abnormal gloom outside."
+
+Good:
+"Raul examines the area beneath the baptismal font and searches for the physical source of the disturbance."
+
+When the source itself leaves a detail unspecified, keep the detail neutral rather than inventing a specific fact. Do not replace an unknown detail with multiple possibilities.
+
+BEAT GRANULARITY
+
+A useful beat should contain a concrete event and its immediate consequence. When a source event is important or complex, separate its internal sequence into multiple beats instead of putting everything into one vague paragraph.
+
+For example, instead of:
+"Raul discovers Elena is affected and becomes worried."
+
+prefer:
+"Raul notices Elena separated from the other children and focused on the chipped wooden block. He watches her trace the damaged edge with her fingers."
+
+"Elena begins whispering fragments associated with Malkor's dark sigils while continuing to stare at the block. Raul moves closer to hear her."
+
+"Raul recognizes the significance of what Elena is whispering. His earlier explanation of the village's condition as seasonal no longer fits the evidence, and his concern becomes active suspicion."
+
+The point is not to write finished prose. The point is to specify exactly what the prose must portray.
 
 NO-INVENTION BOUNDARY
 
-DETAIL MUST COME FROM THE SOURCE.
+DETAIL MUST COME FROM ESTABLISHED STORY MATERIAL.
 
 Do NOT invent:
 - new named characters when the source does not require them;
@@ -57,33 +102,56 @@ Do NOT invent:
 - new psychological interpretations that materially change a character;
 - new consequences that alter later story events.
 
-If a detail is unspecified, keep it neutral or omit it. Plausibility is not authorization.
+Plausibility is not authorization.
 
-You MAY expand source-supported events into natural connective beats. For example: noticing something, approaching another character, asking a question, receiving a response, reacting, and then acting can be used to make an established event writable, provided those connective steps do not create a new fact, revelation, relationship, or plot direction.
+CONNECTIVE ACTION
+
+You MAY add ordinary connective actions needed to make an established event writable, but only when they do not add new canon.
+
+Safe connective actions include:
+- a character approaches another character;
+- a character looks, notices, listens, asks, answers, pauses, or moves between already-established actions;
+- a character physically transitions from one already-established location to another;
+- a character reacts to an established event;
+- a scene transitions naturally to the next established event.
+
+Unsafe connective additions are anything that create new facts, motives, relationships, revelations, named objects, secrets, mechanisms, or plot directions.
 
 CHARACTERS AND WORLD
 
 Use exact established character names whenever they exist. Do not treat titles, professions, epithets, pronouns, or descriptions as separate characters.
 
-Existing Characters and World are reference material for the outline. Use them when they clarify established facts, relationships, setting rules, or continuity. Do not override the Synopsis with them unless they contain already-established canon that must be preserved.
+Existing Characters and World are authoritative reference material for established canon and constraints. Use them to make the Chapter Plan concrete and consistent with known character behavior, relationships, setting rules, and world facts.
 
-When a character is relevant to a chapter, make the Chapter Plan explicit about what that established character is doing, how they respond, what they know, and what changes for them, when the source supports those details.
+The Outline may describe what an established character does, says, knows, notices, decides, or feels when the source and existing canon support it.
 
-When a setting or world rule is relevant to an event, incorporate the established World detail into the Chapter Plan so the chapter writer knows how the scene should work. Do not invent additional worldbuilding merely because World material is available.
+When a World rule or setting fact affects an event, put that relevant information directly into the Chapter Plan so the chapter writer knows how the scene should work. Do not copy the entire World document into every chapter.
+
+Do not invent new worldbuilding simply because a World section exists.
 
 CONTINUITY
 
-For each chapter, the Continuity section records only the resulting state that must be true after the chapter:
+For each chapter, the Continuity section records ONLY the state established after the chapter.
+
+Include, when relevant:
 - character state changes;
 - relationship changes;
 - information known by specific characters;
 - important object/status changes;
 - current locations when narratively relevant;
 - active consequences;
-- unresolved threads;
-- explicit constraints on what has NOT happened yet.
+- unresolved plot threads;
+- explicit constraints on what has NOT happened yet or is still unknown.
 
-Do not duplicate the whole Chapter Plan in Continuity.
+Continuity is a state record, not a second Chapter Plan. Do not duplicate the chapter's event sequence here.
+
+STRUCTURE
+
+Inside Chapter Plan, organize the material chronologically.
+
+Use a numbered list of narrative beats when it improves clarity, but do not create extra Markdown headings inside a chapter.
+
+Each numbered beat should be a concrete instruction to the writer. Multiple sentences are encouraged when needed to resolve the event fully.
 
 FORMAT
 
@@ -142,11 +210,13 @@ Before returning the outline, verify internally:
 1. exactly {{requested_count}} chapter headings exist;
 2. chapters are sequential with no gaps or duplicates;
 3. every major source event has been assigned to a chapter;
-4. every Chapter Plan contains multiple concrete chronological beats when the source provides enough material;
-5. important actions, interactions, decisions, discoveries, reactions, consequences, and transitions have not been compressed into vague summaries;
-6. no unsupported new canon has been introduced;
-7. no forbidden extra chapter section exists;
-8. every chapter ends with a concrete resulting state in Continuity;
-9. the final chapter resolves only what the Synopsis or established canon resolves.
+4. each Chapter Plan contains enough concrete chronological beats to cover the source material without compressing meaningful events;
+5. each important beat is resolved as a decided event, with no speculative alternatives;
+6. important actions, interactions, decisions, discoveries, reactions, consequences, and transitions have not been compressed into vague summaries;
+7. no unsupported new canon has been introduced;
+8. no forbidden extra chapter section exists;
+9. each chapter ends with a concrete resulting state in Continuity;
+10. Continuity does not merely repeat the Chapter Plan;
+11. the final chapter resolves only what the Synopsis or established canon resolves.
 
 Return only the complete outline in the required Markdown format.
