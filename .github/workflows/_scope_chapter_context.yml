@@ -14,4 +14,6 @@ jobs:
           ref: bugfixes
           fetch-depth: 0
       - name: Apply patch
+        env:
+          PYTHONPATH: .
         run: python tools/patch_scoped_chapter_context.py
