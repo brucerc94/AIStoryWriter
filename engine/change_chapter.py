@@ -340,9 +340,31 @@ def ends_abruptly(text: str) -> bool:
 
 
 def _build_continuation_prompt(worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str, missing: list[str] | None) -> tuple[str, str]:
+    # Preserve enough recent prose for scene continuity and pair it with compact
+    # authoritative anchors so a continuation cannot silently swap characters,
+    # location, POV, or established relationships.
     tail = chapter_content[-7000:].strip()
     missing_text = "\n".join(f"- {item}" for item in (missing or [])) or "(none identified; verify the original request yourself)"
     language = worker._response_language()
+
+    project = worker.project
+    characters = format_characters_block(project.characters[:12]) or "(none)"
+    characters = characters.strip()[-1800:]
+    world = _cap(project.world, 1200, "world notes") or "(none)"
+    memory = _cap(project.memory, 1200, "story memory") or "(none)"
+    outline = extract_outline_section(project.outline, chapter_num) or "(none)"
+    outline = outline.strip()[-3000:]
+
+    continuity_context = prompts.render(
+        "change_chapter/section",
+        heading="CONTINUITY ANCHORS — AUTHORITATIVE",
+        body=(
+            f"Current chapter plan:\n{outline}\n\n"
+            f"Established characters:\n{characters}\n\n"
+            f"World/setting anchors:\n{world}\n\n"
+            f"Story memory:\n{memory}"
+        ),
+    )
 
     system = prompts.render("change_chapter/continue_system", language_note=f" Continue in {language}." if language else "")
     user = prompts.render(
@@ -352,6 +374,7 @@ def _build_continuation_prompt(worker, chapter_num: int, chapter_content: str, i
         instruction=instruction.strip(),
         checklist=checklist.strip() or "(none)",
         missing_text=missing_text,
+        continuity_context=continuity_context,
         chapter_tail=tail,
     )
     return system, user

@@ -2030,8 +2030,35 @@ class WorkflowWorker(QObject):
         missing: "list[str] | None" = None,
     ) -> str:
 
-        tail = chapter_text[-2000:].strip()
+        # Keep substantially more recent prose so scene/character state survives a
+        # continuation pass, then reinforce it with compact authoritative anchors.
+        tail = chapter_text[-5000:].strip()
 
+        outline_context = self._extract_chapter_outline_section(chapter_num) or chapter_goal
+        outline_context = outline_context.strip()[-3500:]
+        characters_context = format_characters_block(self.project.characters[:12]) or "(none)"
+        characters_context = characters_context.strip()[-1800:]
+        world_context = (self.project.world or "").strip() or "(none)"
+        world_context = world_context[-1000:]
+        memory_context = (self.project.memory or "").strip() or "(none)"
+        memory_context = memory_context[-1000:]
+        previous_chapter_tail = "(none)"
+        if chapter_num > 1:
+            previous = next((c for c in self.project.chapters if c.number == chapter_num - 1), None)
+            if previous and previous.content:
+                previous_chapter_tail = previous.content[-800:].strip()
+
+        continuity_context = prompts.render(
+            "change_chapter/section",
+            heading="CONTINUITY ANCHORS — AUTHORITATIVE",
+            body=(
+                f"Chapter outline:\n{outline_context or '(none)'}\n\n"
+                f"Established characters:\n{characters_context}\n\n"
+                f"World/setting anchors:\n{world_context}\n\n"
+                f"Story memory:\n{memory_context}\n\n"
+                f"End of previous chapter (continuity only):\n{previous_chapter_tail}"
+            ),
+        )
 
         completed = sorted(c.number for c in self.project.chapters if c.number != chapter_num and c.content)
         if completed:
@@ -2059,6 +2086,7 @@ class WorkflowWorker(QObject):
             completed_note=completed_note,
             chapter_goal=chapter_goal.strip() or "(none)",
             checklist_block=checklist_block,
+            continuity_context=continuity_context,
             chapter_tail=tail,
         )
 
