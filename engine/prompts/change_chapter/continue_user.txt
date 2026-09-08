@@ -3,15 +3,16 @@ Chapter {{chapter_number}}: '{{chapter_title}}'
 AUTHOR'S ORIGINAL REQUEST — AUTHORITATIVE:
 {{instruction}}
 
-INTERNAL CHECKLIST — MANDATORY:
-{{checklist}}
+CHECKLIST PROGRESS:
+Items 1..{{last_completed_id_label}} have been confirmed complete in prior passes and are already present in the chapter. Do not repeat or regress them.
 
-CHECKLIST PROGRESS — PERSISTENT FROM PRIOR PASSES:
-Confirmed complete IDs: {{completed_ids}}
-Remaining checklist items, in original order:
+ACTIVE REQUIREMENTS — ADDRESS IN ORDER:
 {{remaining_checklist}}
 
-MISSING REQUIREMENTS FROM THE LATEST EVALUATION (address these remaining requirements first):
+NEXT REQUIRED ITEM:
+{{next_required_id_label}}
+
+MISSING REQUIREMENTS FROM THE LATEST EVALUATION (address these first):
 {{missing_text}}
 
 {{continuity_context}}
@@ -20,7 +21,7 @@ CONTINUITY IS STRICT: continue the SAME scene and immediate narrative state show
 
 Do not restart, summarize, rewrite, or repeat the existing prose. Do not introduce a new scene, location, time jump, POV, character, relationship, or plot direction unless the current ending and the authoritative chapter plan explicitly require it.
 
-When the remaining checklist contains multiple items, prefer fulfilling the earliest remaining item that can be completed naturally from the current scene; continue to the next remaining item only as the prose naturally reaches it. Never skip a remaining item merely because a different later item is easier.
+When the active requirements contain multiple items, prefer fulfilling the earliest remaining item that can be completed naturally from the current scene; continue to the next remaining item only as the prose naturally reaches it. Never skip a remaining item merely because a different later item is easier.
 
 --- END OF CURRENT REWRITE (last ~7000 chars) ---
 {{chapter_tail}}

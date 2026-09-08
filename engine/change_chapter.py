@@ -99,44 +99,115 @@ def _build_remaining_checklist(checklist: str, completed_ids: set[int] | None = 
     return "\n".join(remaining) or "(none)"
 
 
-def _reconcile_checklist_progress(result: dict, checklist: str, prior_done_ids: set[int] | None = None) -> dict:
-    """Reconcile checklist progress without allowing stale state to override the current draft."""
-    expected = dict(parse_checklist_items(checklist))
-    prior = set(prior_done_ids or ())
-    current_done = set(result.get("done_ids", []))
-    current_missing = set(result.get("missing_ids", []))
+def _get_active_checklist_items(checklist: str, completed_ids: set[int]) -> list[tuple[int, str]]:
+    """Return only the checklist items not yet confirmed complete — the active window."""
+    return [
+        (item_id, text)
+        for item_id, text in parse_checklist_items(checklist)
+        if item_id not in completed_ids
+    ]
 
-    # The evaluator sees the full accumulated chapter and is authoritative.
-    # Prior confirmations are only a fallback when the latest evaluator did
-    # not account for an ID at all. An explicit current missing ID revokes a
-    # stale prior confirmation, preventing false-positive future completion.
-    confirmed = current_done | (prior - current_missing - current_done)
 
+def _get_next_required_id(checklist: str, completed_ids: set[int]) -> int | None:
+    """Return the lowest-numbered item ID that is not yet confirmed complete."""
+    for item_id, _ in parse_checklist_items(checklist):
+        if item_id not in completed_ids:
+            return item_id
+    return None
+
+
+def _format_completed_label(completed_ids: set[int], checklist: str) -> str:
+    """Human-readable label for what has been confirmed complete so far."""
+    if not completed_ids:
+        return "(none yet)"
+    all_ids = [item_id for item_id, _ in parse_checklist_items(checklist)]
+    done_real = sorted(c for c in completed_ids if c != 0)  # exclude truncation sentinel
+    if not done_real:
+        return "(none yet)"
+    if len(done_real) == 1:
+        return str(done_real[0])
+    return f"{done_real[0]}..{done_real[-1]} ({len(done_real)} items)"
+
+
+def _reconcile_active_window_result(
+    result: dict,
+    checklist: str,
+    accumulated_done: set[int],
+    active_items: list[tuple[int, str]],
+) -> dict:
+    """
+    Reconcile the evaluator's result for the ACTIVE WINDOW only.
+
+    The evaluator only saw active_items (i.e. the items not yet confirmed by
+    accumulated_done). We trust its output for those IDs without injecting
+    prior confirmations. Python state (accumulated_done) tracks what was
+    already confirmed in prior passes.
+
+    Returns a result dict updated with:
+      done_ids   – IDs the evaluator confirmed complete in this window
+      missing_ids – IDs the evaluator found incomplete in this window
+      missing    – human-readable missing descriptions
+      completed  – True only if all checklist items (full list) are now done
+    """
+    all_expected = dict(parse_checklist_items(checklist))
+    active_expected = dict(active_items)
+    active_ids = set(active_expected)
+
+    # Evaluator's raw output for the active window.
+    evaluator_done = set(result.get("done_ids", []))
+    evaluator_missing_ids = set(result.get("missing_ids", []))
+
+    # Only accept evaluator verdicts for active IDs; ignore any stray IDs.
+    active_done = evaluator_done & active_ids
+    active_missing_ids = evaluator_missing_ids & active_ids
+
+    # IDs in the active window that the evaluator didn't mention → treat as missing.
+    unaccounted = active_ids - active_done - active_missing_ids
+    for item_id in sorted(unaccounted):
+        active_missing_ids.add(item_id)
+
+    # Rebuild missing list: take evaluator entries for active IDs, add unaccounted.
     filtered_missing: list[str] = []
+    seen_missing: set[str] = set()
     for entry in result.get("missing", []) or []:
-        match = re.match(r"^\s*(\d+)\s*:", str(entry))
-        if match and int(match.group(1)) in confirmed and int(match.group(1)) != 0:
-            continue
-        filtered_missing.append(str(entry).strip())
+        m = re.match(r"^\s*(\d+)\s*:", str(entry))
+        if m and int(m.group(1)) not in active_ids and int(m.group(1)) != 0:
+            continue  # drop entries for non-active IDs
+        text = str(entry).strip()
+        if text and text not in seen_missing:
+            filtered_missing.append(text)
+            seen_missing.add(text)
 
-    missing_ids = set(current_missing)
-    for item_id, label in expected.items():
-        if item_id not in confirmed and item_id not in missing_ids:
-            missing_ids.add(item_id)
-            filtered_missing.append(f"{item_id}: {label}")
+    for item_id in sorted(unaccounted):
+        label = f"{item_id}: not evaluated — {active_expected[item_id]}"
+        if label not in seen_missing:
+            filtered_missing.append(label)
+            seen_missing.add(label)
 
-    deduped_missing: list[str] = []
-    seen: set[str] = set()
-    for entry in filtered_missing:
-        if entry and entry not in seen:
-            deduped_missing.append(entry)
-            seen.add(entry)
+    # Keep truncation sentinel if present.
+    has_truncation = 0 in evaluator_missing_ids or any(
+        "truncat" in str(e).lower() for e in (result.get("missing", []) or [])
+    )
+    if has_truncation and "Chapter appears truncated." not in seen_missing:
+        filtered_missing.append("Chapter appears truncated.")
+        active_missing_ids.add(0)
 
-    confirmed -= (missing_ids - {0})
-    result["done_ids"] = sorted(confirmed)
-    result["missing_ids"] = sorted(missing_ids)
-    result["missing"] = deduped_missing
-    result["completed"] = bool(expected) and set(expected).issubset(confirmed) and not missing_ids and not deduped_missing
+    # Contradictions in the active window: evaluator said both done and missing.
+    contradictory = active_done & active_missing_ids
+    for item_id in sorted(contradictory):
+        active_done.discard(item_id)
+        filtered_missing.append(f"Evaluator contradiction on ID {item_id} — treating as missing.")
+
+    # Full picture: accumulated prior + what the evaluator just confirmed.
+    all_confirmed = accumulated_done | active_done
+
+    # A chapter is complete when every non-zero item in the full checklist is confirmed.
+    all_complete = bool(all_expected) and set(all_expected).issubset(all_confirmed) and not active_missing_ids
+
+    result["done_ids"] = sorted(active_done)
+    result["missing_ids"] = sorted(active_missing_ids)
+    result["missing"] = filtered_missing
+    result["completed"] = all_complete
     return result
 
 def build_clean_context_sections(worker, chapter_num: int, selection_source: str = "") -> str:
@@ -193,12 +264,28 @@ def build_full_rewrite_prompt(
     return system, user
 
 
-def _build_eval_prompt(worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str, prior_done_ids: set[int] | None = None) -> tuple[str, str]:
-    items = parse_checklist_items(checklist)
-    item_block = "\n".join(f"{item_id}. {text}" for item_id, text in items) or \
-        "(No parseable checklist items; evaluate the original request directly.)"
-    all_ids = [item_id for item_id, _ in items]
-    id_list = ", ".join(str(i) for i in all_ids) if all_ids else "(none)"
+def _build_eval_prompt(
+    worker,
+    chapter_num: int,
+    chapter_content: str,
+    instruction: str,
+    checklist: str,
+    accumulated_done: set[int] | None = None,
+) -> tuple[str, str, list[tuple[int, str]]]:
+    """Build evaluator prompt for the ACTIVE WINDOW (items not yet confirmed complete).
+
+    Returns (system, user, active_items) so the caller has the active item list
+    for reconciliation without re-parsing.
+    """
+    accumulated = set(accumulated_done or ())
+    active_items = _get_active_checklist_items(checklist, accumulated)
+
+    if active_items:
+        item_block = "\n".join(f"{item_id}. {text}" for item_id, text in active_items)
+        id_list = ", ".join(str(item_id) for item_id, _ in active_items)
+    else:
+        item_block = "(No remaining checklist items; verify chapter ends naturally and is not truncated.)"
+        id_list = "(none)"
 
     system = prompts.render("change_chapter/eval_system", id_list=id_list)
     user = prompts.render(
@@ -209,9 +296,8 @@ def _build_eval_prompt(worker, chapter_num: int, chapter_content: str, instructi
         checklist_items=item_block,
         chapter_content=chapter_content,
         id_list=id_list,
-        prior_done_ids=", ".join(str(i) for i in sorted(prior_done_ids or set())) or "(none)",
     )
-    return system, user
+    return system, user, active_items
 
 
 def parse_checklist_eval_result(text: str, checklist: str) -> dict:
@@ -290,23 +376,52 @@ def parse_checklist_eval_result(text: str, checklist: str) -> dict:
     return {"valid": False, "completed": False, "missing": [], "missing_ids": [], "done_ids": [], "raw": raw}
 
 
-def evaluate_change(worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str, pass_number: int, prior_done_ids: set[int] | None = None) -> dict:
-    """Run the evaluator with retries. Returns valid=False if every attempt fails to parse."""
-    system, user = _build_eval_prompt(worker, chapter_num, chapter_content, instruction, checklist, prior_done_ids)
-    logger.info("[change_chapter] Chapter %d — verification pass %d — %d words.", chapter_num, pass_number, len(chapter_content.split()))
+def evaluate_change(
+    worker,
+    chapter_num: int,
+    chapter_content: str,
+    instruction: str,
+    checklist: str,
+    pass_number: int,
+    accumulated_done: set[int] | None = None,
+) -> dict:
+    """Run the evaluator with retries against the ACTIVE WINDOW only.
 
-    item_count = max(1, len(parse_checklist_items(checklist)))
-    max_eval_tokens = min(MAX_CHANGE_EVAL_TOKENS, max(768, 512 + item_count * 100))
+    The evaluator receives only the items that are not yet confirmed complete
+    (accumulated_done). Python state owns what was confirmed in prior passes —
+    the evaluator is never told to 'trust' prior IDs.
+
+    Returns valid=False if every attempt fails to produce parseable JSON.
+    """
+    accumulated = set(accumulated_done or ())
+    system, user, active_items = _build_eval_prompt(
+        worker, chapter_num, chapter_content, instruction, checklist, accumulated
+    )
+    active_count = len(active_items)
+    logger.info(
+        "[change_chapter] Chapter %d — verification pass %d — %d words — "
+        "active window: %d item(s) remaining.",
+        chapter_num, pass_number, len(chapter_content.split()), active_count,
+    )
+
+    # Token budget: scale to the number of ACTIVE items, not the full list.
+    max_eval_tokens = min(MAX_CHANGE_EVAL_TOKENS, max(768, 512 + active_count * 100))
+
+    # Build a temporary checklist string containing only active items so
+    # parse_checklist_eval_result validates IDs against the active window.
+    active_checklist = "\n".join(f"{iid}. {txt}" for iid, txt in active_items)
 
     final = {"valid": False, "completed": False, "missing": [], "missing_ids": [], "done_ids": [], "raw": ""}
     for attempt in range(1, MAX_CHANGE_EVAL_RETRIES + 1):
         raw = worker._run_lean_inference(TaskType.REVIEW_CHAPTER, system, user, max_tokens=max_eval_tokens)
-        parsed = parse_checklist_eval_result(raw, checklist)
+        # Parse against the active checklist so only active IDs are validated.
+        parsed = parse_checklist_eval_result(raw, active_checklist)
         if parsed["valid"]:
-            final = _reconcile_checklist_progress(parsed, checklist, prior_done_ids)
+            final = _reconcile_active_window_result(parsed, checklist, accumulated, active_items)
             logger.info(
-                "[change_chapter] Attempt %d/%d: complete=%s done=%s missing_ids=%s",
-                attempt, MAX_CHANGE_EVAL_RETRIES, parsed["completed"], parsed.get("done_ids", []), parsed.get("missing_ids", []),
+                "[change_chapter] Attempt %d/%d: complete=%s active_done=%s active_missing=%s",
+                attempt, MAX_CHANGE_EVAL_RETRIES,
+                final["completed"], final.get("done_ids", []), final.get("missing_ids", []),
             )
             break
         logger.warning(
@@ -344,20 +459,32 @@ def ends_abruptly(text: str) -> bool:
     return not bool(re.search(r'[.!?\u2026"\')\]}\u201d\u2019]$', stripped))
 
 
-def _build_continuation_prompt(worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str, missing: list[str] | None, completed_ids: set[int] | None = None, remaining_checklist: str = "") -> tuple[str, str]:
+def _build_continuation_prompt(
+    worker,
+    chapter_num: int,
+    chapter_content: str,
+    instruction: str,
+    checklist: str,
+    missing: list[str] | None,
+    completed_ids: set[int] | None = None,
+    remaining_checklist: str = "",
+) -> tuple[str, str]:
     """
     Build the system + user prompt for a Change Chapter continuation pass.
 
+    The continuation prompt does NOT include the full checklist. It only
+    shows the active (remaining) requirements so the model focuses on what
+    is actually still needed. Completed requirements are referenced by a
+    human-readable progress label managed entirely by Python state.
+
     Uses a dynamic budget so continuity anchors are never silently truncated
-    before the recent prose tail: the available character budget is derived
-    from the live model context size and the configured reply reservation,
-    then distributed across slots in priority order via budget_allocate().
+    before the recent prose tail.
     """
     # ------------------------------------------------------------------
     # Dynamic budget
     # ------------------------------------------------------------------
     CHARS_PER_TOKEN = 4
-    FIXED_OVERHEAD_TOKENS = 700   # system prompt + template skeleton + instruction/checklist
+    FIXED_OVERHEAD_TOKENS = 700   # system prompt + template skeleton + instruction
     try:
         ctx_tokens = worker._model_context_limit()
     except Exception:
@@ -369,23 +496,28 @@ def _build_continuation_prompt(worker, chapter_num: int, chapter_content: str, i
     missing_text = "\n".join(f"- {item}" for item in (missing or [])) or "(none identified; verify the original request yourself)"
     language = worker._response_language()
 
+    accumulated = set(completed_ids or ())
+    active_remaining = remaining_checklist.strip() or _build_remaining_checklist(checklist, accumulated)
+    last_completed_label = _format_completed_label(accumulated, checklist)
+    next_id = _get_next_required_id(checklist, accumulated)
+    next_required_label = str(next_id) if next_id is not None else "(all items pending or complete)"
+
     project = worker.project
     outline_raw    = (extract_outline_section(project.outline, chapter_num) or "").strip() or "(none)"
     prose_tail_raw = chapter_content.strip()
     selection_source = "\n\n".join(
-        part for part in (outline_raw, instruction, checklist, missing_text, prose_tail_raw) if part
+        part for part in (outline_raw, instruction, active_remaining, missing_text, prose_tail_raw) if part
     )
     characters_raw, world_raw = build_relevant_chapter_context(
         project, selection_source, max_character_chars=5000, max_world_chars=6000
     )
 
     # Fixed text that doesn't participate in budget allocation.
-    fixed_chars = len(instruction) + len(checklist) + len(missing_text)
+    # Note: we use active_remaining instead of the full checklist here.
+    fixed_chars = len(instruction) + len(active_remaining) + len(missing_text)
     variable_budget = max(400, total_chars - fixed_chars)
 
-    # Priority order: outline > characters > world > memory > prose tail.
-    # Prose tail gets the largest minimum (scene-state continuity), but
-    # anchors always appear first and are never bumped off by the tail.
+    # Priority order: outline > characters > world > prose tail.
     slots = [
         # (name,         full_text,      min_chars)
         ("outline",     outline_raw,    min(len(outline_raw),    800)),
@@ -407,10 +539,11 @@ def _build_continuation_prompt(worker, chapter_num: int, chapter_content: str, i
 
     logger.debug(
         "[change_chapter] continuation budget: ctx=%d reply=%d prompt_budget=%d chars "
-        "outline=%d chars=%d world=%d tail=%d",
+        "outline=%d chars=%d world=%d tail=%d active_remaining=%d",
         ctx_tokens, reply_tokens, total_chars,
         len(allocated["outline"]), len(allocated["characters"]),
         len(allocated["world"]), len(allocated["prose_tail"]),
+        len(active_remaining),
     )
 
     system = prompts.render("change_chapter/continue_system", language_note=f" Continue in {language}." if language else "")
@@ -419,9 +552,9 @@ def _build_continuation_prompt(worker, chapter_num: int, chapter_content: str, i
         chapter_number=chapter_num,
         chapter_title=_chapter_title(worker, chapter_num),
         instruction=instruction.strip(),
-        checklist=checklist.strip() or "(none)",
-        completed_ids=", ".join(str(i) for i in sorted(completed_ids or set())) or "(none)",
-        remaining_checklist=remaining_checklist.strip() or _build_remaining_checklist(checklist, completed_ids),
+        last_completed_id_label=last_completed_label,
+        remaining_checklist=active_remaining,
+        next_required_id_label=next_required_label,
         missing_text=missing_text,
         continuity_context=continuity_context,
         chapter_tail=allocated["prose_tail"],
@@ -533,9 +666,14 @@ def run(worker) -> None:
 
 
     consecutive_invalid_evals = 0
-    confirmed_done_ids: set[int] = set()
+    # accumulated_done tracks the full set of confirmed IDs across all passes.
+    # It is NEVER sent to the evaluator as a hint — only the code uses it.
+    accumulated_done: set[int] = set()
     for pass_number in range(1, MAX_CHANGE_PASSES + 1):
-        evaluation = evaluate_change(worker, chapter_num, chapter.content, instruction, checklist, pass_number, confirmed_done_ids)
+        evaluation = evaluate_change(
+            worker, chapter_num, chapter.content, instruction, checklist,
+            pass_number, accumulated_done,
+        )
 
         if not evaluation["valid"]:
             consecutive_invalid_evals += 1
@@ -548,9 +686,16 @@ def run(worker) -> None:
                 break
             continue
         consecutive_invalid_evals = 0
-        confirmed_done_ids.update(evaluation.get("done_ids", []))
-        remaining_checklist = _build_remaining_checklist(checklist, confirmed_done_ids)
 
+        # Accumulate newly confirmed IDs into Python state.
+        newly_done = set(evaluation.get("done_ids", []))
+        accumulated_done.update(newly_done)
+        remaining_checklist = _build_remaining_checklist(checklist, accumulated_done)
+        logger.info(
+            "[change_chapter] Pass %d: newly_done=%s accumulated_done=%s remaining=%d item(s).",
+            pass_number, sorted(newly_done), sorted(accumulated_done),
+            len(_get_active_checklist_items(checklist, accumulated_done)),
+        )
 
         if ends_abruptly(chapter.content):
             note = "Chapter is truncated mid-sentence — must be continued to a natural ending."
@@ -573,7 +718,11 @@ def run(worker) -> None:
             logger.warning("[change_chapter] Reached MAX_CHANGE_PASSES=%d; saving current result.", MAX_CHANGE_PASSES)
             break
 
-        continued = continue_rewrite(worker, chapter_num, chapter, instruction, checklist, pass_number + 1, evaluation.get("missing", []), confirmed_done_ids, remaining_checklist)
+        continued = continue_rewrite(
+            worker, chapter_num, chapter, instruction, checklist,
+            pass_number + 1, evaluation.get("missing", []),
+            accumulated_done, remaining_checklist,
+        )
         if not continued:
             logger.warning("[change_chapter] Continuation produced no new content on pass %d; stopping.", pass_number + 1)
             break
@@ -620,14 +769,27 @@ def plan_chapter(worker, chapter_num: int, chapter_title: str, outline_entry: st
 
 
 def _build_chapter_eval_prompt(
-    chapter_num: int, chapter_title: str, chapter_content: str, outline_entry: str, checklist: str,
-    prior_done_ids: set[int] | None = None,
-) -> tuple[str, str]:
-    items = parse_checklist_items(checklist)
-    item_block = "\n".join(f"{item_id}. {text}" for item_id, text in items) or \
-        "(No parseable checklist items; evaluate against the outline entry directly.)"
-    all_ids = [item_id for item_id, _ in items]
-    id_list = ", ".join(str(i) for i in all_ids) if all_ids else "(none)"
+    chapter_num: int,
+    chapter_title: str,
+    chapter_content: str,
+    outline_entry: str,
+    checklist: str,
+    accumulated_done: set[int] | None = None,
+) -> tuple[str, str, list[tuple[int, str]]]:
+    """Build write_chapter evaluator prompt for the ACTIVE WINDOW only.
+
+    Returns (system, user, active_items). The evaluator never sees items
+    already confirmed complete — those are tracked by Python state only.
+    """
+    accumulated = set(accumulated_done or ())
+    active_items = _get_active_checklist_items(checklist, accumulated)
+
+    if active_items:
+        item_block = "\n".join(f"{item_id}. {text}" for item_id, text in active_items)
+        id_list = ", ".join(str(item_id) for item_id, _ in active_items)
+    else:
+        item_block = "(No remaining checklist items; verify chapter ends naturally and is not truncated.)"
+        id_list = "(none)"
 
     system = prompts.render("write_chapter/eval_system", id_list=id_list)
     user = prompts.render(
@@ -638,37 +800,55 @@ def _build_chapter_eval_prompt(
         checklist_items=item_block,
         chapter_content=chapter_content,
         id_list=id_list,
-        prior_done_ids=", ".join(str(i) for i in sorted(prior_done_ids or set())) or "(none)",
     )
-    return system, user
+    return system, user, active_items
 
 
 def evaluate_chapter(
-    worker, chapter_num: int, chapter_title: str, chapter_content: str,
-    outline_entry: str, checklist: str, pass_number: int,
-    prior_done_ids: set[int] | None = None,
+    worker,
+    chapter_num: int,
+    chapter_title: str,
+    chapter_content: str,
+    outline_entry: str,
+    checklist: str,
+    pass_number: int,
+    accumulated_done: set[int] | None = None,
 ) -> dict:
-    """Run the WRITE_CHAPTER checklist evaluator with retries. Same JSON
-    contract and parsing as evaluate_change() above (see
-    parse_checklist_eval_result), so a valid=False result here means every
-    attempt failed to produce parseable JSON."""
-    system, user = _build_chapter_eval_prompt(
-        chapter_num, chapter_title, chapter_content, outline_entry, checklist, prior_done_ids
-    )
-    logger.info("[write_chapter] Chapter %d — checklist verification pass %d — %d words.", chapter_num, pass_number, len(chapter_content.split()))
+    """Run the WRITE_CHAPTER checklist evaluator against the ACTIVE WINDOW only.
 
-    item_count = max(1, len(parse_checklist_items(checklist)))
-    max_eval_tokens = min(MAX_CHANGE_EVAL_TOKENS, max(768, 512 + item_count * 100))
+    The evaluator receives only the items not yet confirmed complete
+    (accumulated_done). Python state tracks what was confirmed in prior passes —
+    the evaluator is never told to 'trust' prior IDs.
+
+    Returns valid=False if every attempt fails to produce parseable JSON.
+    """
+    accumulated = set(accumulated_done or ())
+    system, user, active_items = _build_chapter_eval_prompt(
+        chapter_num, chapter_title, chapter_content, outline_entry, checklist, accumulated
+    )
+    active_count = len(active_items)
+    logger.info(
+        "[write_chapter] Chapter %d — checklist verification pass %d — %d words — "
+        "active window: %d item(s) remaining.",
+        chapter_num, pass_number, len(chapter_content.split()), active_count,
+    )
+
+    # Token budget scaled to active item count.
+    max_eval_tokens = min(MAX_CHANGE_EVAL_TOKENS, max(768, 512 + active_count * 100))
+
+    # Build a temporary checklist of active items only for parse validation.
+    active_checklist = "\n".join(f"{iid}. {txt}" for iid, txt in active_items)
 
     final = {"valid": False, "completed": False, "missing": [], "missing_ids": [], "done_ids": [], "raw": ""}
     for attempt in range(1, MAX_CHANGE_EVAL_RETRIES + 1):
         raw = worker._run_lean_inference(TaskType.REVIEW_CHAPTER, system, user, max_tokens=max_eval_tokens)
-        parsed = parse_checklist_eval_result(raw, checklist)
+        parsed = parse_checklist_eval_result(raw, active_checklist)
         if parsed["valid"]:
-            final = _reconcile_checklist_progress(parsed, checklist, prior_done_ids)
+            final = _reconcile_active_window_result(parsed, checklist, accumulated, active_items)
             logger.info(
-                "[write_chapter] Attempt %d/%d: complete=%s done=%s missing_ids=%s",
-                attempt, MAX_CHANGE_EVAL_RETRIES, parsed["completed"], parsed.get("done_ids", []), parsed.get("missing_ids", []),
+                "[write_chapter] Attempt %d/%d: complete=%s active_done=%s active_missing=%s",
+                attempt, MAX_CHANGE_EVAL_RETRIES,
+                final["completed"], final.get("done_ids", []), final.get("missing_ids", []),
             )
             break
         logger.warning(

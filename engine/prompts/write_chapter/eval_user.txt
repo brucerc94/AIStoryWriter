@@ -3,13 +3,13 @@ Chapter {{chapter_number}}: '{{chapter_title}}'
 CHAPTER OUTLINE ENTRY — FOR CONTEXT:
 {{outline_entry}}
 
-CHECKLIST — PRIMARY CONTRACT; EVERY ITEM IS MANDATORY:
+ACTIVE CHECKLIST ITEMS FOR THIS PASS — EVALUATE EVERY ONE:
 {{checklist_items}}
 
-CURRENT DRAFT IS THE ONLY AUTHORITATIVE STATE:
-Evaluate every checklist item from the actual current chapter text. Do not assume an item is complete because an earlier pass said it was complete. A requirement is DONE only when the current draft actually satisfies it. Items that have not happened yet must remain in MISSING, even during an append-only continuation.
+EVALUATION SCOPE:
+Evaluate only the active checklist items listed above against the full chapter text below. These are the requirements that have not yet been confirmed complete by prior passes. Items from earlier passes are already confirmed complete in Python state and are NOT re-evaluated here.
 
 CURRENT CHAPTER DRAFT:
 {{chapter_content}}
 
-Evaluate every checklist item one by one against the CURRENT CHAPTER DRAFT. Do not return complete=true unless EVERY ID in [{{id_list}}] is in done and missing is empty. Never mark an item done merely because a previous pass marked it done; the requirement must actually be satisfied in the current draft.
+Evaluate every active checklist item one by one against the CURRENT CHAPTER DRAFT. Do not return complete=true unless EVERY active ID in [{{id_list}}] is in done and missing is empty. A requirement is DONE only when the current draft actually satisfies it — judge substance, not verbatim phrasing.

@@ -2034,15 +2034,18 @@ class WorkflowWorker(QObject):
         chapter_goal: str,
         checklist: str = "",
         missing: "list[str] | None" = None,
-        completed_ids: set[int] | None = None,
+        completed_ids: "set[int] | None" = None,
         remaining_checklist: str = "",
     ) -> str:
+        """Build the continuation prompt for Write Chapter.
+
+        The prompt does NOT include the full checklist. It only shows the
+        active (remaining) requirements and a progress label for confirmed
+        items. Completed requirements are tracked entirely in Python state.
+        """
         # ------------------------------------------------------------------
         # Dynamic budget allocation
         # ------------------------------------------------------------------
-        # Tokens available for the variable content in this continuation
-        # prompt.  We subtract a generous estimate for the fixed prose in the
-        # template itself (~350 tokens) and the system prompt (~300 tokens).
         CHARS_PER_TOKEN = 4
         FIXED_OVERHEAD_TOKENS = 650          # system prompt + template skeleton
         try:
@@ -2053,6 +2056,13 @@ class WorkflowWorker(QObject):
         prompt_token_budget = max(256, ctx_tokens - reply_tokens - FIXED_OVERHEAD_TOKENS)
         total_chars = prompt_token_budget * CHARS_PER_TOKEN
 
+        accumulated = set(completed_ids or ())
+        active_remaining = remaining_checklist.strip() or change_chapter._build_remaining_checklist(checklist, accumulated)
+        last_completed_label = change_chapter._format_completed_label(accumulated, checklist)
+        next_id = change_chapter._get_next_required_id(checklist, accumulated)
+        next_required_label = str(next_id) if next_id is not None else "(all items pending or complete)"
+        missing_text = "\n".join(f"- {item}" for item in (missing or [])) or "(none)"
+
         # Collect raw content for each slot (un-capped).
         outline_raw   = (self._extract_chapter_outline_section(chapter_num) or chapter_goal or "").strip()
         prev_tail_raw = "(none)"
@@ -2062,13 +2072,13 @@ class WorkflowWorker(QObject):
                 prev_tail_raw = prev.content[-1200:].strip()
         prose_tail_raw = chapter_text.strip()
         selection_source = "\n\n".join(
-            part for part in (outline_raw, chapter_goal, checklist, prev_tail_raw, prose_tail_raw) if part
+            part for part in (outline_raw, chapter_goal, active_remaining, prev_tail_raw, prose_tail_raw) if part
         )
         chars_raw, world_raw = build_relevant_chapter_context(
             self.project, selection_source, max_character_chars=5000, max_world_chars=6000
         )
 
-        # Build checklist block (fixed text – not dynamically budgeted).
+        # Note for chapters already saved (not checklist-related).
         completed_note = ""
         completed = sorted(c.number for c in self.project.chapters if c.number != chapter_num and c.content)
         if completed:
@@ -2077,30 +2087,10 @@ class WorkflowWorker(QObject):
                 "Do NOT rewrite any of them.\n"
             )
 
-        checklist_block = ""
-        if checklist:
-            missing_text = "\n".join(f"- {item}" for item in (missing or [])) or \
-                "(none identified; re-check every checklist item yourself)"
-            checklist_block = "\n" + prompts.render(
-                "change_chapter/section",
-                heading="INTERNAL REQUIREMENTS CHECKLIST — STILL-MISSING ITEMS MUST BE ADDRESSED FIRST",
-                body=(
-                    f"Full checklist (internal — never expose to the reader):\n{checklist}"
-                    f"\n\nStill missing:\n{missing_text}"
-                ),
-            )
-
-        # Subtract fixed text from the budget before allocating variable slots.
-        fixed_chars = len(completed_note) + len(checklist_block)
+        # Fixed text that doesn't participate in budget allocation.
+        fixed_chars = len(completed_note) + len(active_remaining) + len(missing_text)
         variable_budget = max(400, total_chars - fixed_chars)
 
-        # Priority order (highest → lowest).  Minimums guarantee the model
-        # always sees something in each slot; surplus fills remaining space.
-        #
-        # Priority:  outline > characters > world+memory > prev_tail > prose_tail
-        # The prose tail gets the largest minimum because scene-state continuity
-        # depends on it, but outline and characters always appear in full when
-        # the budget permits.
         slots = [
             # (name,         full_text,     min_chars)
             ("outline",     outline_raw,   min(len(outline_raw),  800)),
@@ -2124,10 +2114,11 @@ class WorkflowWorker(QObject):
 
         logger.debug(
             "[write_chapter] continuation budget: ctx=%d reply=%d prompt_budget=%d chars "
-            "outline=%d chars=%d world=%d prev=%d tail=%d",
+            "outline=%d chars=%d world=%d prev=%d tail=%d active_remaining=%d",
             ctx_tokens, reply_tokens, total_chars,
             len(allocated["outline"]), len(allocated["characters"]),
             len(allocated["world"]), len(allocated["prev_tail"]), len(allocated["prose_tail"]),
+            len(active_remaining),
         )
 
         return prompts.render(
@@ -2136,9 +2127,11 @@ class WorkflowWorker(QObject):
             title=self.project.title,
             completed_note=completed_note,
             chapter_goal=chapter_goal.strip() or "(none)",
-            checklist_block=checklist_block,
-            completed_ids=", ".join(str(i) for i in sorted(completed_ids or set())) or "(none)",
-            remaining_checklist=remaining_checklist.strip() or change_chapter._build_remaining_checklist(checklist, completed_ids),
+            completed_ids=", ".join(str(i) for i in sorted(accumulated)) or "(none)",
+            last_completed_id_label=last_completed_label,
+            remaining_checklist=active_remaining,
+            next_required_id_label=next_required_label,
+            missing_text=missing_text,
             continuity_context=continuity_context,
             chapter_tail=allocated["prose_tail"],
         )
@@ -2309,8 +2302,10 @@ class WorkflowWorker(QObject):
         chapter_text = ""
         generation_pass = 0
         missing_items: list[str] = []
-        confirmed_done_ids: set[int] = set()
-        remaining_checklist = change_chapter._build_remaining_checklist(checklist, confirmed_done_ids) if checklist else ""
+        # accumulated_done tracks confirmed IDs across all passes.
+        # It is NEVER sent to the evaluator as a hint — only the code uses it.
+        accumulated_done: set[int] = set()
+        remaining_checklist = change_chapter._build_remaining_checklist(checklist, accumulated_done) if checklist else ""
         evaluation = {"completed": True, "confidence": 100, "reason": "", "next": ""}
 
         while generation_pass < MAX_CONTINUATIONS:
@@ -2329,7 +2324,6 @@ class WorkflowWorker(QObject):
                 self.step_started.emit(f"Generating continuation (pass {generation_pass})...")
                 logger.info(f"[write_chapter] Generating continuation (pass {generation_pass})...")
 
-
                 self._clear_chat_messages_for_continuation()
                 continuation_prompt = self._build_chapter_continuation_prompt(
                     chapter_num,
@@ -2337,7 +2331,7 @@ class WorkflowWorker(QObject):
                     chapter_goal,
                     checklist,
                     missing_items,
-                    confirmed_done_ids,
+                    accumulated_done,
                     remaining_checklist,
                 )
 
@@ -2347,7 +2341,6 @@ class WorkflowWorker(QObject):
                 if not generated:
                     logger.warning(f"[write_chapter] generation pass {generation_pass} returned empty text.")
                     break
-
 
                 addition = generated.strip()
                 tail = chapter_text[-2500:].strip()
@@ -2362,8 +2355,20 @@ class WorkflowWorker(QObject):
 
             if checklist:
                 evaluation = change_chapter.evaluate_chapter(
-                    self, chapter_num, f"Chapter {chapter_num}", chapter_text, outline_entry, checklist, generation_pass, confirmed_done_ids,
+                    self, chapter_num, f"Chapter {chapter_num}", chapter_text, outline_entry, checklist,
+                    generation_pass, accumulated_done,
                 )
+
+                # Accumulate newly confirmed IDs into Python state.
+                newly_done = set(evaluation.get("done_ids", []))
+                accumulated_done.update(newly_done)
+                remaining_checklist = change_chapter._build_remaining_checklist(checklist, accumulated_done)
+                logger.info(
+                    "[write_chapter] Pass %d: newly_done=%s accumulated=%s remaining=%d item(s).",
+                    generation_pass, sorted(newly_done), sorted(accumulated_done),
+                    len(change_chapter._get_active_checklist_items(checklist, accumulated_done)),
+                )
+                missing_items = evaluation.get("missing", [])
 
                 if change_chapter.ends_abruptly(chapter_text) and evaluation["completed"]:
                     logger.warning(
@@ -2373,9 +2378,7 @@ class WorkflowWorker(QObject):
                     evaluation["completed"] = False
                     if not any("truncat" in m.lower() for m in evaluation["missing"]):
                         evaluation["missing"].append("Chapter appears truncated mid-sentence.")
-                confirmed_done_ids.update(evaluation.get("done_ids", []))
-                remaining_checklist = change_chapter._build_remaining_checklist(checklist, confirmed_done_ids)
-                missing_items = evaluation.get("missing", [])
+                        missing_items = evaluation["missing"]
             else:
                 evaluation = self._evaluate_chapter_completion(
                     chapter_num,
