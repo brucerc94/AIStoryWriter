@@ -1,0 +1,51 @@
+name: Force Restore Change Chapter Helpers
+
+on:
+  push:
+    branches: [bugfixes]
+    paths:
+      - .github/workflows/_fix_change_helpers_force.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: bugfixes
+          fetch-depth: 0
+
+      - name: Force restore helpers
+        shell: python
+        run: |
+          from pathlib import Path
+          import subprocess
+
+          p = Path('engine/change_chapter.py')
+          text = p.read_text(encoding='utf-8')
+
+          start = text.index('\ndef plan_change(')
+          prefix = '''\n\ndef _chapter_title(worker, chapter_num: int) -> str:\n    return next(\n        (c.title for c in worker.project.chapters if c.number == chapter_num),\n        f"Chapter {chapter_num}",\n    )\n\n\ndef _cap(text: str, limit: int, label: str) -> str:\n    text = (text or "").strip()\n    if len(text) <= limit:\n        return text\n    return f"[... earlier {label} omitted for length ...]\\n\\n" + text[-limit:]\n'''
+
+          head = text[:start]
+          if 'def _chapter_title(' not in head:
+              text = head + prefix + text[start:]
+          elif 'def _cap(' not in head:
+              cap = '''\n\ndef _cap(text: str, limit: int, label: str) -> str:\n    text = (text or "").strip()\n    if len(text) <= limit:\n        return text\n    return f"[... earlier {label} omitted for length ...]\\n\\n" + text[-limit:]\n'''
+              text = head + cap + text[start:]
+
+          compile(text, str(p), 'exec')
+          assert 'def _chapter_title(' in text
+          assert 'def _cap(' in text
+
+          p.write_text(text, encoding='utf-8')
+
+          subprocess.run(['git', 'status', '--short'], check=True)
+          subprocess.run(['git', 'config', 'user.name', 'github-actions[bot]'], check=True)
+          subprocess.run(['git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], check=True)
+          subprocess.run(['git', 'add', str(p)], check=True)
+          subprocess.run(['git', 'commit', '-m', 'fix: restore change chapter helpers'], check=True)
+          subprocess.run(['git', 'push', 'origin', 'HEAD:bugfixes'], check=True)
