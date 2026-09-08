@@ -20,6 +20,7 @@
     <a href="#screenshots">Screenshots</a> ·
     <a href="#how-it-works">How it works</a> ·
     <a href="#using-the-ui">Using the UI</a> ·
+    <a href="#context-and-workflow-behavior">Context & workflow behavior</a> ·
     <a href="#tips">Tips</a> ·
     <a href="#recommended-models">Recommended models</a> ·
     <a href="#quick-start">Quick Start</a>
@@ -28,7 +29,7 @@
 
 > **Status: In Development** — AI Story Studio is already usable, but it is **not a final or stable release yet**. The interface, workflows, model support, and behavior may continue to change while development progresses.
 
-> **Documentation policy:** this README describes the **current graphical interface**. Internal classes, backend APIs, development scaffolding, prompt files, unexposed workflow tasks, and planned features are intentionally omitted.
+> **Documentation policy:** this README describes the **current graphical interface and user-visible workflow behavior**. Internal classes, backend APIs, prompt files, development scaffolding, and unexposed implementation details are intentionally omitted unless they are important for understanding how the application behaves.
 
 ---
 
@@ -42,7 +43,7 @@ The idea is deliberately simple: **you follow the workflow, and the AI helps at 
 
 ## How it works
 
-The main writing process is intentionally straightforward:
+The main writing process is:
 
 ```text
 Create Project
@@ -55,14 +56,61 @@ Characters + World + Author
       ↓
 Chapters
       ↓
-Edit / Review / Continue
+Review / Edit / Change / Continue
       ↓
 Finish the Book
       ↓
 Export
 ```
 
+The important distinction is that the **Outline acts as the chapter blueprint**. Chapter generation then works from the selected chapter's plan and the relevant project canon instead of blindly feeding the entire project back into the model.
+
 You do not need to understand agents, APIs, pipelines, or prompt files to use the application. The UI handles the underlying context and model calls for you.
+
+---
+
+## Recent workflow improvements
+
+The current development branch has tightened the writing workflow around a few rules:
+
+### Outline is a real chapter blueprint
+
+The outline is no longer treated as a simple list of chapter titles. Each chapter is planned with a structured format centered on:
+
+```text
+Chapter Plan
+Continuity
+```
+
+That gives chapter generation a clearer, binding description of what should happen and what should remain consistent.
+
+### Extend Outline is sequential
+
+**Extend Outline** appends new chapters after the existing outline instead of rewriting earlier chapters. New chapter numbers are validated to remain sequential, without collisions, gaps, or accidental repeats.
+
+### Write Chapter uses chapter-scoped canon
+
+When a chapter is generated, the application selects the **relevant established characters and world/setting information for that chapter** rather than sending all character records and the entire world document every time.
+
+This reduces irrelevant context and helps keep the generation focused on the current chapter.
+
+### Change Chapter uses the same principle
+
+**Change Chapter** works from the current chapter, your requested modification, the chapter plan, and only the relevant canon needed for that change.
+
+The goal is to change the requested part of a chapter without pulling unrelated project information into the rewrite.
+
+### UI Chat history is isolated from chapter writing
+
+The top-level Chat workspace has its own conversation state. That chat history is **not automatically used as context when writing or changing a chapter**.
+
+The chapter-writing workflows do not take their instructions from whatever happened earlier in `UI/Chat`.
+
+### Story Memory is not automatically injected into Write/Change
+
+Story Memory remains a separate project feature. It can be inspected and maintained through the Memory area, and longer automated book workflows can update it, but **Write Chapter and Change Chapter do not use Story Memory as an automatic source of chapter-writing context**.
+
+This separation is intentional: the chapter plan and relevant canon should drive chapter writing, while Chat and Memory remain separate tools.
 
 ---
 
@@ -104,14 +152,14 @@ You do not need to understand agents, APIs, pipelines, or prompt files to use th
 |---|---|
 | 📚 **Projects** | Create, open, search, rename and delete projects. See status and chapter progress. |
 | ✍️ **Synopsis** | Write manually or generate a synopsis with AI. |
-| 🧭 **Outline** | Edit, generate, extend, and track planned chapters. |
+| 🧭 **Outline** | Create a structured chapter blueprint, edit it, extend it, and keep chapter numbering consistent. |
 | 👤 **Characters** | Manage character details, relationships, and AI-generated portraits. |
-| 🌍 **World** | Keep world and setting notes manually. |
-| 📖 **Chapters** | Add, generate, read, edit, change, save, mark ready, and delete chapters. Generate the remaining book from the outline. |
-| 🧠 **Memory** | Maintain story memory automatically during chapter generation while keeping manual editing available. |
+| 🌍 **World** | Keep world and setting notes available as project canon. |
+| 📖 **Chapters** | Generate, read, edit, change, save, review, continue, and delete chapters. Generate the remaining book from the outline. |
+| 🧠 **Memory** | Maintain story memory separately, including automatic updates during longer book-generation workflows. |
 | 🎨 **Author** | Define creative intent and writing-style preferences. |
 | 💬 **Chat** | Ask questions, brainstorm, request writing help, attach a chapter, and control story context. |
-| 🖼️ **Images** | Generate book covers, scenes, locations, objects/items, and character portraits. Image generation currently operates as a separate tool from the main writing workflow. |
+| 🖼️ **Images** | Generate book covers, scenes, locations, objects/items, and character portraits. Image generation is currently separate from the main story-writing pipeline. |
 | 📊 **Stats** | Track words, chapters, reading time, review status, progress, and chapter breakdowns. |
 | 🔎 **Search** | Search the project with normal text, case-sensitive mode, or regex. |
 | ⚙️ **Models & Settings** | Configure local GGUF models and generation/image settings. |
@@ -166,17 +214,23 @@ Open **Story → Outline**.
 
 Click **Generate Outline** to open the outline setup dialog. There you can choose the number of chapters and optionally define the author's creative intent and writing-style preferences used for the generation.
 
-The outline is then shown in the editor and can still be edited manually. When you manually edit the outline, click **Save** to store the changes before using another workflow action that depends on the updated outline.
+The outline is now intended to be a **detailed chapter blueprint**, not only a list of titles. Chapter entries follow a structured format centered on:
 
-You can also use **Extend Outline** when you want to append additional chapters to an existing outline.
-
-The outline uses chapter headings such as:
-
-```markdown
+```text
 ## Chapter 1: Title
-## Chapter 2: Title
-## Chapter 3: Title
+
+Chapter Plan
+...
+
+Continuity
+...
 ```
+
+The chapter plan describes the material the chapter should cover. The continuity section records important information that should remain consistent as the story progresses.
+
+The outline remains editable. When you manually edit the outline, click **Save** to store the changes before using another workflow action that depends on the updated outline.
+
+You can also use **Extend Outline** when you want to append additional chapters. Existing chapters are preserved, and the new chapters continue from the next available chapter number.
 
 ### 6. Add Characters
 
@@ -189,7 +243,7 @@ You can add characters manually with **+ Add Character**, providing:
 - Physical description
 - Backstory
 - Traits
-- Relationships with other characters
+- Relationships
 
 When you generate an outline, the application also extracts and adds characters found in the generated outline automatically. You can then open **Characters** to review, edit, or delete those characters, and you can always add new characters manually.
 
@@ -199,9 +253,9 @@ Characters can also have AI-generated portraits. Existing character data is kept
 
 Open **Story → World**.
 
-Use this space for the information the story needs to remain consistent: locations, rules, history, politics, culture, technology, magic systems, or other setting details.
+Use this space for information the story needs to keep consistent: locations, rules, history, politics, culture, technology, magic systems, or other setting details.
 
-This section is intentionally manual in the current UI. **After writing or changing the world information, click `Save` at the bottom of the editor.** The changes are not persisted until you save them.
+This section is intentionally user-editable in the current UI. **After writing or changing the world information, click `Save` at the bottom of the editor.** The changes are not persisted until you save them.
 
 ### 8. Define the Author profile
 
@@ -209,7 +263,7 @@ Open **Story → Author**.
 
 The **Author Profile** is where you can establish long-term creative preferences such as themes, emotional goals, inspirations, point of view, pacing, dialogue style, description density, violence, romance, genre tags, and target chapter length.
 
-These settings are stored in the project and can also be used by the outline-generation workflow.
+These settings are stored in the project and can be used by planning and writing workflows where appropriate.
 
 ### 9. Generate Chapters
 
@@ -224,10 +278,10 @@ The chapter workspace provides these main actions:
 
 | Action | What it does |
 |---|---|
-| **Generate Chapter** | Generates the **currently selected chapter**. It does not create the next numbered chapter. |
+| **Generate Chapter** | Generates the **currently selected chapter**. It does not automatically create the next numbered chapter. |
 | **Generate Next Chapter** | Finds the first chapter in the outline that still has no content and generates that chapter. |
 | **Generate Full Book** | Generates all remaining chapters from the outline in order, one after another. |
-| **Change Chapter** | Opens a dialog where you describe a targeted change for the current chapter; it requires existing chapter content. |
+| **Change Chapter** | Opens a targeted revision workflow for the current chapter; it requires existing chapter content. |
 | **Mark as Ready** | Marks the current chapter as reviewed/ready. This does not call the AI. |
 | **Save** | Saves manual edits to the chapter content. |
 | **Delete** | Deletes the current chapter from the project. |
@@ -236,25 +290,60 @@ For example, if your outline has Chapters 1–5 but Chapter 3 is still empty, **
 
 Use **Read** mode to review the chapter as a book page. You can move between chapters with **Previous Chapter / Next Chapter** and through pages with **Previous Page / Next Page**. Use **Edit** mode when you need to change the title or text manually.
 
-The editor also shows a live word count, character count, and estimated reading time. After an AI generation finishes, the generated chapter is opened in the book reader automatically.
+The editor also shows a live word count, character count, and estimated reading time.
 
-**Generate Full Book** is useful when you want the application to work through the remaining outline automatically. It confirms how many chapters remain before starting and updates story memory between generated chapters.
+**Generate Full Book** is useful when you want the application to work through the remaining outline automatically. It confirms how many chapters remain before starting and maintains story continuity across the generated chapters.
 
-### 10. Use Story Memory
+### 10. Use Change Chapter for targeted revisions
+
+**Change Chapter** is for an existing chapter that needs a controlled modification.
+
+Describe:
+
+- what must change
+- what must remain unchanged
+- the desired tone or emotional effect
+- which scene or passage should be expanded or shortened
+- how characters should behave
+- what information should be added or removed
+- what the ending should preserve
+
+The workflow is designed to keep the rewrite focused on the requested chapter rather than pulling unrelated project context into the revision.
+
+A strong request looks more like:
+
+```text
+Make the confrontation between Elena and Marcus more tense.
+
+Keep the existing plot events and ending, but make Elena more defensive
+and Marcus more controlled and threatening. Add more subtext to their
+dialogue, slow the scene slightly, and preserve the final outcome.
+Do not add a new character.
+```
+
+The more concrete the instruction, the easier it is to steer the revision toward the result you actually want.
+
+### 11. Use Story Memory
 
 Open **Story → Memory** to inspect the story memory maintained by the application.
 
-During chapter generation, the application can update memory automatically. You can also edit the memory manually when needed. **After making manual changes, click `Save` at the bottom of the Memory editor to persist them.**
+During longer book-generation workflows, memory can be updated between chapters. You can also edit the memory manually when needed.
 
-### 11. Use Chat when you want assistance
+**Memory is intentionally separate from Write Chapter and Change Chapter input context.** Those workflows do not automatically read Story Memory when generating or rewriting a chapter.
+
+After making manual changes, click **Save** at the bottom of the Memory editor to persist them.
+
+### 12. Use Chat when you want assistance
 
 The top-level **Chat** tab is a general-purpose writing assistant.
 
 You can send questions, brainstorm ideas, ask for writing help, enable or disable project context, and attach a chapter to the conversation.
 
-With context enabled, the chat can use information from the current project such as the synopsis, outline, characters and relationships, world notes, memory, and conversation summary.
+With context enabled, Chat can use project information such as the synopsis, outline, characters and relationships, world notes, memory, and conversation summary.
 
-### 12. Generate images separately
+Chat has its own conversation history. **That UI chat history is not automatically carried into Write Chapter or Change Chapter.**
+
+### 13. Generate images separately
 
 The top-level **Images** tab provides local image generation for:
 
@@ -264,17 +353,17 @@ The top-level **Images** tab provides local image generation for:
 - Object / Item
 - Character portraits through the character workflow
 
-Image generation **works**, but it is currently a **separate tool and is not yet integrated into the main synopsis → outline → characters/world → chapters workflow**. Generated images are saved inside the active project.
+Image generation **works**, but it is currently a **separate tool and is not yet integrated into the main synopsis → outline → characters/world → chapters pipeline**. Generated images are saved inside the active project.
 
 Open **Images**, enter a prompt, optionally set a negative prompt, seed, dimensions, steps, and CFG, then click **Generate**.
 
-### 13. Check progress and find text
+### 14. Check progress and find text
 
 Use **Stats** to see project progress, chapter counts, word counts, reading-time information, and review status.
 
 Use **Search** to find text across the project.
 
-### 14. Export the finished book
+### 15. Export the finished book
 
 Use **Export Book** from the top-right of the application window.
 
@@ -284,6 +373,65 @@ The current UI supports:
 - PDF (`.pdf`)
 - Markdown (`.md`)
 - Plain text (`.txt`)
+
+---
+
+## Context and workflow behavior
+
+AI Story Studio uses different context boundaries for different jobs. This is important when working with a large project.
+
+### Outline generation
+
+Outline generation can use the project material needed to plan the story, including relevant Characters, World information, and Author preferences.
+
+The goal is to create a detailed chapter-by-chapter blueprint.
+
+### Write Chapter
+
+Write Chapter is driven by the selected chapter's outline entry and the chapter-writing workflow.
+
+For chapter canon, the application selects **relevant established characters and relevant world/setting sections** based on the current chapter context. This is intentionally narrower than sending all project canon.
+
+Write Chapter does **not** automatically use:
+
+```text
+UI Chat history       ❌
+Chat Summary          ❌
+Story Memory          ❌
+Full project synopsis ❌
+Entire character database ❌
+Entire world document ❌
+```
+
+The chapter workflow can still use the previous chapter's ending as a continuity anchor when continuing the story.
+
+### Change Chapter
+
+Change Chapter follows the same isolation principle.
+
+The rewrite is based on:
+
+```text
+Current Chapter
+       +
+User's requested change
+       +
+Chapter checklist / plan
+       +
+Relevant Characters
+       +
+Relevant World / Setting
+```
+
+The top-level Chat history and Story Memory are not automatically injected into this workflow.
+
+### Chat
+
+Chat is intentionally different.
+
+When Chat context is enabled, it can use broader project information and its own conversation history. That makes Chat suitable for brainstorming and open-ended assistance.
+
+This separation prevents a conversation in the Chat tab from silently becoming writing context for a later chapter generation.
 
 ---
 
@@ -303,11 +451,23 @@ rival of → Marcus
 friend of → Elena
 ```
 
-Try to define the important relationships **for each relevant character**, not only for the protagonist. This gives chapter generation more concrete information about how characters should behave toward each other.
+Try to define important relationships **for each relevant character**, not only for the protagonist. This gives chapter generation more concrete information about how characters should behave toward each other.
+
+### Make the outline specific
+
+The more useful the chapter plan is, the easier it is for chapter generation to stay on track.
+
+A good chapter entry should make clear:
+
+- what the chapter needs to accomplish
+- which events should happen
+- which characters matter
+- what continuity must be preserved
+- how the chapter should end or transition into the next one
 
 ### Use Change Chapter for precise revisions
 
-**Change Chapter** is especially useful when you already have a chapter and want to alter how it behaves without rewriting the entire book from scratch.
+Use **Change Chapter** when you already have a chapter and want to make a controlled revision.
 
 Be specific. Instead of:
 
@@ -315,27 +475,7 @@ Be specific. Instead of:
 Make this chapter better.
 ```
 
-describe exactly what should change and what should remain. You can specify things such as:
-
-- the tone or emotional intensity you want
-- which scene should be expanded or shortened
-- how a character should behave
-- how a relationship should affect the dialogue
-- whether pacing should become faster or slower
-- what information should be added or removed
-- how the chapter should end
-- what the AI must preserve from the current version
-
-For example:
-
-```text
-Make the confrontation between Elena and Marcus more tense.
-Keep the existing plot events and ending, but make Elena more defensive and
-Marcus more controlled and threatening. Add more subtext to their dialogue,
-slow the scene slightly, and make the final exchange end with Elena realizing
-that Marcus already knows about the letter. Do not add a new character or
-change the outcome of the chapter.
-```
+describe exactly what should change and what should remain.
 
 The more concrete the instruction, the easier it is to steer the revision toward the result you actually want.
 
@@ -410,6 +550,8 @@ Available controls include:
 - **Clear Chat**
 
 With context enabled, the conversation can include the project's synopsis, outline, characters and relationships, world notes, memory, and conversation summary.
+
+Chat history remains local to the Chat workflow and does not silently become Write Chapter or Change Chapter context.
 
 ---
 
@@ -516,7 +658,23 @@ AI Story Studio is a local desktop application. Language and image models are **
 
 The main writing workflow is the **Story** workspace. Image generation is functional, but it is currently a standalone companion tool rather than part of the automatic story-generation pipeline.
 
-This README intentionally follows the **UI currently shipped**. New user-facing features should be added here when they are actually visible and usable in the application.
+The current chapter workflow is designed around a **structured Outline + scoped canon + chapter writing** model:
+
+```text
+Outline
+  ↓
+Chapter Plan + Continuity
+  ↓
+Relevant Characters + World
+  ↓
+Write / Change Chapter
+  ↓
+Review / Continue
+```
+
+The Chat workspace and Story Memory remain separate sources of assistance and state.
+
+This README follows the **UI currently shipped** and the workflow behavior currently implemented. New user-facing features should be documented here when they are actually visible and usable in the application.
 
 Because the project is still in development, behavior, UI details, and supported models may change before a stable release.
 
