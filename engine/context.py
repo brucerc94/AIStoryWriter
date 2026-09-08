@@ -169,9 +169,9 @@ def _compact_sections(
     if task == TaskType.GENERATE_OUTLINE:
         budgets = {
             "Synopsis": 0,
-            "Characters": max(220, min(700, max_context_tokens // 7)),
+            "Characters": max(220, min(700, max_context_tokens // 8)),
             "Outline": 0,
-            "World": 0,
+            "World": max(180, min(500, max_context_tokens // 10)),
             "Memory": 0,
             "Chat Summary": 0,
             "Creative Direction": max(120, min(360, max_context_tokens // 12)),
@@ -231,8 +231,12 @@ def _build_story_context_text(
         )
         if task == TaskType.GENERATE_OUTLINE:
             # Synopsis is normally in the user message for outline generation.
+            # Characters and World are reference canon for planning; keep them
+            # compact so the detailed task prompt remains available.
             if sections["Characters"]:
                 parts.append(f"\n\n## Established Characters\n{sections['Characters']}")
+            if sections["World"]:
+                parts.append(f"\n\n## World & Setting\n{sections['World']}")
             if sections["Creative Direction"]:
                 parts.append(f"\n\n## Author's Creative Direction\n{sections['Creative Direction']}")
         else:
