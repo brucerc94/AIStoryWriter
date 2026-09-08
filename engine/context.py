@@ -182,7 +182,7 @@ def _compact_sections(
             "Characters": max(240, min(650, max_context_tokens // 7)),
             "Outline": max(450, min(1100, max_context_tokens // 4)),
             "World": max(80, min(350, max_context_tokens // 12)),
-            "Memory": max(100, min(450, max_context_tokens // 10)),
+            "Memory": (0 if task in (TaskType.WRITE_CHAPTER, TaskType.CHANGE_CHAPTER) else max(100, min(450, max_context_tokens // 10))),
             "Chat Summary": 0,
             "Creative Direction": max(80, min(300, max_context_tokens // 14)),
         }

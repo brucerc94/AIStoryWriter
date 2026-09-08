@@ -2054,7 +2054,6 @@ class WorkflowWorker(QObject):
         outline_raw   = (self._extract_chapter_outline_section(chapter_num) or chapter_goal or "").strip()
         chars_raw     = (format_characters_block(self.project.characters[:12]) or "(none)").strip()
         world_raw     = (self.project.world or "").strip() or "(none)"
-        memory_raw    = (self.project.memory or "").strip() or "(none)"
         prev_tail_raw = "(none)"
         if chapter_num > 1:
             prev = next((c for c in self.project.chapters if c.number == chapter_num - 1), None)
@@ -2100,7 +2099,6 @@ class WorkflowWorker(QObject):
             ("outline",     outline_raw,   min(len(outline_raw),  800)),
             ("characters",  chars_raw,     min(len(chars_raw),    600)),
             ("world",       world_raw,     min(len(world_raw),    400)),
-            ("memory",      memory_raw,    min(len(memory_raw),   400)),
             ("prev_tail",   prev_tail_raw, min(len(prev_tail_raw), 300)),
             ("prose_tail",  prose_tail_raw, min(len(prose_tail_raw), 1600)),
         ]
@@ -2113,18 +2111,16 @@ class WorkflowWorker(QObject):
                 f"Chapter outline:\n{allocated['outline'] or '(none)'}\n\n"
                 f"Established characters:\n{allocated['characters'] or '(none)'}\n\n"
                 f"World/setting anchors:\n{allocated['world'] or '(none)'}\n\n"
-                f"Story memory:\n{allocated['memory'] or '(none)'}\n\n"
                 f"End of previous chapter (continuity only):\n{allocated['prev_tail'] or '(none)'}"
             ),
         )
 
         logger.debug(
             "[write_chapter] continuation budget: ctx=%d reply=%d prompt_budget=%d chars "
-            "outline=%d chars=%d world=%d memory=%d prev=%d tail=%d",
+            "outline=%d chars=%d world=%d prev=%d tail=%d",
             ctx_tokens, reply_tokens, total_chars,
             len(allocated["outline"]), len(allocated["characters"]),
-            len(allocated["world"]), len(allocated["memory"]),
-            len(allocated["prev_tail"]), len(allocated["prose_tail"]),
+            len(allocated["world"]), len(allocated["prev_tail"]), len(allocated["prose_tail"]),
         )
 
         return prompts.render(

@@ -95,7 +95,6 @@ def build_clean_context_sections(worker, chapter_num: int) -> str:
 
     characters = format_characters_block(project.characters[:12]) or "(none)"
     world = _cap(project.world, WORLD_CAP, "world notes") or "(none)"
-    memory = _cap(project.memory, MEMORY_CAP, "story memory") or "(none)"
     intent_frag = project.author_intent.to_prompt_fragment()
     style_frag = project.writing_style.to_prompt_fragment()
     chapter_outline = extract_outline_section(project.outline, chapter_num) or "(no outline entry for this chapter)"
@@ -105,8 +104,6 @@ def build_clean_context_sections(worker, chapter_num: int) -> str:
     ]
     if world != "(none)":
         sections.append(prompts.render("change_chapter/section", heading="WORLD & SETTING", body=world))
-    if memory != "(none)":
-        sections.append(prompts.render("change_chapter/section", heading="STORY MEMORY", body=memory))
     if intent_frag:
         sections.append(prompts.render("change_chapter/section", heading="AUTHOR INTENT", body=intent_frag))
     if style_frag:
@@ -317,7 +314,6 @@ def _build_continuation_prompt(worker, chapter_num: int, chapter_content: str, i
     outline_raw    = (extract_outline_section(project.outline, chapter_num) or "").strip() or "(none)"
     characters_raw = (format_characters_block(project.characters[:12]) or "(none)").strip()
     world_raw      = _cap(project.world, 8000, "world notes") or "(none)"
-    memory_raw     = _cap(project.memory, 8000, "story memory") or "(none)"
     prose_tail_raw = chapter_content.strip()
 
     # Fixed text that doesn't participate in budget allocation.
@@ -332,7 +328,6 @@ def _build_continuation_prompt(worker, chapter_num: int, chapter_content: str, i
         ("outline",     outline_raw,    min(len(outline_raw),    800)),
         ("characters",  characters_raw, min(len(characters_raw), 600)),
         ("world",       world_raw,      min(len(world_raw),      400)),
-        ("memory",      memory_raw,     min(len(memory_raw),     400)),
         ("prose_tail",  prose_tail_raw, min(len(prose_tail_raw), 1600)),
     ]
     allocated = budget_allocate(variable_budget, slots)
@@ -344,17 +339,15 @@ def _build_continuation_prompt(worker, chapter_num: int, chapter_content: str, i
             f"Current chapter plan:\n{allocated['outline']}\n\n"
             f"Established characters:\n{allocated['characters']}\n\n"
             f"World/setting anchors:\n{allocated['world']}\n\n"
-            f"Story memory:\n{allocated['memory']}"
         ),
     )
 
     logger.debug(
         "[change_chapter] continuation budget: ctx=%d reply=%d prompt_budget=%d chars "
-        "outline=%d chars=%d world=%d memory=%d tail=%d",
+        "outline=%d chars=%d world=%d tail=%d",
         ctx_tokens, reply_tokens, total_chars,
         len(allocated["outline"]), len(allocated["characters"]),
-        len(allocated["world"]), len(allocated["memory"]),
-        len(allocated["prose_tail"]),
+        len(allocated["world"]), len(allocated["prose_tail"]),
     )
 
     system = prompts.render("change_chapter/continue_system", language_note=f" Continue in {language}." if language else "")
