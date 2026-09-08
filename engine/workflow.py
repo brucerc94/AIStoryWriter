@@ -2616,7 +2616,6 @@ class WorkflowWorker(QObject):
         self._extract_and_merge_characters(chapter.content)
         self._update_world_incremental(chapter.content, source_type="chapter")
         self.project.current_chapter = chapter_num
-        self._run_update_memory()
 
     def _run_change_chapter(self) -> None:
 

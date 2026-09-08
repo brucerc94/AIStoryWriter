@@ -2,7 +2,7 @@
 CHANGE_CHAPTER workflow: checklist plan → full rewrite
 with clean context → checklist evaluation → continuation until complete.
 
-Characters/World/Memory are refreshed only once the chapter is accepted.
+Characters/World are refreshed only once the chapter is accepted.
 All prompt text lives in engine/prompts/change_chapter/.
 
 Shared helpers (parse_checklist_items, ends_abruptly, trim_leading_overlap,
