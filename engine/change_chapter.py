@@ -17,7 +17,7 @@ import logging
 import re
 
 from engine import prompts
-from engine.context import budget_allocate, extract_outline_section, format_characters_block
+from engine.context import budget_allocate, build_relevant_chapter_context, extract_outline_section
 from engine.models import ChatMessage, MessageRole, TaskType
 
 logger = logging.getLogger("workflow")
@@ -89,28 +89,36 @@ def parse_checklist_items(checklist: str) -> list[tuple[int, str]]:
 
 
 
-def build_clean_context_sections(worker, chapter_num: int) -> str:
-    """Assemble clean context for the target chapter only."""
+def build_clean_context_sections(worker, chapter_num: int, selection_source: str = "") -> str:
+    """Assemble scoped canon context for the target chapter only."""
     project = worker.project
+    chapter_outline = extract_outline_section(project.outline, chapter_num) or "(no outline entry for this chapter)"
+    source = "\n\n".join(part for part in (chapter_outline, selection_source) if part)
+    characters, world = build_relevant_chapter_context(
+        project, source, max_character_chars=5000, max_world_chars=6000
+    )
 
-    characters = format_characters_block(project.characters[:12]) or "(none)"
-    world = _cap(project.world, WORLD_CAP, "world notes") or "(none)"
+    sections = []
+    if characters:
+        sections.append(prompts.render(
+            "change_chapter/section",
+            heading="RELEVANT CHARACTERS (project canon — use only these established records)",
+            body=characters,
+        ))
+    if world:
+        sections.append(prompts.render(
+            "change_chapter/section",
+            heading="RELEVANT WORLD & SETTING (project canon — scoped to this chapter)",
+            body=world,
+        ))
     intent_frag = project.author_intent.to_prompt_fragment()
     style_frag = project.writing_style.to_prompt_fragment()
-    chapter_outline = extract_outline_section(project.outline, chapter_num) or "(no outline entry for this chapter)"
-
-    sections = [
-        prompts.render("change_chapter/section", heading="CHARACTERS", body=characters),
-    ]
-    if world != "(none)":
-        sections.append(prompts.render("change_chapter/section", heading="WORLD & SETTING", body=world))
     if intent_frag:
         sections.append(prompts.render("change_chapter/section", heading="AUTHOR INTENT", body=intent_frag))
     if style_frag:
         sections.append(prompts.render("change_chapter/section", heading="WRITING STYLE", body=style_frag))
     sections.append(prompts.render("change_chapter/section", heading="CURRENT CHAPTER PLAN", body=chapter_outline))
     return "\n\n".join(sections)
-
 
 def build_full_rewrite_prompt(
     worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str,
@@ -129,7 +137,7 @@ def build_full_rewrite_prompt(
         chapter_title=_chapter_title(worker, chapter_num),
         instruction=instruction.strip(),
         checklist=checklist.strip() or "(none; follow the original request directly)",
-        context_sections=build_clean_context_sections(worker, chapter_num),
+        context_sections=build_clean_context_sections(worker, chapter_num, "\n\n".join((instruction, checklist, chapter_content))),
         chapter_content=_cap(chapter_content, CHAPTER_CAP, "part of the chapter"),
     )
     return system, user
@@ -312,9 +320,13 @@ def _build_continuation_prompt(worker, chapter_num: int, chapter_content: str, i
 
     project = worker.project
     outline_raw    = (extract_outline_section(project.outline, chapter_num) or "").strip() or "(none)"
-    characters_raw = (format_characters_block(project.characters[:12]) or "(none)").strip()
-    world_raw      = _cap(project.world, 8000, "world notes") or "(none)"
     prose_tail_raw = chapter_content.strip()
+    selection_source = "\n\n".join(
+        part for part in (outline_raw, instruction, checklist, missing_text, prose_tail_raw) if part
+    )
+    characters_raw, world_raw = build_relevant_chapter_context(
+        project, selection_source, max_character_chars=5000, max_world_chars=6000
+    )
 
     # Fixed text that doesn't participate in budget allocation.
     fixed_chars = len(instruction) + len(checklist) + len(missing_text)

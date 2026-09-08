@@ -9,6 +9,8 @@ requires it.
 from __future__ import annotations
 
 import logging
+import unicodedata
+import re
 from typing import Optional
 
 from engine import prompts
@@ -38,6 +40,118 @@ def _format_character_for_prompt(c) -> str:
 
 def format_characters_block(characters: list) -> str:
     return "\n\n".join(_format_character_for_prompt(c) for c in characters).strip()
+
+
+
+
+_CHAPTER_MATCH_STOPWORDS = {
+    "about", "after", "again", "also", "before", "being", "between", "could", "from", "have",
+    "into", "just", "more", "other", "over", "same", "some", "than", "that", "their", "there",
+    "these", "they", "this", "those", "through", "under", "very", "what", "when", "where", "which",
+    "while", "with", "would", "chapter", "scene", "story", "plan", "must", "should", "then", "only",
+    "para", "como", "desde", "esta", "este", "estas", "estos", "entre", "sobre", "hacia", "donde",
+    "cuando", "quien", "quienes", "tambien", "todo", "todos", "toda", "todas", "debe", "deben", "con",
+    "por", "del", "las", "los", "una", "uno", "unas", "unos", "que", "sus", "ser", "sea", "son",
+}
+
+
+def _normalize_match_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text or "")
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]+", " ", normalized.casefold()).strip()
+
+
+def _meaningful_words(text: str) -> set[str]:
+    return {
+        word for word in re.findall(r"[a-z0-9]{4,}", _normalize_match_text(text))
+        if word not in _CHAPTER_MATCH_STOPWORDS
+    }
+
+
+def select_relevant_characters(
+    characters: list,
+    source_text: str,
+    max_characters: int = 12,
+    max_chars: int = 5000,
+) -> str:
+    """Return only established character records referenced by chapter context."""
+    source_norm = " " + _normalize_match_text(source_text) + " "
+    selected = []
+    for character in characters:
+        name = (getattr(character, "name", "") or "").strip()
+        if not name:
+            continue
+        name_norm = _normalize_match_text(name)
+        if not name_norm:
+            continue
+        tokens = name_norm.split()
+        matched = f" {name_norm} " in source_norm
+        if not matched and len(tokens) == 1:
+            matched = f" {tokens[0]} " in source_norm
+        if not matched and len(tokens) > 1:
+            matched = all(f" {token} " in source_norm for token in tokens)
+        if matched:
+            selected.append(character)
+        if len(selected) >= max_characters:
+            break
+    if not selected:
+        return ""
+    return _truncate_to_budget(format_characters_block(selected), max(1, max_chars // 4))
+
+
+def _markdown_world_sections(world: str) -> list[tuple[int, str, str]]:
+    matches = list(re.finditer(r"(?m)^##\s+(.+?)\s*$", world or ""))
+    sections = []
+    for index, match in enumerate(matches):
+        start = match.start()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(world)
+        sections.append((index, match.group(1).strip(), world[start:end].strip()))
+    return sections
+
+
+def select_relevant_world(
+    world: str,
+    source_text: str,
+    max_sections: int = 4,
+    max_chars: int = 6000,
+) -> str:
+    """Return the highest-scoring world sections referenced by this chapter context."""
+    sections = _markdown_world_sections(world)
+    if not sections:
+        return ""
+    source_words = _meaningful_words(source_text)
+    scored = []
+    for index, title, body in sections:
+        score = (
+            len(source_words & _meaningful_words(title)) * 5
+            + len(source_words & _meaningful_words(body))
+        )
+        if score > 0:
+            scored.append((score, index, body))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    chosen = sorted(scored[:max_sections], key=lambda item: item[1])
+    blocks = []
+    remaining = max_chars
+    for _score, _index, body in chosen:
+        if remaining <= 0:
+            break
+        block = body if len(body) <= remaining else body[:remaining].rstrip() + "\n\n[... world section truncated ...]"
+        blocks.append(block)
+        remaining -= len(block) + 2
+    return "\n\n".join(blocks).strip()
+
+
+def build_relevant_chapter_context(
+    project,
+    source_text: str,
+    max_character_chars: int = 5000,
+    max_world_chars: int = 6000,
+) -> tuple[str, str]:
+    """Resolve scoped chapter canon without an LLM call."""
+    return (
+        select_relevant_characters(project.characters, source_text, max_chars=max_character_chars),
+        select_relevant_world(project.world, source_text, max_chars=max_world_chars),
+    )
 
 
 def _estimate_tokens(text: str) -> int:
@@ -230,15 +344,17 @@ def _build_story_context_text(
             project=project,
         )
         if task == TaskType.GENERATE_OUTLINE:
-            # Synopsis is normally in the user message for outline generation.
-            # Characters and World are reference canon for planning; keep them
-            # compact so the detailed task prompt remains available.
             if sections["Characters"]:
                 parts.append(f"\n\n## Established Characters\n{sections['Characters']}")
             if sections["World"]:
                 parts.append(f"\n\n## World & Setting\n{sections['World']}")
             if sections["Creative Direction"]:
                 parts.append(f"\n\n## Author's Creative Direction\n{sections['Creative Direction']}")
+        elif task in (TaskType.WRITE_CHAPTER, TaskType.CHANGE_CHAPTER):
+            # These workflows inject their own chapter-scoped canon in their
+            # explicit task prompts. Never inject project-wide synopsis, canon,
+            # Memory, UI Chat Summary, or chat history here.
+            pass
         else:
             if sections["Synopsis"]:
                 parts.append(f"\n\n{sections['Synopsis']}")
@@ -255,11 +371,9 @@ def _build_story_context_text(
             if sections["Creative Direction"]:
                 parts.append(f"\n\n## Author's Creative Direction\n{sections['Creative Direction']}")
 
-    # Author-provided custom instructions remain the final instruction block.
     if custom_instructions:
         parts.append(f"\n\n{CUSTOM_INSTRUCTIONS_MARKER}\n{custom_instructions}")
     return "\n".join(p for p in parts if p).strip()
-
 
 def _repair_alternation(messages: list[dict]) -> list[dict]:
     while messages and messages[0].get("role") != "user":

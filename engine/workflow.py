@@ -18,6 +18,7 @@ from engine.context import (
     estimate_messages_tokens,
     build_summarization_prompt,
     budget_allocate,
+    build_relevant_chapter_context,
     format_characters_block,
     mark_old_messages_summarized,
     should_summarize,
@@ -2052,14 +2053,18 @@ class WorkflowWorker(QObject):
 
         # Collect raw content for each slot (un-capped).
         outline_raw   = (self._extract_chapter_outline_section(chapter_num) or chapter_goal or "").strip()
-        chars_raw     = (format_characters_block(self.project.characters[:12]) or "(none)").strip()
-        world_raw     = (self.project.world or "").strip() or "(none)"
         prev_tail_raw = "(none)"
         if chapter_num > 1:
             prev = next((c for c in self.project.chapters if c.number == chapter_num - 1), None)
             if prev and prev.content:
                 prev_tail_raw = prev.content[-1200:].strip()
         prose_tail_raw = chapter_text.strip()
+        selection_source = "\n\n".join(
+            part for part in (outline_raw, chapter_goal, checklist, prev_tail_raw, prose_tail_raw) if part
+        )
+        chars_raw, world_raw = build_relevant_chapter_context(
+            self.project, selection_source, max_character_chars=5000, max_world_chars=6000
+        )
 
         # Build checklist block (fixed text – not dynamically budgeted).
         completed_note = ""
@@ -2207,29 +2212,47 @@ class WorkflowWorker(QObject):
         return final
 
     def _build_chapter_generation_prompt(self, chapter_num: int, outline_entry: str, checklist: str) -> str:
-
         sections = []
+
+        prev_tail = ""
+        if chapter_num > 1:
+            prev = next((c for c in self.project.chapters if c.number == chapter_num - 1), None)
+            if prev and prev.content:
+                prev_tail = prev.content[-800:].strip()
+
+        selection_source = "\n\n".join(
+            part for part in (outline_entry, checklist, prev_tail, self.extra_input.strip()) if part
+        )
+        relevant_characters, relevant_world = build_relevant_chapter_context(
+            self.project, selection_source, max_character_chars=5000, max_world_chars=6000
+        )
 
         if outline_entry:
             sections.append(prompts.render(
                 "change_chapter/section", heading="CHAPTER OUTLINE (binding)", body=outline_entry,
             ))
-
         if checklist:
             sections.append(prompts.render(
                 "change_chapter/section",
                 heading="INTERNAL REQUIREMENTS CHECKLIST (write ordinary prose — never expose this list to the reader)",
                 body=checklist,
             ))
-
-        if chapter_num > 1:
-            prev = next((c for c in self.project.chapters if c.number == chapter_num - 1), None)
-            if prev and prev.content:
-                tail = prev.content[-800:].strip()
-                sections.append(prompts.render(
-                    "change_chapter/section", heading="END OF PREVIOUS CHAPTER (continuity only)", body=tail,
-                ))
-
+        if relevant_characters:
+            sections.append(prompts.render(
+                "change_chapter/section",
+                heading="RELEVANT CHARACTERS (project canon — use only these established records)",
+                body=relevant_characters,
+            ))
+        if relevant_world:
+            sections.append(prompts.render(
+                "change_chapter/section",
+                heading="RELEVANT WORLD & SETTING (project canon — scoped to this chapter)",
+                body=relevant_world,
+            ))
+        if prev_tail:
+            sections.append(prompts.render(
+                "change_chapter/section", heading="END OF PREVIOUS CHAPTER (continuity only)", body=prev_tail,
+            ))
 
         style_frag = self.project.writing_style.to_prompt_fragment()
         if style_frag:
@@ -2243,7 +2266,6 @@ class WorkflowWorker(QObject):
             intent_lines.append(f"Avoid entirely: {intent.avoid}")
         if intent_lines:
             sections.append(prompts.render("change_chapter/section", heading="AUTHOR INTENT", body="\n".join(intent_lines)))
-
 
         if self.extra_input and self.extra_input.strip():
             sections.append(prompts.render("change_chapter/section", heading="AUTHOR'S REQUEST", body=self.extra_input.strip()))
