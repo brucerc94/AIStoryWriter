@@ -1,0 +1,48 @@
+name: Restore Change Chapter Context Caps
+
+on:
+  push:
+    branches: [bugfixes]
+    paths:
+      - .github/workflows/_restore_change_caps.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: bugfixes
+          fetch-depth: 0
+
+      - name: Restore constants
+        shell: python
+        run: |
+          from pathlib import Path
+          import subprocess
+
+          p = Path('engine/change_chapter.py')
+          text = p.read_text(encoding='utf-8')
+          marker = 'MAX_CONSECUTIVE_INVALID_EVALS = 2\n'
+          constants = '\nWORLD_CAP = 6000\nMEMORY_CAP = 5000\nCHAPTER_CAP = 20000\n'
+
+          if marker not in text:
+              raise SystemExit('expected marker not found')
+
+          if 'WORLD_CAP = 6000' not in text:
+              text = text.replace(marker, marker + constants, 1)
+
+          if 'MEMORY_CAP = 5000' not in text or 'CHAPTER_CAP = 20000' not in text:
+              raise SystemExit('context cap constants were not restored')
+
+          compile(text, str(p), 'exec')
+          p.write_text(text, encoding='utf-8')
+
+          subprocess.run(['git', 'config', 'user.name', 'github-actions[bot]'], check=True)
+          subprocess.run(['git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], check=True)
+          subprocess.run(['git', 'add', str(p)], check=True)
+          subprocess.run(['git', 'commit', '-m', 'fix: restore change chapter context caps'], check=True)
+          subprocess.run(['git', 'push', 'origin', 'HEAD:bugfixes'], check=True)
