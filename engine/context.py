@@ -277,7 +277,7 @@ def build_context_for_model(
     project: Project,
     user_message: str,
     system_prompt: str,
-    max_context_tokens: int = 3200,
+    max_context_tokens: int,
     task: TaskType = TaskType.CHAT,
     reply_reserved: Optional[int] = None,
     include_story_context: bool = True,
@@ -351,7 +351,7 @@ def build_review_context_for_model(
     project: Project,
     user_message: str,
     system_prompt: str,
-    max_context_tokens: int = 3200,
+    max_context_tokens: int,
     reply_reserved: Optional[int] = None,
 ) -> list[dict]:
     """Build a lean review context without chat history."""
