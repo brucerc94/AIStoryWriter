@@ -1,0 +1,90 @@
+name: Remove Memory From Chapter Writers
+
+on:
+  push:
+    branches: [bugfixes]
+    paths:
+      - .github/workflows/_remove_memory_from_writers.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: bugfixes
+          fetch-depth: 0
+
+      - name: Patch writer contexts
+        shell: python
+        run: |
+          from pathlib import Path
+          import subprocess
+
+          # 1) Global context: Memory must be disabled only for WRITE_CHAPTER and CHANGE_CHAPTER.
+          p = Path('engine/context.py')
+          text = p.read_text(encoding='utf-8')
+          old = '"Memory": max(100, min(450, max_context_tokens // 10)),'
+          new = '"Memory": (0 if task in (TaskType.WRITE_CHAPTER, TaskType.CHANGE_CHAPTER) else max(100, min(450, max_context_tokens // 10))),'
+          if text.count(old) != 1:
+              raise SystemExit(f'context.py expected one Memory budget line, found {text.count(old)}')
+          text = text.replace(old, new, 1)
+          p.write_text(text, encoding='utf-8')
+
+          # 2) Write Chapter continuation: remove Memory from the dynamic continuity anchors.
+          p = Path('engine/workflow.py')
+          text = p.read_text(encoding='utf-8')
+          replacements = [
+              ('        memory_raw    = (self.project.memory or "").strip() or "(none)"\n', ''),
+              ('            ("memory",      memory_raw,    min(len(memory_raw),   400)),\n', ''),
+              ('                f"Story memory:\\n{allocated[\'memory\'] or \'(none)\'}\\n\\n"\n', ''),
+              ('            "outline=%d chars=%d world=%d memory=%d prev=%d tail=%d",\n', '            "outline=%d chars=%d world=%d prev=%d tail=%d",\n'),
+              ('            len(allocated["outline"]), len(allocated["characters"]), len(allocated["world"]),\n            len(allocated["memory"]), len(allocated["prev_tail"]), len(allocated["prose_tail"]),\n', '            len(allocated["outline"]), len(allocated["characters"]), len(allocated["world"]),\n            len(allocated["prev_tail"]), len(allocated["prose_tail"]),\n'),
+          ]
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f'workflow.py missing expected snippet: {old[:80]!r}')
+              text = text.replace(old, new, 1)
+          p.write_text(text, encoding='utf-8')
+
+          # 3) Change Chapter main context + continuation: remove Memory from both.
+          p = Path('engine/change_chapter.py')
+          text = p.read_text(encoding='utf-8')
+          replacements = [
+              ('    memory = _cap(project.memory, MEMORY_CAP, "story memory") or "(none)"\n', ''),
+              ('    if memory != "(none)":\n        sections.append(prompts.render("change_chapter/section", heading="STORY MEMORY", body=memory))\n', ''),
+              ('    memory_raw     = _cap(project.memory, 8000, "story memory") or "(none)"\n', ''),
+              ('        ("memory",       memory_raw,     min(len(memory_raw),     400)),\n', ''),
+              ('            f"Story memory:\\n{allocated[\'memory\']}"\n', ''),
+              ('        "outline=%d chars=%d world=%d memory=%d tail=%d",\n', '        "outline=%d chars=%d world=%d tail=%d",\n'),
+              ('        len(allocated["outline"]), len(allocated["characters"]),\n        len(allocated["world"]), len(allocated["memory"]),\n        len(allocated["prose_tail"]),\n', '        len(allocated["outline"]), len(allocated["characters"]),\n        len(allocated["world"]), len(allocated["prose_tail"]),\n'),
+          ]
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f'change_chapter.py missing expected snippet: {old[:80]!r}')
+              text = text.replace(old, new, 1)
+          p.write_text(text, encoding='utf-8')
+
+          # Sanity checks: source compiles and Memory is no longer emitted by writer contexts.
+          for path in ('engine/context.py', 'engine/workflow.py', 'engine/change_chapter.py'):
+              compile(Path(path).read_text(encoding='utf-8'), path, 'exec')
+
+          workflow_text = Path('engine/workflow.py').read_text(encoding='utf-8')
+          change_text = Path('engine/change_chapter.py').read_text(encoding='utf-8')
+          if 'allocated["memory"]' in workflow_text:
+              raise SystemExit('Write Chapter continuation still references allocated memory')
+          if 'memory_raw' in change_text or 'heading="STORY MEMORY"' in change_text:
+              raise SystemExit('Change Chapter still emits Story Memory')
+
+          # Remove this temporary workflow before committing the real change.
+          helper = Path('.github/workflows/_remove_memory_from_writers.yml')
+          helper.unlink()
+
+          subprocess.run(['git', 'config', 'user.name', 'github-actions[bot]'], check=True)
+          subprocess.run(['git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], check=True)
+          subprocess.run(['git', 'add', 'engine/context.py', 'engine/workflow.py', 'engine/change_chapter.py', str(helper)], check=True)
+          subprocess.run(['git', 'commit', '-m', 'fix: exclude story memory from chapter writing'], check=True)
+          subprocess.run(['git', 'push', 'origin', 'HEAD:bugfixes'], check=True)
