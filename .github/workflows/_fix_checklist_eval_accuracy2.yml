@@ -1,0 +1,116 @@
+name: Fix checklist evaluator accuracy 2
+on:
+  push:
+    branches:
+      - bugfixes
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: bugfixes
+          fetch-depth: 0
+      - name: Patch evaluator prompts and reconciliation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          # Prompt templates: remove prior-state priming. The current full
+          # chapter is the only evidence used by the evaluator.
+          replacements = {
+              Path('engine/prompts/change_chapter/eval_user.txt'): (
+                  'PRIOR CHECKLIST STATE — PERSISTENT:\nConfirmed complete IDs from earlier passes: {{prior_done_ids}}\nThese items were already satisfied in the current rewrite and must not be regressed to pending unless the current chapter text actually contradicts or removes them.\n\n',
+                  'CURRENT DRAFT IS THE ONLY AUTHORITATIVE STATE:\nEvaluate every checklist item from the actual current chapter text. Do not assume an item is complete because an earlier pass said it was complete. A requirement is DONE only when the current draft actually satisfies it. Items that have not happened yet must remain in MISSING, even during an append-only continuation.\n\n',
+              ),
+              Path('engine/prompts/write_chapter/eval_user.txt'): (
+                  'PRIOR CHECKLIST STATE — PERSISTENT:\nConfirmed complete IDs from earlier passes: {{prior_done_ids}}\nThese items were already satisfied in the current chapter and must not be regressed to pending unless the current draft actually contradicts or removes them.\n\n',
+                  'CURRENT DRAFT IS THE ONLY AUTHORITATIVE STATE:\nEvaluate every checklist item from the actual current chapter text. Do not assume an item is complete because an earlier pass said it was complete. A requirement is DONE only when the current draft actually satisfies it. Items that have not happened yet must remain in MISSING, even during an append-only continuation.\n\n',
+              ),
+          }
+          for path, (old, new) in replacements.items():
+              text = path.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'prior-state block not found: {path}')
+              text = text.replace(old, new, 1)
+              if 'PRIOR CHECKLIST STATE — PERSISTENT:' in text:
+                  raise SystemExit(f'old prior-state block remains: {path}')
+              path.write_text(text, encoding='utf-8')
+
+          # Remove the instruction that tells the model to trust prior IDs.
+          for path, old, new in [
+              (
+                  Path('engine/prompts/change_chapter/eval_user.txt'),
+                  'Evaluate every checklist item one by one. Do not return complete=true unless EVERY ID in [{{id_list}}] is in done and missing is empty. Treat the prior confirmed IDs as already complete for this append-only continuation workflow, then identify only requirements that remain genuinely unsatisfied.',
+                  'Evaluate every checklist item one by one against the CURRENT FULL CHAPTER. Do not return complete=true unless EVERY ID in [{{id_list}}] is in done and missing is empty. Never mark an item done merely because a previous pass marked it done; the requirement must actually be satisfied in the current draft.',
+              ),
+              (
+                  Path('engine/prompts/write_chapter/eval_user.txt'),
+                  'Evaluate every checklist item one by one. Do not return complete=true unless EVERY ID in [{{id_list}}] is in done and missing is empty. Treat prior confirmed IDs as already complete for this append-only continuation workflow, then identify only requirements that remain genuinely unsatisfied.',
+                  'Evaluate every checklist item one by one against the CURRENT CHAPTER DRAFT. Do not return complete=true unless EVERY ID in [{{id_list}}] is in done and missing is empty. Never mark an item done merely because a previous pass marked it done; the requirement must actually be satisfied in the current draft.',
+              ),
+          ]:
+              text = path.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'evaluator instruction not found: {path}')
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          # Reconciliation: current evaluation wins. Prior IDs are only a
+          # fallback if the current evaluator failed to account for the ID.
+          path = Path('engine/change_chapter.py')
+          code = path.read_text(encoding='utf-8')
+          start = code.find('def _reconcile_checklist_progress(')
+          end = code.find('\ndef build_clean_context_sections(', start)
+          if start < 0 or end < 0:
+              raise SystemExit('reconcile function boundaries not found')
+          new_fn = '''def _reconcile_checklist_progress(result: dict, checklist: str, prior_done_ids: set[int] | None = None) -> dict:\n    \"\"\"Reconcile checklist progress without allowing stale state to override the current draft.\"\"\"\n    expected = dict(parse_checklist_items(checklist))\n    prior = set(prior_done_ids or ())\n    current_done = set(result.get(\"done_ids\", []))\n    current_missing = set(result.get(\"missing_ids\", []))\n\n    # The evaluator sees the full accumulated chapter and is authoritative.\n    # Prior confirmations are only a fallback when the latest evaluator did\n    # not account for an ID at all. An explicit current missing ID revokes a\n    # stale prior confirmation, preventing false-positive future completion.\n    confirmed = current_done | (prior - current_missing - current_done)\n\n    filtered_missing: list[str] = []\n    for entry in result.get(\"missing\", []) or []:\n        match = re.match(r\"^\\s*(\\d+)\\s*:\", str(entry))\n        if match and int(match.group(1)) in confirmed and int(match.group(1)) != 0:\n            continue\n        filtered_missing.append(str(entry).strip())\n\n    missing_ids = set(current_missing)\n    for item_id, label in expected.items():\n        if item_id not in confirmed and item_id not in missing_ids:\n            missing_ids.add(item_id)\n            filtered_missing.append(f\"{item_id}: {label}\")\n\n    deduped_missing: list[str] = []\n    seen: set[str] = set()\n    for entry in filtered_missing:\n        if entry and entry not in seen:\n            deduped_missing.append(entry)\n            seen.add(entry)\n\n    confirmed -= (missing_ids - {0})\n    result[\"done_ids\"] = sorted(confirmed)\n    result[\"missing_ids\"] = sorted(missing_ids)\n    result[\"missing\"] = deduped_missing\n    result[\"completed\"] = bool(expected) and set(expected).issubset(confirmed) and not missing_ids and not deduped_missing\n    return result\n\n'''
+          code = code[:start] + new_fn + code[end + 1:]
+          compile(code, 'engine/change_chapter.py', 'exec')
+
+          path.write_text(code, encoding='utf-8')
+          print('patch syntax OK')
+          PY
+
+      - name: Test stale prior state cannot hide pending items
+        run: |
+          python - <<'PY'
+          import importlib.util
+          spec = importlib.util.spec_from_file_location('change_chapter', 'engine/change_chapter.py')
+          mod = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(mod)
+
+          checklist = '\n'.join(f'{i}. Requirement {i}' for i in range(1, 58))
+          current = {
+              'valid': True,
+              'completed': False,
+              'done_ids': list(range(1, 43)),
+              'missing_ids': list(range(43, 58)),
+              'missing': [f'{i}: Requirement {i}' for i in range(43, 58)],
+              'raw': '{}',
+          }
+          result = mod._reconcile_checklist_progress(current, checklist, set(range(1, 57)))
+          assert result['completed'] is False
+          assert set(range(43, 58)).issubset(result['missing_ids'])
+          assert 56 not in result['done_ids']
+          assert 57 in result['missing_ids']
+          print('stale-state regression test OK')
+          PY
+
+      - name: Verify prompts and commit
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          for p in [Path('engine/prompts/change_chapter/eval_user.txt'), Path('engine/prompts/write_chapter/eval_user.txt')]:
+              t = p.read_text(encoding='utf-8')
+              assert 'PRIOR CHECKLIST STATE — PERSISTENT:' not in t
+              assert 'previous pass marked it done' in t
+          print('prompt verification OK')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          rm -f .github/workflows/_fix_checklist_eval_accuracy2.yml
+          git add engine/change_chapter.py engine/prompts/change_chapter/eval_user.txt engine/prompts/write_chapter/eval_user.txt .github/workflows/_fix_checklist_eval_accuracy2.yml
+          git commit -m 'fix: make current draft authoritative for checklist evaluation'
+          git push origin HEAD:bugfixes
