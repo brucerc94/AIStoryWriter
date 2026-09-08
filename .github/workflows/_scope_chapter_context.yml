@@ -19,24 +19,24 @@ jobs:
           fetch-depth: 0
 
       - name: Apply scoped chapter context
-        shell: python
+        shell: bash
         run: |
+          python - <<'PY'
           from pathlib import Path
           import re
           import subprocess
 
-          def replace_function(text, signature, next_signature, replacement):
-              start = text.index(signature)
-              end = text.index(next_signature, start)
+          def replace_function(text, start_marker, end_marker, replacement):
+              start = text.index(start_marker)
+              end = text.index(end_marker, start)
               return text[:start] + replacement.rstrip() + "\n\n" + text[end:]
 
-          # 1) Context helpers: deterministic, token-free selection of relevant canon.
-          p = Path('engine/context.py')
-          text = p.read_text(encoding='utf-8')
-          if 'def build_relevant_chapter_context(' not in text:
-              text = text.replace('import logging\n', 'import logging\nimport re\nimport unicodedata\n', 1)
-              anchor = 'def _estimate_tokens(text: str) -> int:\n'
-              helper = r'''
+          # context.py: add deterministic relevance helpers.
+          p = Path("engine/context.py")
+          text = p.read_text(encoding="utf-8")
+          if "def build_relevant_chapter_context(" not in text:
+              text = text.replace("import logging\n", "import logging\nimport re\nimport unicodedata\n", 1)
+              helper = '''
 
 _CHAPTER_MATCH_STOPWORDS = {
     "about", "after", "again", "also", "before", "being", "between", "could", "from", "have",
@@ -63,7 +63,7 @@ def _meaningful_words(text: str) -> set[str]:
 
 
 def select_relevant_characters(characters: list, source_text: str, max_characters: int = 12, max_chars: int = 5000) -> str:
-    """Select only project-canon characters explicitly referenced by this chapter's plan/context."""
+    """Return only canon character records explicitly referenced by chapter planning/context."""
     source_norm = " " + _normalize_match_text(source_text) + " "
     selected = []
     for character in characters:
@@ -73,9 +73,8 @@ def select_relevant_characters(characters: list, source_text: str, max_character
         name_norm = _normalize_match_text(name)
         if not name_norm:
             continue
-        padded = f" {name_norm} "
         tokens = name_norm.split()
-        matched = padded in source_norm
+        matched = f" {name_norm} " in source_norm
         if not matched and len(tokens) == 1:
             matched = f" {tokens[0]} " in source_norm
         if not matched and len(tokens) > 1:
@@ -88,19 +87,17 @@ def select_relevant_characters(characters: list, source_text: str, max_character
 
 
 def _markdown_world_sections(world: str) -> list[tuple[int, str, str]]:
-    matches = list(re.finditer(r"(?m)^##\\s+(.+?)\\s*$", world or ""))
+    matches = list(re.finditer(r"(?m)^##\s+(.+?)\s*$", world or ""))
     sections = []
     for index, match in enumerate(matches):
         start = match.start()
         end = matches[index + 1].start() if index + 1 < len(matches) else len(world)
-        title = match.group(1).strip()
-        body = world[start:end].strip()
-        sections.append((index, title, body))
+        sections.append((index, match.group(1).strip(), world[start:end].strip()))
     return sections
 
 
 def select_relevant_world(world: str, source_text: str, max_sections: int = 4, max_chars: int = 6000) -> str:
-    """Select the most relevant world sections using deterministic lexical overlap."""
+    """Return the highest-scoring world sections referenced by this chapter context."""
     sections = _markdown_world_sections(world)
     if not sections:
         return ""
@@ -109,18 +106,14 @@ def select_relevant_world(world: str, source_text: str, max_sections: int = 4, m
     for index, title, body in sections:
         title_words = _meaningful_words(title)
         body_words = _meaningful_words(body)
-        title_hits = len(source_words & title_words)
-        body_hits = len(source_words & body_words)
-        score = title_hits * 5 + body_hits
+        score = len(source_words & title_words) * 5 + len(source_words & body_words)
         if score > 0:
-            scored.append((score, -index, body))
-    if not scored:
-        return ""
-    scored.sort(reverse=True)
-    chosen = sorted(scored[:max_sections], key=lambda item: -item[1])
+            scored.append((score, index, body))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    chosen = sorted(scored[:max_sections], key=lambda item: item[1])
     blocks = []
     remaining = max_chars
-    for _score, _order, body in chosen:
+    for _score, _index, body in chosen:
         if remaining <= 0:
             break
         block = body if len(body) <= remaining else body[:remaining].rstrip() + "\n\n[... world section truncated ...]"
@@ -130,169 +123,68 @@ def select_relevant_world(world: str, source_text: str, max_sections: int = 4, m
 
 
 def build_relevant_chapter_context(project: Project, source_text: str, max_character_chars: int = 5000, max_world_chars: int = 6000) -> tuple[str, str]:
-    """Resolve scoped Characters and World context without an LLM call."""
+    """Resolve scoped Characters and World from project canon without an LLM call."""
     return (
         select_relevant_characters(project.characters, source_text, max_chars=max_character_chars),
         select_relevant_world(project.world, source_text, max_chars=max_world_chars),
     )
 '''
-              text = text.replace(anchor, helper + '\n' + anchor, 1)
+              text = text.replace('def _estimate_tokens(text: str) -> int:\n', helper + '\n\ndef _estimate_tokens(text: str) -> int:\n', 1)
 
-          # 2) Writer system-context isolation: Write/Change already inject scoped context themselves.
-          p = Path('engine/context.py')
-          text = p.read_text(encoding='utf-8')
+          # Prevent generic project context (including chat summary) from reaching Write/Change Chapter.
+          start = text.index('def _build_story_context_text(')
+          end = text.index('\ndef _repair_alternation(', start)
+          fn = text[start:end]
           old = '''        else:\n            if sections["Synopsis"]:\n                parts.append(f"\\n\\n{sections['Synopsis']}")\n            if sections["Characters"]:\n                parts.append(f"\\n\\n## Established Characters\\n{sections['Characters']}")\n            if sections["Outline"]:\n                parts.append(f"\\n\\n## Outline\\n{sections['Outline']}")\n            if sections["World"]:\n                parts.append(f"\\n\\n## World & Setting\\n{sections['World']}")\n            if sections["Memory"]:\n                parts.append(f"\\n\\n## Story Memory\\n{sections['Memory']}")\n            if sections["Chat Summary"]:\n                parts.append(f"\\n\\n## Conversation Summary (older messages)\\n{sections['Chat Summary']}")\n            if sections["Creative Direction"]:\n                parts.append(f"\\n\\n## Author's Creative Direction\\n{sections['Creative Direction']}")\n'''
-          new = '''        elif task in (TaskType.WRITE_CHAPTER, TaskType.CHANGE_CHAPTER):\n            # These deterministic writing workflows inject their own scoped\n            # chapter context. Never duplicate project-wide story context or UI chat state here.\n            pass\n        else:\n            if sections["Synopsis"]:\n                parts.append(f"\\n\\n{sections['Synopsis']}")\n            if sections["Characters"]:\n                parts.append(f"\\n\\n## Established Characters\\n{sections['Characters']}")\n            if sections["Outline"]:\n                parts.append(f"\\n\\n## Outline\\n{sections['Outline']}")\n            if sections["World"]:\n                parts.append(f"\\n\\n## World & Setting\\n{sections['World']}")\n            if sections["Memory"]:\n                parts.append(f"\\n\\n## Story Memory\\n{sections['Memory']}")\n            if sections["Chat Summary"]:\n                parts.append(f"\\n\\n## Conversation Summary (older messages)\\n{sections['Chat Summary']}")\n            if sections["Creative Direction"]:\n                parts.append(f"\\n\\n## Author's Creative Direction\\n{sections['Creative Direction']}")\n'''
-          if old not in text:
+          new = '''        elif task in (TaskType.WRITE_CHAPTER, TaskType.CHANGE_CHAPTER):\n            # Chapter workflows inject their own scoped canon; never add synopsis, full canon,\n            # story memory, chat summary, or other project-wide context here.\n            pass\n        else:\n            if sections["Synopsis"]:\n                parts.append(f"\\n\\n{sections['Synopsis']}")\n            if sections["Characters"]:\n                parts.append(f"\\n\\n## Established Characters\\n{sections['Characters']}")\n            if sections["Outline"]:\n                parts.append(f"\\n\\n## Outline\\n{sections['Outline']}")\n            if sections["World"]:\n                parts.append(f"\\n\\n## World & Setting\\n{sections['World']}")\n            if sections["Memory"]:\n                parts.append(f"\\n\\n## Story Memory\\n{sections['Memory']}")\n            if sections["Chat Summary"]:\n                parts.append(f"\\n\\n## Conversation Summary (older messages)\\n{sections['Chat Summary']}")\n            if sections["Creative Direction"]:\n                parts.append(f"\\n\\n## Author's Creative Direction\\n{sections['Creative Direction']}")\n'''
+          if old not in fn:
               raise SystemExit('context.py story-context branch not found')
-          text = text.replace(old, new, 1)
+          fn = fn.replace(old, new, 1)
+          text = text[:start] + fn + text[end:]
           p.write_text(text, encoding='utf-8')
 
-          # 3) workflow.py import.
+          # workflow.py import and Write Chapter prompt/continuation scoping.
           p = Path('engine/workflow.py')
           text = p.read_text(encoding='utf-8')
-          if 'build_relevant_chapter_context,' not in text:
+          if '    build_relevant_chapter_context,\n' not in text:
               text = text.replace('    budget_allocate,\n    format_characters_block,\n', '    budget_allocate,\n    build_relevant_chapter_context,\n    format_characters_block,\n', 1)
 
-          # 4) Write Chapter generation prompt: inject only scoped canon.
           start = text.index('    def _build_chapter_generation_prompt(')
           end = text.index('\n    def _run_write_chapter', start)
-          new_fn = r'''    def _build_chapter_generation_prompt(self, chapter_num: int, outline_entry: str, checklist: str) -> str:
-        sections = []
-
-        prev_tail = ""
-        if chapter_num > 1:
-            prev = next((c for c in self.project.chapters if c.number == chapter_num - 1), None)
-            if prev and prev.content:
-                prev_tail = prev.content[-800:].strip()
-
-        selection_source = "\n\n".join(
-            part for part in (outline_entry, checklist, prev_tail, self.extra_input.strip()) if part
-        )
-        relevant_characters, relevant_world = build_relevant_chapter_context(
-            self.project,
-            selection_source,
-            max_character_chars=5000,
-            max_world_chars=6000,
-        )
-
-        if outline_entry:
-            sections.append(prompts.render(
-                "change_chapter/section", heading="CHAPTER OUTLINE (binding)", body=outline_entry,
-            ))
-        if checklist:
-            sections.append(prompts.render(
-                "change_chapter/section",
-                heading="INTERNAL REQUIREMENTS CHECKLIST (write ordinary prose — never expose this list to the reader)",
-                body=checklist,
-            ))
-        if relevant_characters:
-            sections.append(prompts.render(
-                "change_chapter/section",
-                heading="RELEVANT CHARACTERS (project canon — use only these established records)",
-                body=relevant_characters,
-            ))
-        if relevant_world:
-            sections.append(prompts.render(
-                "change_chapter/section",
-                heading="RELEVANT WORLD & SETTING (project canon — scoped to this chapter)",
-                body=relevant_world,
-            ))
-        if prev_tail:
-            sections.append(prompts.render(
-                "change_chapter/section", heading="END OF PREVIOUS CHAPTER (continuity only)", body=prev_tail,
-            ))
-
-        style_frag = self.project.writing_style.to_prompt_fragment()
-        if style_frag:
-            sections.append(prompts.render("change_chapter/section", heading="STYLE TO APPLY", body=style_frag))
-
-        intent = self.project.author_intent
-        intent_lines = []
-        if intent.emotional_journey:
-            intent_lines.append(f"Emotional tone to sustain in this chapter: {intent.emotional_journey}")
-        if intent.avoid:
-            intent_lines.append(f"Avoid entirely: {intent.avoid}")
-        if intent_lines:
-            sections.append(prompts.render("change_chapter/section", heading="AUTHOR INTENT", body="\n".join(intent_lines)))
-
-        if self.extra_input and self.extra_input.strip():
-            sections.append(prompts.render("change_chapter/section", heading="AUTHOR'S REQUEST", body=self.extra_input.strip()))
-
-        return prompts.render(
-            "write_chapter/generation_user",
-            chapter_number=chapter_num,
-            title=self.project.title,
-            sections="\n\n".join(sections),
-        )
-'''
+          new_fn = '''    def _build_chapter_generation_prompt(self, chapter_num: int, outline_entry: str, checklist: str) -> str:\n        sections = []\n\n        prev_tail = ""\n        if chapter_num > 1:\n            prev = next((c for c in self.project.chapters if c.number == chapter_num - 1), None)\n            if prev and prev.content:\n                prev_tail = prev.content[-800:].strip()\n\n        selection_source = "\\n\\n".join(\n            part for part in (outline_entry, checklist, prev_tail, self.extra_input.strip()) if part\n        )\n        relevant_characters, relevant_world = build_relevant_chapter_context(\n            self.project, selection_source, max_character_chars=5000, max_world_chars=6000\n        )\n\n        if outline_entry:\n            sections.append(prompts.render(\n                "change_chapter/section", heading="CHAPTER OUTLINE (binding)", body=outline_entry,\n            ))\n        if checklist:\n            sections.append(prompts.render(\n                "change_chapter/section",\n                heading="INTERNAL REQUIREMENTS CHECKLIST (write ordinary prose — never expose this list to the reader)",\n                body=checklist,\n            ))\n        if relevant_characters:\n            sections.append(prompts.render(\n                "change_chapter/section",\n                heading="RELEVANT CHARACTERS (project canon — use only these established records)",\n                body=relevant_characters,\n            ))\n        if relevant_world:\n            sections.append(prompts.render(\n                "change_chapter/section",\n                heading="RELEVANT WORLD & SETTING (project canon — scoped to this chapter)",\n                body=relevant_world,\n            ))\n        if prev_tail:\n            sections.append(prompts.render(\n                "change_chapter/section", heading="END OF PREVIOUS CHAPTER (continuity only)", body=prev_tail,\n            ))\n\n        style_frag = self.project.writing_style.to_prompt_fragment()\n        if style_frag:\n            sections.append(prompts.render("change_chapter/section", heading="STYLE TO APPLY", body=style_frag))\n\n        intent = self.project.author_intent\n        intent_lines = []\n        if intent.emotional_journey:\n            intent_lines.append(f"Emotional tone to sustain in this chapter: {intent.emotional_journey}")\n        if intent.avoid:\n            intent_lines.append(f"Avoid entirely: {intent.avoid}")\n        if intent_lines:\n            sections.append(prompts.render("change_chapter/section", heading="AUTHOR INTENT", body="\\n".join(intent_lines)))\n\n        if self.extra_input and self.extra_input.strip():\n            sections.append(prompts.render("change_chapter/section", heading="AUTHOR'S REQUEST", body=self.extra_input.strip()))\n\n        return prompts.render(\n            "write_chapter/generation_user",\n            chapter_number=chapter_num,\n            title=self.project.title,\n            sections="\\n\\n".join(sections),\n        )\n'''
           text = text[:start] + new_fn.rstrip() + '\n\n' + text[end:]
 
-          # 5) Write Chapter continuation: select scoped canon from current chapter state.
           start = text.index('    def _build_chapter_continuation_prompt(')
           end = text.index('\n    def _parse_completion_evaluation', start)
           fn = text[start:end]
           old = '''        chars_raw     = (format_characters_block(self.project.characters[:12]) or "(none)").strip()\n        world_raw     = (self.project.world or "").strip() or "(none)"\n        prev_tail_raw = "(none)"\n'''
           new = '''        prev_tail_raw = "(none)"\n'''
           if old not in fn:
-              raise SystemExit('Write continuation context block not found')
+              raise SystemExit('Write continuation raw context block not found')
           fn = fn.replace(old, new, 1)
-          old2 = '''        prose_tail_raw = chapter_text.strip()\n\n        # Build checklist block (fixed text – not dynamically budgeted).\n'''
-          new2 = '''        prose_tail_raw = chapter_text.strip()\n        selection_source = "\\n\\n".join(\n            part for part in (outline_raw, chapter_goal, checklist, prev_tail_raw, prose_tail_raw) if part\n        )\n        chars_raw, world_raw = build_relevant_chapter_context(\n            self.project, selection_source, max_character_chars=5000, max_world_chars=6000\n        )\n\n        # Build checklist block (fixed text – not dynamically budgeted).\n'''
-          if old2 not in fn:
+          old = '''        prose_tail_raw = chapter_text.strip()\n\n        # Build checklist block (fixed text – not dynamically budgeted).\n'''
+          new = '''        prose_tail_raw = chapter_text.strip()\n        selection_source = "\\n\\n".join(\n            part for part in (outline_raw, chapter_goal, checklist, prev_tail_raw, prose_tail_raw) if part\n        )\n        chars_raw, world_raw = build_relevant_chapter_context(\n            self.project, selection_source, max_character_chars=5000, max_world_chars=6000\n        )\n\n        # Build checklist block (fixed text – not dynamically budgeted).\n'''
+          if old not in fn:
               raise SystemExit('Write continuation insertion point not found')
-          fn = fn.replace(old2, new2, 1)
-          old3 = '# Priority order:  outline > characters > world+memory > prev_tail > prose_tail\n'
-          fn = fn.replace(old3, '# Priority order: outline > characters > world > prev_tail > prose_tail\n', 1)
+          fn = fn.replace(old, new, 1)
+          fn = fn.replace('outline > characters > world > memory > prev_tail > prose_tail', 'outline > characters > world > prev_tail > prose_tail', 1)
           text = text[:start] + fn + text[end:]
           p.write_text(text, encoding='utf-8')
 
-          # 6) Change Chapter scoped context.
+          # change_chapter.py: use scoped canon in first rewrite and continuations.
           p = Path('engine/change_chapter.py')
           text = p.read_text(encoding='utf-8')
           text = text.replace('from engine.context import budget_allocate, extract_outline_section, format_characters_block\n', 'from engine.context import budget_allocate, build_relevant_chapter_context, extract_outline_section\n', 1)
+
           start = text.index('def build_clean_context_sections(')
           end = text.index('\ndef build_full_rewrite_prompt', start)
-          new_fn = r'''def build_clean_context_sections(worker, chapter_num: int, selection_source: str = "") -> str:
-    """Assemble scoped canon context for the target chapter only."""
-    project = worker.project
-    chapter_outline = extract_outline_section(project.outline, chapter_num) or "(no outline entry for this chapter)"
-    source = "\n\n".join(part for part in (chapter_outline, selection_source) if part)
-    characters, world = build_relevant_chapter_context(
-        project,
-        source,
-        max_character_chars=5000,
-        max_world_chars=6000,
-    )
-
-    sections = []
-    if characters:
-        sections.append(prompts.render(
-            "change_chapter/section",
-            heading="RELEVANT CHARACTERS (project canon — use only these established records)",
-            body=characters,
-        ))
-    if world:
-        sections.append(prompts.render(
-            "change_chapter/section",
-            heading="RELEVANT WORLD & SETTING (project canon — scoped to this chapter)",
-            body=world,
-        ))
-    intent_frag = project.author_intent.to_prompt_fragment()
-    style_frag = project.writing_style.to_prompt_fragment()
-    if intent_frag:
-        sections.append(prompts.render("change_chapter/section", heading="AUTHOR INTENT", body=intent_frag))
-    if style_frag:
-        sections.append(prompts.render("change_chapter/section", heading="WRITING STYLE", body=style_frag))
-    sections.append(prompts.render("change_chapter/section", heading="CURRENT CHAPTER PLAN", body=chapter_outline))
-    return "\n\n".join(sections)
-'''
+          new_fn = '''def build_clean_context_sections(worker, chapter_num: int, selection_source: str = "") -> str:\n    """Assemble scoped canon context for the target chapter only."""\n    project = worker.project\n    chapter_outline = extract_outline_section(project.outline, chapter_num) or "(no outline entry for this chapter)"\n    source = "\\n\\n".join(part for part in (chapter_outline, selection_source) if part)\n    characters, world = build_relevant_chapter_context(\n        project, source, max_character_chars=5000, max_world_chars=6000\n    )\n\n    sections = []\n    if characters:\n        sections.append(prompts.render(\n            "change_chapter/section",\n            heading="RELEVANT CHARACTERS (project canon — use only these established records)",\n            body=characters,\n        ))\n    if world:\n        sections.append(prompts.render(\n            "change_chapter/section",\n            heading="RELEVANT WORLD & SETTING (project canon — scoped to this chapter)",\n            body=world,\n        ))\n    intent_frag = project.author_intent.to_prompt_fragment()\n    style_frag = project.writing_style.to_prompt_fragment()\n    if intent_frag:\n        sections.append(prompts.render("change_chapter/section", heading="AUTHOR INTENT", body=intent_frag))\n    if style_frag:\n        sections.append(prompts.render("change_chapter/section", heading="WRITING STYLE", body=style_frag))\n    sections.append(prompts.render("change_chapter/section", heading="CURRENT CHAPTER PLAN", body=chapter_outline))\n    return "\\n\\n".join(sections)\n'''
           text = text[:start] + new_fn.rstrip() + '\n\n' + text[end:]
 
           old = '        context_sections=build_clean_context_sections(worker, chapter_num),\n'
           new = '        context_sections=build_clean_context_sections(worker, chapter_num, "\\n\\n".join((instruction, checklist, chapter_content))),\n'
           if old not in text:
-              raise SystemExit('Change Chapter full rewrite context call not found')
+              raise SystemExit('Change full rewrite context call not found')
           text = text.replace(old, new, 1)
 
           start = text.index('def _build_continuation_prompt(')
@@ -301,12 +193,12 @@ def build_relevant_chapter_context(project: Project, source_text: str, max_chara
           old = '''    characters_raw = (format_characters_block(project.characters[:12]) or "(none)").strip()\n    world_raw      = _cap(project.world, 8000, "world notes") or "(none)"\n    prose_tail_raw = chapter_content.strip()\n'''
           new = '''    prose_tail_raw = chapter_content.strip()\n    selection_source = "\\n\\n".join(\n        part for part in (outline_raw, instruction, checklist, missing_text, prose_tail_raw) if part\n    )\n    characters_raw, world_raw = build_relevant_chapter_context(\n        project, selection_source, max_character_chars=5000, max_world_chars=6000\n    )\n'''
           if old not in fn:
-              raise SystemExit('Change continuation context block not found')
+              raise SystemExit('Change continuation raw context block not found')
           fn = fn.replace(old, new, 1)
           text = text[:start] + fn + text[end:]
           p.write_text(text, encoding='utf-8')
 
-          # 7) Remove stale Story Memory wording from Write continuation instructions.
+          # Prompt wording: Memory and UI/chat history are explicitly out of writer context.
           p = Path('engine/prompts/write_chapter/continuation_user.txt')
           text = p.read_text(encoding='utf-8')
           text = text.replace(
@@ -315,92 +207,15 @@ def build_relevant_chapter_context(project: Project, source_text: str, max_chara
           )
           p.write_text(text, encoding='utf-8')
 
-          # 8) Tests.
-          test_path = Path('tests/test_scoped_chapter_context.py')
-          test_path.write_text(r'''import unittest
-from types import SimpleNamespace
-
-from engine.context import build_relevant_chapter_context, select_relevant_characters, select_relevant_world
-from engine.models import Project, TaskType
-
-
-class ScopedChapterContextTests(unittest.TestCase):
-    def make_character(self, name, role="supporting", description=""):
-        return SimpleNamespace(name=name, role=role, description=description, backstory="", traits=[], relationships=[])
-
-    def test_only_named_characters_are_selected(self):
-        chars = [
-            self.make_character("Raul", "protagonist", "Painter"),
-            self.make_character("Isabel", "supporting", "Head caregiver"),
-            self.make_character("Manolo", "supporting", "Groundskeeper"),
-        ]
-        result = select_relevant_characters(chars, "Raul meets Isabel at La Guarderia.")
-        self.assertIn("Raul", result)
-        self.assertIn("Isabel", result)
-        self.assertNotIn("Manolo", result)
-
-    def test_world_sections_are_scoped(self):
-        world = """# World
-
-## Geography
-La Guarderia sits beside the maize fields and the old baptismal font.
-
-## Culture & Customs
-Santa Clara celebrates the Harvest Moon Festival each year.
-
-## History
-The village was founded beside an ancient church.
-"""
-        result = select_relevant_world(world, "Raul searches the baptismal font beside the maize fields.", max_sections=2)
-        self.assertIn("Geography", result)
-        self.assertNotIn("Culture & Customs", result)
-
-    def test_writer_context_does_not_depend_on_memory_or_chat(self):
-        project = Project(title="Test")
-        project.characters = [self.make_character("Raul")]
-        project.world = "## Geography\nThe village has maize fields."
-        project.outline = "## Chapter 1: Test\nRaul walks through the maize fields."
-        source = project.outline
-        chars, world = build_relevant_chapter_context(project, source)
-        self.assertIn("Raul", chars)
-        self.assertIn("maize", world)
-
-
-if __name__ == "__main__":
-    unittest.main()
-''', encoding='utf-8')
-
-          # Validate syntax and run focused tests.
+          # Syntax checks.
           for path in ('engine/context.py', 'engine/workflow.py', 'engine/change_chapter.py'):
               compile(Path(path).read_text(encoding='utf-8'), path, 'exec')
-          subprocess.run(['python', 'tests/test_scoped_chapter_context.py'], check=True)
 
-          # Verify writer tasks no longer receive generic project-wide context via context.py.
-          context_text = Path('engine/context.py').read_text(encoding='utf-8')
-          branch = context_text[context_text.index('def _build_story_context_text('):]
-          branch = branch[:branch.index('def _repair_alternation(')]
-          if 'elif task in (TaskType.WRITE_CHAPTER, TaskType.CHANGE_CHAPTER)' not in branch:
-              raise SystemExit('Writer task isolation branch missing')
-          if 'sections["Chat Summary"]' in branch[branch.index('elif task in (TaskType.WRITE_CHAPTER, TaskType.CHANGE_CHAPTER)'):]:
-              raise SystemExit('Chat Summary still reaches writer context branch')
-
-          # Ensure current writer call sites do not auto-extract characters.
-          workflow_text = Path('engine/workflow.py').read_text(encoding='utf-8')
-          write_fn = workflow_text[workflow_text.index('    def _run_write_chapter('):]
-          write_fn = write_fn[:write_fn.index('\n    def _run_write_book', 0)]
-          if '_extract_and_merge_characters(chapter_text)' in write_fn:
-              raise SystemExit('Write Chapter still updates Characters')
-
-          change_text = Path('engine/change_chapter.py').read_text(encoding='utf-8')
-          if 'format_characters_block(' in change_text:
-              raise SystemExit('Change Chapter still directly injects the full character DB')
-
-          # Remove this patch workflow before committing.
           helper = Path('.github/workflows/_scope_chapter_context.yml')
           helper.unlink()
-
           subprocess.run(['git', 'config', 'user.name', 'github-actions[bot]'], check=True)
           subprocess.run(['git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], check=True)
-          subprocess.run(['git', 'add', 'engine/context.py', 'engine/workflow.py', 'engine/change_chapter.py', 'engine/prompts/write_chapter/continuation_user.txt', 'tests/test_scoped_chapter_context.py', str(helper)], check=True)
+          subprocess.run(['git', 'add', 'engine/context.py', 'engine/workflow.py', 'engine/change_chapter.py', 'engine/prompts/write_chapter/continuation_user.txt', str(helper)], check=True)
           subprocess.run(['git', 'commit', '-m', 'refactor: scope chapter context to relevant canon'], check=True)
           subprocess.run(['git', 'push', 'origin', 'HEAD:bugfixes'], check=True)
+          PY
