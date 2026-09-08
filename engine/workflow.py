@@ -2034,6 +2034,8 @@ class WorkflowWorker(QObject):
         chapter_goal: str,
         checklist: str = "",
         missing: "list[str] | None" = None,
+        completed_ids: set[int] | None = None,
+        remaining_checklist: str = "",
     ) -> str:
         # ------------------------------------------------------------------
         # Dynamic budget allocation
@@ -2135,6 +2137,8 @@ class WorkflowWorker(QObject):
             completed_note=completed_note,
             chapter_goal=chapter_goal.strip() or "(none)",
             checklist_block=checklist_block,
+            completed_ids=", ".join(str(i) for i in sorted(completed_ids or set())) or "(none)",
+            remaining_checklist=remaining_checklist.strip() or change_chapter._build_remaining_checklist(checklist, completed_ids),
             continuity_context=continuity_context,
             chapter_tail=allocated["prose_tail"],
         )
@@ -2305,6 +2309,8 @@ class WorkflowWorker(QObject):
         chapter_text = ""
         generation_pass = 0
         missing_items: list[str] = []
+        confirmed_done_ids: set[int] = set()
+        remaining_checklist = change_chapter._build_remaining_checklist(checklist, confirmed_done_ids) if checklist else ""
         evaluation = {"completed": True, "confidence": 100, "reason": "", "next": ""}
 
         while generation_pass < MAX_CONTINUATIONS:
@@ -2331,6 +2337,8 @@ class WorkflowWorker(QObject):
                     chapter_goal,
                     checklist,
                     missing_items,
+                    confirmed_done_ids,
+                    remaining_checklist,
                 )
 
                 generated = self._run_inference(
@@ -2354,7 +2362,7 @@ class WorkflowWorker(QObject):
 
             if checklist:
                 evaluation = change_chapter.evaluate_chapter(
-                    self, chapter_num, f"Chapter {chapter_num}", chapter_text, outline_entry, checklist, generation_pass,
+                    self, chapter_num, f"Chapter {chapter_num}", chapter_text, outline_entry, checklist, generation_pass, confirmed_done_ids,
                 )
 
                 if change_chapter.ends_abruptly(chapter_text) and evaluation["completed"]:
@@ -2365,6 +2373,8 @@ class WorkflowWorker(QObject):
                     evaluation["completed"] = False
                     if not any("truncat" in m.lower() for m in evaluation["missing"]):
                         evaluation["missing"].append("Chapter appears truncated mid-sentence.")
+                confirmed_done_ids.update(evaluation.get("done_ids", []))
+                remaining_checklist = change_chapter._build_remaining_checklist(checklist, confirmed_done_ids)
                 missing_items = evaluation.get("missing", [])
             else:
                 evaluation = self._evaluate_chapter_completion(

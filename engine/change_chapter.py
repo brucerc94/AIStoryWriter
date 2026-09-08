@@ -89,6 +89,55 @@ def parse_checklist_items(checklist: str) -> list[tuple[int, str]]:
 
 
 
+def _build_remaining_checklist(checklist: str, completed_ids: set[int] | None = None) -> str:
+    completed = set(completed_ids or ())
+    remaining = [
+        f"{item_id}. {text}"
+        for item_id, text in parse_checklist_items(checklist)
+        if item_id not in completed
+    ]
+    return "\n".join(remaining) or "(none)"
+
+
+def _reconcile_checklist_progress(result: dict, checklist: str, prior_done_ids: set[int] | None = None) -> dict:
+    """Keep checklist progress monotonic across append-only continuation passes."""
+    expected = dict(parse_checklist_items(checklist))
+    confirmed = set(prior_done_ids or ())
+    confirmed.update(int(value) for value in result.get("done_ids", []) if str(value).lstrip("-").isdigit())
+
+    missing_ids = set(result.get("missing_ids", []))
+    # Once a checklist item has been confirmed complete, later evaluators
+    # must not regress it to pending because continuation passes only append.
+    missing_ids = {item_id for item_id in missing_ids if item_id not in confirmed or item_id == 0}
+
+    filtered_missing: list[str] = []
+    for entry in result.get("missing", []) or []:
+        match = re.match(r"^\s*(\d+)\s*:", str(entry))
+        if match and int(match.group(1)) in confirmed and int(match.group(1)) != 0:
+            continue
+        filtered_missing.append(str(entry).strip())
+
+    # Every still-pending checklist item must remain explicit even if an
+    # evaluator omitted it from its latest JSON response.
+    for item_id, label in expected.items():
+        if item_id not in confirmed and item_id not in missing_ids:
+            missing_ids.add(item_id)
+            filtered_missing.append(f"{item_id}: {label}")
+
+    deduped_missing = []
+    seen = set()
+    for entry in filtered_missing:
+        if entry and entry not in seen:
+            deduped_missing.append(entry)
+            seen.add(entry)
+
+    result["done_ids"] = sorted(confirmed)
+    result["missing_ids"] = sorted(missing_ids)
+    result["missing"] = deduped_missing
+    result["completed"] = bool(expected) and set(expected).issubset(confirmed) and not missing_ids and not deduped_missing
+    return result
+
+
 def build_clean_context_sections(worker, chapter_num: int, selection_source: str = "") -> str:
     """Assemble scoped canon context for the target chapter only."""
     project = worker.project
@@ -143,7 +192,7 @@ def build_full_rewrite_prompt(
     return system, user
 
 
-def _build_eval_prompt(worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str) -> tuple[str, str]:
+def _build_eval_prompt(worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str, prior_done_ids: set[int] | None = None) -> tuple[str, str]:
     items = parse_checklist_items(checklist)
     item_block = "\n".join(f"{item_id}. {text}" for item_id, text in items) or \
         "(No parseable checklist items; evaluate the original request directly.)"
@@ -159,6 +208,7 @@ def _build_eval_prompt(worker, chapter_num: int, chapter_content: str, instructi
         checklist_items=item_block,
         chapter_content=chapter_content,
         id_list=id_list,
+        prior_done_ids=", ".join(str(i) for i in sorted(prior_done_ids or set())) or "(none)",
     )
     return system, user
 
@@ -227,7 +277,7 @@ def parse_checklist_eval_result(text: str, checklist: str) -> dict:
             if model_said_complete and not all_items_complete:
                 logger.warning("[change_chapter] Model returned complete=true but ID accounting disagrees — overriding to incomplete.")
 
-            completed = all_items_complete if expected_items else (model_said_complete and not missing_ids)
+            completed = all_items_complete if expected_items else (model_said_complete and not missing_ids and not missing)
 
             return {
                 "valid": True, "completed": completed, "missing": missing,
@@ -239,9 +289,9 @@ def parse_checklist_eval_result(text: str, checklist: str) -> dict:
     return {"valid": False, "completed": False, "missing": [], "missing_ids": [], "done_ids": [], "raw": raw}
 
 
-def evaluate_change(worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str, pass_number: int) -> dict:
+def evaluate_change(worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str, pass_number: int, prior_done_ids: set[int] | None = None) -> dict:
     """Run the evaluator with retries. Returns valid=False if every attempt fails to parse."""
-    system, user = _build_eval_prompt(worker, chapter_num, chapter_content, instruction, checklist)
+    system, user = _build_eval_prompt(worker, chapter_num, chapter_content, instruction, checklist, prior_done_ids)
     logger.info("[change_chapter] Chapter %d — verification pass %d — %d words.", chapter_num, pass_number, len(chapter_content.split()))
 
     item_count = max(1, len(parse_checklist_items(checklist)))
@@ -252,7 +302,7 @@ def evaluate_change(worker, chapter_num: int, chapter_content: str, instruction:
         raw = worker._run_lean_inference(TaskType.REVIEW_CHAPTER, system, user, max_tokens=max_eval_tokens)
         parsed = parse_checklist_eval_result(raw, checklist)
         if parsed["valid"]:
-            final = parsed
+            final = _reconcile_checklist_progress(parsed, checklist, prior_done_ids)
             logger.info(
                 "[change_chapter] Attempt %d/%d: complete=%s done=%s missing_ids=%s",
                 attempt, MAX_CHANGE_EVAL_RETRIES, parsed["completed"], parsed.get("done_ids", []), parsed.get("missing_ids", []),
@@ -293,7 +343,7 @@ def ends_abruptly(text: str) -> bool:
     return not bool(re.search(r'[.!?\u2026"\')\]}\u201d\u2019]$', stripped))
 
 
-def _build_continuation_prompt(worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str, missing: list[str] | None) -> tuple[str, str]:
+def _build_continuation_prompt(worker, chapter_num: int, chapter_content: str, instruction: str, checklist: str, missing: list[str] | None, completed_ids: set[int] | None = None, remaining_checklist: str = "") -> tuple[str, str]:
     """
     Build the system + user prompt for a Change Chapter continuation pass.
 
@@ -369,6 +419,8 @@ def _build_continuation_prompt(worker, chapter_num: int, chapter_content: str, i
         chapter_title=_chapter_title(worker, chapter_num),
         instruction=instruction.strip(),
         checklist=checklist.strip() or "(none)",
+        completed_ids=", ".join(str(i) for i in sorted(completed_ids or set())) or "(none)",
+        remaining_checklist=remaining_checklist.strip() or _build_remaining_checklist(checklist, completed_ids),
         missing_text=missing_text,
         continuity_context=continuity_context,
         chapter_tail=allocated["prose_tail"],
@@ -405,10 +457,10 @@ def is_substantial_duplicate(addition: str, tail: str) -> bool:
     return norm_add == norm_tail or norm_add in norm_tail or norm_tail.endswith(norm_add)
 
 
-def continue_rewrite(worker, chapter_num: int, chapter, instruction: str, checklist: str, pass_number: int, missing: list[str] | None = None) -> bool:
+def continue_rewrite(worker, chapter_num: int, chapter, instruction: str, checklist: str, pass_number: int, missing: list[str] | None = None, completed_ids: set[int] | None = None, remaining_checklist: str = "") -> bool:
     """Append a continuation to chapter.content. Returns True if new content was appended."""
     worker.step_started.emit(f"Continuing Chapter {chapter_num} rewrite (pass {pass_number})...")
-    system, user = _build_continuation_prompt(worker, chapter_num, chapter.content, instruction, checklist, missing)
+    system, user = _build_continuation_prompt(worker, chapter_num, chapter.content, instruction, checklist, missing, completed_ids, remaining_checklist)
     result = worker._run_lean_inference(TaskType.CHANGE_CHAPTER, system, user, max_tokens=worker._content_max_tokens())
     if not result or not result.strip():
         logger.warning("[change_chapter] Continuation returned empty text.")
@@ -480,8 +532,9 @@ def run(worker) -> None:
 
 
     consecutive_invalid_evals = 0
+    confirmed_done_ids: set[int] = set()
     for pass_number in range(1, MAX_CHANGE_PASSES + 1):
-        evaluation = evaluate_change(worker, chapter_num, chapter.content, instruction, checklist, pass_number)
+        evaluation = evaluate_change(worker, chapter_num, chapter.content, instruction, checklist, pass_number, confirmed_done_ids)
 
         if not evaluation["valid"]:
             consecutive_invalid_evals += 1
@@ -494,7 +547,8 @@ def run(worker) -> None:
                 break
             continue
         consecutive_invalid_evals = 0
-
+        confirmed_done_ids.update(evaluation.get("done_ids", []))
+        remaining_checklist = _build_remaining_checklist(checklist, confirmed_done_ids)
 
 
         if ends_abruptly(chapter.content):
@@ -518,7 +572,7 @@ def run(worker) -> None:
             logger.warning("[change_chapter] Reached MAX_CHANGE_PASSES=%d; saving current result.", MAX_CHANGE_PASSES)
             break
 
-        continued = continue_rewrite(worker, chapter_num, chapter, instruction, checklist, pass_number + 1, evaluation.get("missing", []))
+        continued = continue_rewrite(worker, chapter_num, chapter, instruction, checklist, pass_number + 1, evaluation.get("missing", []), confirmed_done_ids, remaining_checklist)
         if not continued:
             logger.warning("[change_chapter] Continuation produced no new content on pass %d; stopping.", pass_number + 1)
             break
