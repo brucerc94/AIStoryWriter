@@ -193,13 +193,14 @@ class Chapter:
     reviewed: bool = False
     last_review: str = ""
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    generation_status: str = "accepted"  # "accepted" | "incomplete"
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "number": self.number, "title": self.title, "summary": self.summary, "content": self.content, "reviewed": self.reviewed, "last_review": self.last_review}
+        return {"id": self.id, "number": self.number, "title": self.title, "summary": self.summary, "content": self.content, "reviewed": self.reviewed, "last_review": self.last_review, "generation_status": self.generation_status}
 
     @classmethod
     def from_dict(cls, d: dict) -> "Chapter":
-        return cls(id=d.get("id", str(uuid.uuid4())), number=d["number"], title=d.get("title", f"Chapter {d['number']}"), summary=d.get("summary", ""), content=d.get("content", ""), reviewed=d.get("reviewed", False), last_review=d.get("last_review", ""))
+        return cls(id=d.get("id", str(uuid.uuid4())), number=d["number"], title=d.get("title", f"Chapter {d['number']}"), summary=d.get("summary", ""), content=d.get("content", ""), reviewed=d.get("reviewed", False), last_review=d.get("last_review", ""), generation_status=d.get("generation_status", "accepted"))
 
 
 @dataclass

@@ -2290,31 +2290,41 @@ class WorkflowWorker(QObject):
             if generation_pass >= MAX_CONTINUATIONS:
                 logger.warning(
                     f"[write_chapter] Reached MAX_CONTINUATIONS={MAX_CONTINUATIONS}. "
-                    "Saving chapter as-is."
+                    "Saving chapter as-is (incomplete)."
                 )
+                evaluation["completed"] = False
                 break
 
             logger.info(
                 "[write_chapter] Chapter not complete yet. Generating continuation..."
             )
 
+        chapter_accepted = bool(evaluation.get("completed", True))
+
         if chapter_text:
             existing = next((c for c in self.project.chapters if c.number == chapter_num), None)
             if existing:
                 existing.content = chapter_text
                 existing.reviewed = False
+                existing.generation_status = "accepted" if chapter_accepted else "incomplete"
             else:
-
                 outline_title = self._outline_chapter_title(chapter_num)
                 ch = Chapter(
                     number=chapter_num,
                     title=outline_title or f"Chapter {chapter_num}",
                     content=chapter_text,
+                    generation_status="accepted" if chapter_accepted else "incomplete",
                 )
                 self.project.chapters.append(ch)
 
-            self._extract_and_merge_characters(chapter_text)
-            self._update_world_incremental(chapter_text, source_type="chapter")
+            if chapter_accepted:
+                self._extract_and_merge_characters(chapter_text)
+                self._update_world_incremental(chapter_text, source_type="chapter")
+            else:
+                logger.warning(
+                    f"[write_chapter] Chapter {chapter_num} saved as INCOMPLETE — "
+                    "skipping character/world/memory updates to avoid state contamination."
+                )
             storage.save_project(self.project)
             self.step_finished.emit(f"Chapter {chapter_num}", chapter_text)
 
@@ -2362,14 +2372,25 @@ class WorkflowWorker(QObject):
             if self._cancelled:
                 break
 
-
-            wrote_chapter = any(c.number == pending for c in self.project.chapters)
-            if wrote_chapter:
-
-                self.project.current_chapter = pending
-                logger.info(f"[write_book] Updating Story Memory for Chapter {pending}.")
-                self.step_started.emit(f"Updating Story Memory for Chapter {pending}...")
-                self._run_update_memory()
+            wrote_chapter_obj = next((c for c in self.project.chapters if c.number == pending), None)
+            if wrote_chapter_obj is not None:
+                chapter_accepted = wrote_chapter_obj.generation_status != "incomplete"
+                if chapter_accepted:
+                    self.project.current_chapter = pending
+                    logger.info(f"[write_book] Updating Story Memory for Chapter {pending}.")
+                    self.step_started.emit(f"Updating Story Memory for Chapter {pending}...")
+                    self._run_update_memory()
+                else:
+                    logger.warning(
+                        f"[write_book] Chapter {pending} is INCOMPLETE — "
+                        "skipping memory update and stopping book generation "
+                        "to prevent propagating a defective chapter."
+                    )
+                    self.step_started.emit(
+                        f"Chapter {pending} did not pass completion checks. "
+                        "Stopping book generation — please review or regenerate it."
+                    )
+                    break
             else:
                 logger.warning(
                     f"[write_book] Chapter {pending} was not produced "
