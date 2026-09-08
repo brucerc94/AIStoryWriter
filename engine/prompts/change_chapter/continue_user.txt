@@ -6,7 +6,12 @@ AUTHOR'S ORIGINAL REQUEST — AUTHORITATIVE:
 INTERNAL CHECKLIST — MANDATORY:
 {{checklist}}
 
-MISSING REQUIREMENTS (must be addressed in the continuation):
+CHECKLIST PROGRESS — PERSISTENT FROM PRIOR PASSES:
+Confirmed complete IDs: {{completed_ids}}
+Remaining checklist items, in original order:
+{{remaining_checklist}}
+
+MISSING REQUIREMENTS FROM THE LATEST EVALUATION (address these remaining requirements first):
 {{missing_text}}
 
 {{continuity_context}}
@@ -14,6 +19,8 @@ MISSING REQUIREMENTS (must be addressed in the continuation):
 CONTINUITY IS STRICT: continue the SAME scene and immediate narrative state shown at the end of the current rewrite. Preserve the exact active characters, their identities and relationships, location, POV, tense, and immediate objective. Do not substitute another character simply because that character appears in the chapter plan or continuity anchors.
 
 Do not restart, summarize, rewrite, or repeat the existing prose. Do not introduce a new scene, location, time jump, POV, character, relationship, or plot direction unless the current ending and the authoritative chapter plan explicitly require it.
+
+When the remaining checklist contains multiple items, prefer fulfilling the earliest remaining item that can be completed naturally from the current scene; continue to the next remaining item only as the prose naturally reaches it. Never skip a remaining item merely because a different later item is easier.
 
 --- END OF CURRENT REWRITE (last ~7000 chars) ---
 {{chapter_tail}}
