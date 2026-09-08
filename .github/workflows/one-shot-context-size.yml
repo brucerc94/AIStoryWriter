@@ -1,0 +1,53 @@
+name: one-shot-context-size
+
+on:
+  push:
+    branches: [bugfixes]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove independent context default
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('engine/context.py')
+          text = path.read_text(encoding='utf-8')
+          old = 'max_context_tokens: int = 3200'
+          count = text.count(old)
+          if count < 2:
+              raise SystemExit(f'Expected context-size defaults not found; count={count}')
+          text = text.replace(old, 'max_context_tokens: int', 2)
+          path.write_text(text, encoding='utf-8')
+
+          # Ensure all non-context.py call sites explicitly provide a resolved limit.
+          import subprocess
+          result = subprocess.run(
+              ['grep', '-RIn', 'build_context_for_model(', '.', '--exclude-dir=.git', '--exclude=context.py'],
+              text=True, capture_output=True,
+          )
+          print(result.stdout)
+          if result.returncode not in (0, 1):
+              raise SystemExit(result.stderr)
+
+          test = Path('tests/test_context_prompt_integrity.py')
+          if not test.exists():
+              raise SystemExit('Expected context regression test file is missing')
+          PY
+
+          python -m unittest tests/test_context_prompt_integrity.py tests/test_outline_world_context.py
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/one-shot-context-size.yml
+          git add engine/context.py
+          git commit -m 'fix: use resolved model context size everywhere'
+          git push origin HEAD:bugfixes
