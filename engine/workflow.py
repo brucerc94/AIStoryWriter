@@ -2390,7 +2390,6 @@ class WorkflowWorker(QObject):
                 self.project.chapters.append(ch)
 
             if chapter_accepted:
-                self._extract_and_merge_characters(chapter_text)
                 self._update_world_incremental(chapter_text, source_type="chapter")
             else:
                 logger.warning(
@@ -2613,7 +2612,6 @@ class WorkflowWorker(QObject):
 
     def _finalize_changed_chapter(self, chapter_num: int, chapter: Chapter) -> None:
 
-        self._extract_and_merge_characters(chapter.content)
         self._update_world_incremental(chapter.content, source_type="chapter")
         self.project.current_chapter = chapter_num
 
