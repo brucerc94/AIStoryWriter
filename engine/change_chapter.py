@@ -620,6 +620,7 @@ def plan_chapter(worker, chapter_num: int, chapter_title: str, outline_entry: st
 
 def _build_chapter_eval_prompt(
     chapter_num: int, chapter_title: str, chapter_content: str, outline_entry: str, checklist: str,
+    prior_done_ids: set[int] | None = None,
 ) -> tuple[str, str]:
     items = parse_checklist_items(checklist)
     item_block = "\n".join(f"{item_id}. {text}" for item_id, text in items) or \
@@ -636,6 +637,7 @@ def _build_chapter_eval_prompt(
         checklist_items=item_block,
         chapter_content=chapter_content,
         id_list=id_list,
+        prior_done_ids=", ".join(str(i) for i in sorted(prior_done_ids or set())) or "(none)",
     )
     return system, user
 
@@ -643,12 +645,15 @@ def _build_chapter_eval_prompt(
 def evaluate_chapter(
     worker, chapter_num: int, chapter_title: str, chapter_content: str,
     outline_entry: str, checklist: str, pass_number: int,
+    prior_done_ids: set[int] | None = None,
 ) -> dict:
     """Run the WRITE_CHAPTER checklist evaluator with retries. Same JSON
     contract and parsing as evaluate_change() above (see
     parse_checklist_eval_result), so a valid=False result here means every
     attempt failed to produce parseable JSON."""
-    system, user = _build_chapter_eval_prompt(chapter_num, chapter_title, chapter_content, outline_entry, checklist)
+    system, user = _build_chapter_eval_prompt(
+        chapter_num, chapter_title, chapter_content, outline_entry, checklist, prior_done_ids
+    )
     logger.info("[write_chapter] Chapter %d — checklist verification pass %d — %d words.", chapter_num, pass_number, len(chapter_content.split()))
 
     item_count = max(1, len(parse_checklist_items(checklist)))
@@ -659,7 +664,7 @@ def evaluate_chapter(
         raw = worker._run_lean_inference(TaskType.REVIEW_CHAPTER, system, user, max_tokens=max_eval_tokens)
         parsed = parse_checklist_eval_result(raw, checklist)
         if parsed["valid"]:
-            final = parsed
+            final = _reconcile_checklist_progress(parsed, checklist, prior_done_ids)
             logger.info(
                 "[write_chapter] Attempt %d/%d: complete=%s done=%s missing_ids=%s",
                 attempt, MAX_CHANGE_EVAL_RETRIES, parsed["completed"], parsed.get("done_ids", []), parsed.get("missing_ids", []),
