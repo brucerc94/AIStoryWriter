@@ -3,8 +3,8 @@ Chapter {{chapter_number}}: '{{chapter_title}}'
 AUTHOR'S ORIGINAL REQUEST — AUTHORITATIVE:
 {{instruction}}
 
-CHECKLIST PROGRESS:
-Items 1..{{last_completed_id_label}} have been confirmed complete in prior passes and are already present in the chapter. Do not repeat or regress them.
+ACTIVE CHECKLIST PROGRESS:
+Items confirmed complete in prior passes are already satisfied in the chapter. Do not repeat or regress them.
 
 ACTIVE REQUIREMENTS — ADDRESS IN ORDER:
 {{remaining_checklist}}
@@ -12,17 +12,17 @@ ACTIVE REQUIREMENTS — ADDRESS IN ORDER:
 NEXT REQUIRED ITEM:
 {{next_required_id_label}}
 
-MISSING REQUIREMENTS FROM THE LATEST EVALUATION (address these first):
+LATEST EVALUATOR MISSING REQUIREMENTS (address these first):
 {{missing_text}}
 
 {{continuity_context}}
 
 CONTINUITY IS STRICT: continue the SAME scene and immediate narrative state shown at the end of the current rewrite. Preserve the exact active characters, their identities and relationships, location, POV, tense, and immediate objective. Do not substitute another character simply because that character appears in the chapter plan or continuity anchors.
 
-Do not restart, summarize, rewrite, or repeat the existing prose. Do not introduce a new scene, location, time jump, POV, character, relationship, or plot direction unless the current ending and the authoritative chapter plan explicitly require it.
+PACING RULE: The active checklist is an ordered narrative sequence. Continue from the current ending and advance only from the NEXT REQUIRED ITEM. Do not jump ahead to later checklist items, even if later events appear in the chapter plan, outline, or context. Do not deliberately execute requirements outside the ACTIVE REQUIREMENTS block.
 
-When the active requirements contain multiple items, prefer fulfilling the earliest remaining item that can be completed naturally from the current scene; continue to the next remaining item only as the prose naturally reaches it. Never skip a remaining item merely because a different later item is easier.
+Do not restart, summarize, rewrite, or repeat the existing prose. Do not introduce a new scene, location, time jump, POV, character, relationship, or plot direction unless the current ending and the active requirement explicitly require it.
 
---- END OF CURRENT REWRITE (last ~7000 chars) ---
+--- END OF CURRENT REWRITE ---
 {{chapter_tail}}
---- CONTINUE IMMEDIATELY FROM EXACTLY HERE — NO REPETITION ---
+--- CONTINUE IMMEDIATELY FROM EXACTLY HERE — NO REPETITION, NO AHEAD-OF-SEQUENCE EVENTS ---
