@@ -13,8 +13,13 @@ substituted via a controlled regex rather than str.format()/string.Template
 so that literal braces or `$` in story content (JSON examples, dialogue,
 etc.) inside a template are never mistaken for template syntax.
 
+Usage:
+    from engine import prompts
+    text = prompts.render("change_chapter/full_rewrite_system", title=project.title)
+
 Files are cached in memory after first read (they don't change at
-runtime), but caching can be bypassed with `reload=True`.
+runtime), but caching can be bypassed with `reload=True` — handy if a
+template is edited while the app is running.
 """
 
 from __future__ import annotations
@@ -28,8 +33,9 @@ PROMPTS_DIR = Path(__file__).parent / "prompts"
 _PLACEHOLDER_RE = re.compile(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}")
 _CHECKLIST_ITEM_RE = re.compile(r"^\s*(\d+)\s*[.)-]\s+(.+?)\s*$", re.MULTILINE)
 
-# Prose-generation templates get checklist requirements without numeric IDs;
-# planner/evaluator templates retain the original numbered form.
+# These templates feed prose generation. Keep checklist IDs internal to
+# planners/evaluators; the writer needs the requirement text and order, not
+# the numeric labels that the model may accidentally reproduce in the story.
 _WRITER_CHECKLIST_TEMPLATES = {
     "change_chapter/full_rewrite_user",
     "change_chapter/continue_user",
@@ -37,6 +43,7 @@ _WRITER_CHECKLIST_TEMPLATES = {
 }
 
 _cache: dict[str, str] = {}
+_last_writer_checklist_items: list[tuple[int, str]] = []
 
 
 def _path_for(name: str) -> Path:
@@ -54,10 +61,63 @@ def load_raw(name: str, reload: bool = False) -> str:
             "Prompt text belongs in engine/prompts/, not inline in Python."
         )
     text = path.read_text(encoding="utf-8")
+
     if text.endswith("\n"):
         text = text[:-1]
     _cache[name] = text
     return text
+
+
+def _remember_writer_checklist(value: Any) -> None:
+    """Remember the original numbered checklist for later continuation passes."""
+    global _last_writer_checklist_items
+    text = str(value or "").strip()
+    if not text:
+        return
+    matches = list(_CHECKLIST_ITEM_RE.finditer(text))
+    if not matches:
+        return
+    _last_writer_checklist_items = [
+        (int(match.group(1)), match.group(2).strip())
+        for match in matches
+        if match.group(2).strip()
+    ]
+
+
+def _last_completed_beat(completed_ids: Any) -> str:
+    """Return the latest checklist beat already confirmed complete."""
+    try:
+        done_ids = {
+            int(part.strip())
+            for part in str(completed_ids or "").split(",")
+            if part.strip()
+        }
+    except (TypeError, ValueError):
+        done_ids = set()
+
+    if not done_ids or not _last_writer_checklist_items:
+        return "(none — use the exact current chapter ending as the starting point)"
+
+    for item_id, text in reversed(_last_writer_checklist_items):
+        if item_id in done_ids:
+            return text
+    return "(none — use the exact current chapter ending as the starting point)"
+
+
+def _last_completed_beat_from_label(label: Any) -> str:
+    """Return the checklist beat represented by a human-readable progress label."""
+    numbers = re.findall(r"\d+", str(label or ""))
+    if not numbers or not _last_writer_checklist_items:
+        return "(none — use the exact current chapter ending as the starting point)"
+    try:
+        last_id = int(numbers[-1])
+    except (TypeError, ValueError):
+        return "(none — use the exact current chapter ending as the starting point)"
+
+    for item_id, text in reversed(_last_writer_checklist_items):
+        if item_id == last_id:
+            return text
+    return "(none — use the exact current chapter ending as the starting point)"
 
 
 def _format_writer_checklist(value: Any) -> str:
@@ -75,22 +135,43 @@ def _format_writer_checklist(value: Any) -> str:
 
 
 def render(name: str, **variables: Any) -> str:
-    """Load a template and substitute its supplied variables."""
+    """
+    Load the named template and substitute every {{placeholder}} with the
+    matching keyword argument. Raises KeyError with the template name and
+    missing variable if the caller forgot to supply something the template
+    needs — fails loudly instead of silently sending "{{foo}}" to a model.
+
+    Prose-generation templates receive a writer-safe checklist view: item
+    numbers are stripped while preserving the requirement text and order.
+    Planner/evaluator templates retain the original numbered checklist.
+    """
     text = load_raw(name)
     render_vars = dict(variables)
+
+    # Capture the original checklist only when a prose-generation call sees
+    # the full checklist. Continuation subsets never overwrite this state.
+    if name in _WRITER_CHECKLIST_TEMPLATES and "checklist" in render_vars:
+        _remember_writer_checklist(render_vars["checklist"])
 
     if name in _WRITER_CHECKLIST_TEMPLATES:
         for key in ("checklist", "remaining_checklist"):
             if key in render_vars:
                 render_vars[key] = _format_writer_checklist(render_vars[key])
+        if "completed_ids" in render_vars:
+            render_vars["last_completed_beat"] = _last_completed_beat(render_vars["completed_ids"])
+        elif "last_completed_id_label" in render_vars:
+            render_vars["last_completed_beat"] = _last_completed_beat_from_label(
+                render_vars["last_completed_id_label"]
+            )
 
     # Write Chapter's initial checklist is embedded through a generic section
-    # template. Only checklist/requirements sections are transformed so canon,
-    # style, intent, and other section bodies remain untouched.
+    # template. Only checklist/requirements sections are transformed so
+    # canon, style, intent, and other section bodies remain untouched.
     if name == "change_chapter/section":
         heading = str(render_vars.get("heading", "")).lower()
         if "checklist" in heading or "story requirements" in heading:
             if "body" in render_vars:
+                _remember_writer_checklist(render_vars["body"])
                 render_vars["body"] = _format_writer_checklist(render_vars["body"])
 
     def _substitute(match: re.Match) -> str:
@@ -106,4 +187,6 @@ def render(name: str, **variables: Any) -> str:
 
 
 def clear_cache() -> None:
+    global _last_writer_checklist_items
     _cache.clear()
+    _last_writer_checklist_items = []
