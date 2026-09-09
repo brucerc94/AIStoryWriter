@@ -209,3 +209,8 @@ def install(module) -> None:
     module.evaluate_chapter = evaluate_chapter
     module._frontier_consensus_installed = True
     logger.info("[frontier_eval] Installed frontier consensus evaluator for Write/Change Chapter")
+    try:
+        from engine.consistency_precheck import install_change_run
+        install_change_run(module)
+    except Exception:
+        logger.exception("[change_chapter] Could not install consistency precheck; leaving base Change Chapter run intact.")
