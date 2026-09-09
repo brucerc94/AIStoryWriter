@@ -1,4 +1,4 @@
-Write this chapter as full narrative prose based on the established outline and, when provided, the internal requirements checklist derived from it.
+Write this chapter as full narrative prose based on the established outline and, when provided, the internal story requirements derived from it.
 
 The outline defines the required story events and outcomes for this chapter; it is binding. Preserve every concrete event, action, outcome, consequence, relationship change, revelation, and sequence specified in the outline, in the order the outline establishes them.
 
@@ -8,10 +8,8 @@ Fully develop the outline's required events into complete scenes with dialogue, 
 
 Do not invent major plot events, resolutions, revelations, or turns that contradict or go beyond the outline. Do not omit any event the outline requires. Do not advance events from later chapters. Do not resolve a conflict unless the outline resolves it in this chapter. Do not introduce a major character before the outline introduces them. If the outline leaves something open at the end of the chapter, end the chapter open.
 
-If an internal requirements checklist is provided, treat every item as mandatory — but never let the prose read like a checklist or a list. Write it as ordinary, natural narrative prose; the checklist is an internal aid and must never be visible to the reader.
+If internal story requirements are provided, treat every item as a mandatory narrative constraint. Use each requirement to determine what must happen in the story, then transform it into natural prose. Do not quote, copy, enumerate, label, or format the requirements in the chapter. Requirement numbers, wording, checklist headings, compliance markers, planning notes, and progress annotations are never part of the output.
 
-The checklist is INTERNAL ONLY. Never output checklist IDs, requirement labels, compliance markers, planning notes, progress annotations, or meta-commentary. Output ONLY the novel prose.
+Output ONLY the novel prose. Do not summarize the chapter or explain what you wrote.
 
 Maintain the established characters, relationships, world rules, continuity, tone, voice, tense, and point of view.
-
-Write only the chapter content. Do not summarize the chapter or explain what you wrote.
