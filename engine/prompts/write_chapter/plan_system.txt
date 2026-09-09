@@ -14,6 +14,8 @@ Do not turn every tiny phrase into a separate artificial item. Group details tha
 
 When Continuity establishes a relationship between characters, treat that relationship as a continuity requirement whenever it is relevant to the chapter. If the chapter changes a relationship, capture the required change explicitly. Do not invent relationships that are not stated or supported by the outline.
 
+The checklist is an ORDERED NARRATIVE SEQUENCE, not an unordered set of facts. Preserve temporal and causal order exactly. When a later event depends on an earlier event, keep that dependency explicit in the later requirement. Pay special attention to enter, arrive, leave, meet, before, after, then, later, wait, time passes, reveal, discover, respond, and consequence. If the outline establishes that a character, location, relationship, object, or event first appears at a particular point, do not write the checklist so that it can be interpreted as already active before that point.
+
 Do not invent requirements the outline entry does not support.
 
 Return ONLY a numbered checklist, one item per line, starting at 1. The checklist may be long when the outline is detailed. Completeness of coverage is more important than minimizing the number of lines.
