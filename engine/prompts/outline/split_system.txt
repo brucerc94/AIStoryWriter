@@ -17,6 +17,10 @@ RULES
 - Do not duplicate the same event across chapters.
 - When a later chapter depends on a prior event, the later block may briefly state that the dependency is already established, but must not repeat the earlier event as new material.
 - Keep each block focused on the material that the outline writer for that chapter must execute.
+- Keep each source block concise: about 2–4 factual sentences when the source permits.
+- Preserve important named entities, causal links, turning points, and consequences even when compressing.
+- IMPORTANT JSON SAFETY: never use a double-quote character inside a source value. Do not quote titles, terms, or phrases. Use plain text instead so the JSON string remains valid without escaping.
+- Do not use markdown code fences, comments, trailing prose, or any text before or after the JSON object.
 
 OUTPUT
 Return ONLY valid JSON in this exact shape:
