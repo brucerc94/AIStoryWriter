@@ -1,24 +1,19 @@
 Chapter {{chapter_number}}: '{{chapter_title}}'
 
-ACTIVE CHECKLIST PROGRESS:
-Items confirmed complete in prior passes are already satisfied in the chapter. Do not repeat or regress them.
+Previously satisfied requirements are already complete. Do not repeat or regress them.
 
 ACTIVE REQUIREMENTS — ADDRESS IN ORDER:
 {{remaining_checklist}}
 
-NEXT REQUIRED ITEM:
-{{next_required_id_label}}
-
-LATEST EVALUATOR MISSING REQUIREMENTS (address these first):
-{{missing_text}}
+Start with the first requirement listed above. Treat these requirements only as narrative constraints to transform into natural prose; never reproduce their labels, numbering, or wording as output.
 
 {{continuity_context}}
 
 CONTINUITY IS STRICT: continue the SAME scene and immediate narrative state shown at the end of the current rewrite. Preserve the exact active characters, their identities and relationships, location, POV, tense, and immediate objective. Do not substitute another character simply because that character appears in the chapter plan or continuity anchors.
 
-PACING RULE: The active checklist is an ordered narrative sequence. Continue from the current ending and advance only from the NEXT REQUIRED ITEM. Do not jump ahead to later checklist items, even if later events appear in the chapter plan, outline, or context. Do not deliberately execute requirements outside the ACTIVE REQUIREMENTS block.
+PACING RULE: the active requirements are an ordered narrative sequence. Continue from the current ending and advance only through the requirements listed above, in order. Do not jump ahead to later story beats or introduce a future character, event, location, relationship, revelation, or consequence before its required position.
 
-Do not restart, summarize, rewrite, or repeat the existing prose. Do not introduce a new scene, location, time jump, POV, character, relationship, or plot direction unless the current ending and the active requirement explicitly require it.
+Do not restart, summarize, rewrite, or repeat the existing prose. Do not introduce a new scene, location, time jump, POV, character, relationship, or plot direction unless the current ending and the active requirements explicitly require it.
 
 --- END OF CURRENT REWRITE ---
 {{chapter_tail}}
