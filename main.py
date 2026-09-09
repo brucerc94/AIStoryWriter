@@ -14,8 +14,25 @@ import sys
 from pathlib import Path
 
 
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+
+def _enable_windows_ansi() -> None:
+    """Enable ANSI/VT escape-sequence support for the Windows console."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+        mode = ctypes.c_uint32()
+        if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            kernel32.SetConsoleMode(handle, mode.value | 0x0004)  # ENABLE_VIRTUAL_TERMINAL_PROCESSING
+    except Exception:
+        # Some hosts (IDE consoles, redirected stdout, etc.) do not expose
+        # a Win32 console. ANSI support is optional and must never stop startup.
+        pass
 
 
 def _configure_logging() -> None:
@@ -34,6 +51,7 @@ def _configure_logging() -> None:
     )
 
 
+_enable_windows_ansi()
 _configure_logging()
 logger = logging.getLogger("main")
 
