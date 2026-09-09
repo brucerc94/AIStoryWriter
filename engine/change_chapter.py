@@ -35,6 +35,7 @@ MAX_CONSECUTIVE_INVALID_EVALS = 2
 WORLD_CAP = 6000
 MEMORY_CAP = 5000
 CHAPTER_CAP = 20000
+TAIL_LIMIT = 2500
 
 
 
@@ -558,7 +559,7 @@ def _build_continuation_prompt(
     # only forward-looking instruction a continuation should see is the
     # ACTIVE/REMAINING checklist and its NEXT REQUIRED ITEM.
     outline_raw    = (extract_outline_section(project.outline, chapter_num) or "").strip()
-    prose_tail_raw = chapter_content.strip()
+    prose_tail_raw = chapter_content[-TAIL_LIMIT:].strip()
     selection_source = "\n\n".join(
         part for part in (outline_raw, active_remaining, missing_text, prose_tail_raw) if part
     )

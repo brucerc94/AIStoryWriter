@@ -45,6 +45,7 @@ import re as _re
 _HEADING_RE_WF = _re.compile(r"^(#{1,6})\s*(.+?)\s*$", _re.MULTILINE)
 
 WORLD_ALLOWED_SECTIONS = ("Geography", "Culture & Customs", "Relevant History")
+TAIL_LIMIT = 2500
 _WORLD_SECTION_ALIASES = {
     "geography": "Geography",
     "geography & key locations": "Geography",
@@ -2075,7 +2076,7 @@ class WorkflowWorker(QObject):
             prev = next((c for c in self.project.chapters if c.number == chapter_num - 1), None)
             if prev and prev.content:
                 prev_tail_raw = prev.content[-1200:].strip()
-        prose_tail_raw = chapter_text.strip()
+        prose_tail_raw = chapter_text[-TAIL_LIMIT:].strip()
         selection_source = "\n\n".join(
             part for part in (outline_raw, chapter_goal, active_remaining, prev_tail_raw, prose_tail_raw) if part
         )
