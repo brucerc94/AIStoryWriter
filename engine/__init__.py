@@ -56,6 +56,8 @@ class _FrontierLoader(importlib.abc.Loader):
         self._wrapped.exec_module(module)
         from engine.frontier_consensus import install
         install(module)
+        from engine.consistency_precheck import install_change_run
+        install_change_run(module)
 
 
 class _FrontierFinder(importlib.abc.MetaPathFinder):
