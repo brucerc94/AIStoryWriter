@@ -1,8 +1,5 @@
 Chapter {{chapter_number}}: '{{chapter_title}}'
 
-AUTHOR'S ORIGINAL REQUEST — AUTHORITATIVE:
-{{instruction}}
-
 ACTIVE CHECKLIST PROGRESS:
 Items confirmed complete in prior passes are already satisfied in the chapter. Do not repeat or regress them.
 

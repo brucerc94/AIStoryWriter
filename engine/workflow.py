@@ -2101,6 +2101,11 @@ class WorkflowWorker(QObject):
         ]
         allocated = budget_allocate(variable_budget, slots)
 
+        # AUTHOR STYLE is reconstructed from project.writing_style on every
+        # RESET pass — required in every prose-generating call for Write
+        # Chapter, including all continuation passes.
+        style_frag = self.project.writing_style.to_prompt_fragment()
+
         continuity_context = prompts.render(
             "change_chapter/section",
             heading="CONTINUITY ANCHORS — AUTHORITATIVE",
@@ -2108,7 +2113,8 @@ class WorkflowWorker(QObject):
                 f"Chapter outline:\n{allocated['outline'] or '(none)'}\n\n"
                 f"Established characters:\n{allocated['characters'] or '(none)'}\n\n"
                 f"World/setting anchors:\n{allocated['world'] or '(none)'}\n\n"
-                f"End of previous chapter (continuity only):\n{allocated['prev_tail'] or '(none)'}"
+                f"End of previous chapter (continuity only):\n{allocated['prev_tail'] or '(none)'}\n\n"
+                f"Writing style to preserve:\n{style_frag or '(none specified)'}"
             ),
         )
 
@@ -2308,13 +2314,26 @@ class WorkflowWorker(QObject):
         remaining_checklist = change_chapter._build_remaining_checklist(checklist, accumulated_done) if checklist else ""
         evaluation = {"completed": True, "confidence": 100, "reason": "", "next": ""}
 
+        # RESET architecture: every generation pass below builds a brand-new,
+        # self-contained system+user prompt via _run_lean_inference. No pass
+        # depends on project.chat_messages or any prior conversational turn —
+        # all cross-pass state (accumulated_done / remaining_checklist / the
+        # accumulated chapter text itself) lives in Python variables here.
+        write_chapter_system = build_system_prompt(
+            self.project,
+            TaskType.WRITE_CHAPTER,
+            custom_instructions=self._custom_system_instructions(),
+            language=self._response_language(),
+            allow_nsfw=self._allow_nsfw(),
+        )
+
         while generation_pass < MAX_CONTINUATIONS:
             generation_pass += 1
             if generation_pass == 1:
                 self.step_started.emit(f"Generation pass {generation_pass}...")
                 logger.info(f"[write_chapter] Generation pass {generation_pass}...")
-                generated = self._run_inference(
-                    TaskType.WRITE_CHAPTER, prompt, add_to_chat=True, max_tokens=self._content_max_tokens()
+                generated = self._run_lean_inference(
+                    TaskType.WRITE_CHAPTER, write_chapter_system, prompt, max_tokens=self._content_max_tokens()
                 )
                 if not generated:
                     logger.warning(f"[write_chapter] generation pass {generation_pass} returned empty text.")
@@ -2324,7 +2343,11 @@ class WorkflowWorker(QObject):
                 self.step_started.emit(f"Generating continuation (pass {generation_pass})...")
                 logger.info(f"[write_chapter] Generating continuation (pass {generation_pass})...")
 
-                self._clear_chat_messages_for_continuation()
+                # RESET: a fresh call is built from current Python state
+                # (accumulated chapter text, remaining checklist, next
+                # required item, relevant canon, author style). This is not
+                # a continued conversation — project.chat_messages is never
+                # touched or read here.
                 continuation_prompt = self._build_chapter_continuation_prompt(
                     chapter_num,
                     chapter_text,
@@ -2335,8 +2358,8 @@ class WorkflowWorker(QObject):
                     remaining_checklist,
                 )
 
-                generated = self._run_inference(
-                    TaskType.WRITE_CHAPTER, continuation_prompt, add_to_chat=False, max_tokens=self._content_max_tokens()
+                generated = self._run_lean_inference(
+                    TaskType.WRITE_CHAPTER, write_chapter_system, continuation_prompt, max_tokens=self._content_max_tokens()
                 )
                 if not generated:
                     logger.warning(f"[write_chapter] generation pass {generation_pass} returned empty text.")
@@ -2355,7 +2378,7 @@ class WorkflowWorker(QObject):
 
             if checklist:
                 evaluation = change_chapter.evaluate_chapter(
-                    self, chapter_num, f"Chapter {chapter_num}", chapter_text, outline_entry, checklist,
+                    self, chapter_num, f"Chapter {chapter_num}", chapter_text, checklist,
                     generation_pass, accumulated_done,
                 )
 

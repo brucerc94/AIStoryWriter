@@ -10,6 +10,8 @@ Do not invent major plot events, resolutions, revelations, or turns that contrad
 
 If an internal requirements checklist is provided, treat every item as mandatory — but never let the prose read like a checklist or a list. Write it as ordinary, natural narrative prose; the checklist is an internal aid and must never be visible to the reader.
 
+The checklist is INTERNAL ONLY. Never output checklist IDs, requirement labels, compliance markers, planning notes, progress annotations, or meta-commentary. Output ONLY the novel prose.
+
 Maintain the established characters, relationships, world rules, continuity, tone, voice, tense, and point of view.
 
 Write only the chapter content. Do not summarize the chapter or explain what you wrote.

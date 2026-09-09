@@ -18,7 +18,7 @@ import re
 
 from engine import prompts
 from engine.context import budget_allocate, build_relevant_chapter_context, extract_outline_section
-from engine.models import ChatMessage, MessageRole, TaskType
+from engine.models import TaskType
 
 logger = logging.getLogger("workflow")
 
@@ -268,11 +268,15 @@ def _build_eval_prompt(
     worker,
     chapter_num: int,
     chapter_content: str,
-    instruction: str,
     checklist: str,
     accumulated_done: set[int] | None = None,
 ) -> tuple[str, str, list[tuple[int, str]]]:
     """Build evaluator prompt for the ACTIVE WINDOW (items not yet confirmed complete).
+
+    The evaluator receives ONLY the current chapter text and the active
+    checklist — no author request/instruction, no full canon, no author
+    style, no chat history. That is the entire evaluation contract: "which
+    active checklist requirements does the current text actually satisfy?"
 
     Returns (system, user, active_items) so the caller has the active item list
     for reconciliation without re-parsing.
@@ -292,7 +296,6 @@ def _build_eval_prompt(
         "change_chapter/eval_user",
         chapter_number=chapter_num,
         chapter_title=_chapter_title(worker, chapter_num),
-        instruction=instruction.strip(),
         checklist_items=item_block,
         chapter_content=chapter_content,
         id_list=id_list,
@@ -380,7 +383,6 @@ def evaluate_change(
     worker,
     chapter_num: int,
     chapter_content: str,
-    instruction: str,
     checklist: str,
     pass_number: int,
     accumulated_done: set[int] | None = None,
@@ -389,13 +391,15 @@ def evaluate_change(
 
     The evaluator receives only the items that are not yet confirmed complete
     (accumulated_done). Python state owns what was confirmed in prior passes —
-    the evaluator is never told to 'trust' prior IDs.
+    the evaluator is never told to 'trust' prior IDs. It also never receives
+    the author's original change request — the checklist already encodes the
+    intent, and the evaluator's only job is to check current text against it.
 
     Returns valid=False if every attempt fails to produce parseable JSON.
     """
     accumulated = set(accumulated_done or ())
     system, user, active_items = _build_eval_prompt(
-        worker, chapter_num, chapter_content, instruction, checklist, accumulated
+        worker, chapter_num, chapter_content, checklist, accumulated
     )
     active_count = len(active_items)
     logger.info(
@@ -463,7 +467,6 @@ def _build_continuation_prompt(
     worker,
     chapter_num: int,
     chapter_content: str,
-    instruction: str,
     checklist: str,
     missing: list[str] | None,
     completed_ids: set[int] | None = None,
@@ -472,9 +475,17 @@ def _build_continuation_prompt(
     """
     Build the system + user prompt for a Change Chapter continuation pass.
 
-    The continuation prompt does NOT include the full checklist. It only
-    shows the active (remaining) requirements so the model focuses on what
-    is actually still needed. Completed requirements are referenced by a
+    RESET: this is a brand-new, self-contained model call. It does NOT
+    receive the author's original USER CHANGE REQUEST — that request was
+    already converted into the (immutable) checklist during planning, and
+    re-supplying it here risks the model reinterpreting the original intent
+    instead of simply picking up from the current narrative position. The
+    checklist is the sole authoritative specification of what remains to be
+    done.
+
+    The continuation prompt does NOT include the full checklist either. It
+    only shows the active (remaining) requirements so the model focuses on
+    what is actually still needed. Completed requirements are referenced by a
     human-readable progress label managed entirely by Python state.
 
     Uses a dynamic budget so continuity anchors are never silently truncated
@@ -493,7 +504,7 @@ def _build_continuation_prompt(
     prompt_token_budget = max(256, ctx_tokens - reply_tokens - FIXED_OVERHEAD_TOKENS)
     total_chars = prompt_token_budget * CHARS_PER_TOKEN
 
-    missing_text = "\n".join(f"- {item}" for item in (missing or [])) or "(none identified; verify the original request yourself)"
+    missing_text = "\n".join(f"- {item}" for item in (missing or [])) or "(none identified; continue satisfying the active checklist)"
     language = worker._response_language()
 
     accumulated = set(completed_ids or ())
@@ -506,7 +517,7 @@ def _build_continuation_prompt(
     outline_raw    = (extract_outline_section(project.outline, chapter_num) or "").strip() or "(none)"
     prose_tail_raw = chapter_content.strip()
     selection_source = "\n\n".join(
-        part for part in (outline_raw, instruction, active_remaining, missing_text, prose_tail_raw) if part
+        part for part in (outline_raw, active_remaining, missing_text, prose_tail_raw) if part
     )
     characters_raw, world_raw = build_relevant_chapter_context(
         project, selection_source, max_character_chars=5000, max_world_chars=6000
@@ -514,7 +525,7 @@ def _build_continuation_prompt(
 
     # Fixed text that doesn't participate in budget allocation.
     # Note: we use active_remaining instead of the full checklist here.
-    fixed_chars = len(instruction) + len(active_remaining) + len(missing_text)
+    fixed_chars = len(active_remaining) + len(missing_text)
     variable_budget = max(400, total_chars - fixed_chars)
 
     # Priority order: outline > characters > world > prose tail.
@@ -546,12 +557,18 @@ def _build_continuation_prompt(
         len(active_remaining),
     )
 
-    system = prompts.render("change_chapter/continue_system", language_note=f" Continue in {language}." if language else "")
+    # AUTHOR STYLE is reconstructed from project.writing_style on every
+    # RESET pass — it must be present in every prose-generating call.
+    style_frag = worker.project.writing_style.to_prompt_fragment()
+    system = prompts.render(
+        "change_chapter/continue_system",
+        language_note=f" Continue in {language}." if language else "",
+        style_block=f"\n\nWriting style to preserve:\n{style_frag}" if style_frag else "",
+    )
     user = prompts.render(
         "change_chapter/continue_user",
         chapter_number=chapter_num,
         chapter_title=_chapter_title(worker, chapter_num),
-        instruction=instruction.strip(),
         last_completed_id_label=last_completed_label,
         remaining_checklist=active_remaining,
         next_required_id_label=next_required_label,
@@ -591,10 +608,14 @@ def is_substantial_duplicate(addition: str, tail: str) -> bool:
     return norm_add == norm_tail or norm_add in norm_tail or norm_tail.endswith(norm_add)
 
 
-def continue_rewrite(worker, chapter_num: int, chapter, instruction: str, checklist: str, pass_number: int, missing: list[str] | None = None, completed_ids: set[int] | None = None, remaining_checklist: str = "") -> bool:
-    """Append a continuation to chapter.content. Returns True if new content was appended."""
+def continue_rewrite(worker, chapter_num: int, chapter, checklist: str, pass_number: int, missing: list[str] | None = None, completed_ids: set[int] | None = None, remaining_checklist: str = "") -> bool:
+    """Append a continuation to chapter.content. Returns True if new content was appended.
+
+    RESET pass: does not receive the original USER CHANGE REQUEST — see
+    _build_continuation_prompt for why.
+    """
     worker.step_started.emit(f"Continuing Chapter {chapter_num} rewrite (pass {pass_number})...")
-    system, user = _build_continuation_prompt(worker, chapter_num, chapter.content, instruction, checklist, missing, completed_ids, remaining_checklist)
+    system, user = _build_continuation_prompt(worker, chapter_num, chapter.content, checklist, missing, completed_ids, remaining_checklist)
     result = worker._run_lean_inference(TaskType.CHANGE_CHAPTER, system, user, max_tokens=worker._content_max_tokens())
     if not result or not result.strip():
         logger.warning("[change_chapter] Continuation returned empty text.")
@@ -657,13 +678,10 @@ def run(worker) -> None:
     chapter.content = rewritten.strip()
     chapter.reviewed = False
 
-    worker.project.chat_messages.append(ChatMessage(role=MessageRole.USER, content=instruction))
-    worker.project.chat_messages.append(ChatMessage(
-        role=MessageRole.ASSISTANT,
-        content=f"*(Rewrote the complete Chapter {chapter_num} according to your instructions.)*",
-    ))
-
-
+    # RESET architecture: Change Chapter never reads from or writes to
+    # project.chat_messages. Nothing about this rewrite is added to the
+    # conversational chat history — the UI does not need it, and doing so
+    # would risk chat history leaking into later, unrelated inference calls.
 
     consecutive_invalid_evals = 0
     # accumulated_done tracks the full set of confirmed IDs across all passes.
@@ -671,7 +689,7 @@ def run(worker) -> None:
     accumulated_done: set[int] = set()
     for pass_number in range(1, MAX_CHANGE_PASSES + 1):
         evaluation = evaluate_change(
-            worker, chapter_num, chapter.content, instruction, checklist,
+            worker, chapter_num, chapter.content, checklist,
             pass_number, accumulated_done,
         )
 
@@ -719,7 +737,7 @@ def run(worker) -> None:
             break
 
         continued = continue_rewrite(
-            worker, chapter_num, chapter, instruction, checklist,
+            worker, chapter_num, chapter, checklist,
             pass_number + 1, evaluation.get("missing", []),
             accumulated_done, remaining_checklist,
         )
@@ -772,12 +790,13 @@ def _build_chapter_eval_prompt(
     chapter_num: int,
     chapter_title: str,
     chapter_content: str,
-    outline_entry: str,
     checklist: str,
     accumulated_done: set[int] | None = None,
 ) -> tuple[str, str, list[tuple[int, str]]]:
     """Build write_chapter evaluator prompt for the ACTIVE WINDOW only.
 
+    The evaluator receives ONLY the current chapter text and the active
+    checklist — no outline, no canon, no author style, no chat history.
     Returns (system, user, active_items). The evaluator never sees items
     already confirmed complete — those are tracked by Python state only.
     """
@@ -796,7 +815,6 @@ def _build_chapter_eval_prompt(
         "write_chapter/eval_user",
         chapter_number=chapter_num,
         chapter_title=chapter_title,
-        outline_entry=outline_entry.strip() or "(none)",
         checklist_items=item_block,
         chapter_content=chapter_content,
         id_list=id_list,
@@ -809,7 +827,6 @@ def evaluate_chapter(
     chapter_num: int,
     chapter_title: str,
     chapter_content: str,
-    outline_entry: str,
     checklist: str,
     pass_number: int,
     accumulated_done: set[int] | None = None,
@@ -818,13 +835,15 @@ def evaluate_chapter(
 
     The evaluator receives only the items not yet confirmed complete
     (accumulated_done). Python state tracks what was confirmed in prior passes —
-    the evaluator is never told to 'trust' prior IDs.
+    the evaluator is never told to 'trust' prior IDs. It never receives the
+    outline, project canon, author style, or chat history — only the current
+    chapter text and the active checklist.
 
     Returns valid=False if every attempt fails to produce parseable JSON.
     """
     accumulated = set(accumulated_done or ())
     system, user, active_items = _build_chapter_eval_prompt(
-        chapter_num, chapter_title, chapter_content, outline_entry, checklist, accumulated
+        chapter_num, chapter_title, chapter_content, checklist, accumulated
     )
     active_count = len(active_items)
     logger.info(

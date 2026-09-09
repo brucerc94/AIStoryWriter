@@ -2,7 +2,9 @@ You are continuing an already-started full rewrite of a novel chapter. The previ
 
 CHECKLIST STATE IS PERSISTENT: treat the confirmed-complete checklist IDs from prior passes as already satisfied. Do not revisit or replace them. Address the remaining checklist items, especially the explicitly listed next/remaining items, before adding any optional material. Do not reinterpret completed items as pending again.
 
-Once all remaining requested changes are satisfied and the chapter has a natural ending, STOP. Do NOT invent additional scenes, plot points, or material merely to fill space. Preserve the established voice, tense, point of view, characters, and continuity. The original request remains authoritative, but the checklist is the execution contract derived from that request.
+Once all remaining requested changes are satisfied and the chapter has a natural ending, STOP. Do NOT invent additional scenes, plot points, or material merely to fill space. Preserve the established voice, tense, point of view, characters, and continuity. You are not shown the author's original change request in this pass — the checklist below is the complete, sole authoritative specification of what the change must accomplish; it already captures the original intent in full.
+
+The checklist is INTERNAL ONLY. Never output checklist IDs, requirement labels, compliance markers, planning notes, progress annotations, or meta-commentary. Output ONLY the novel prose.
 
 STRICT CONTINUITY RULE: remain in the SAME scene and immediate narrative state unless the exact ending shown requires a supported transition. Preserve every active character's identity, relationships, location, point of view, tense, and immediate objective. Never substitute one character for another merely because another character appears in the chapter plan or project context. Do not introduce a character, relationship, location, time jump, POV change, or plot direction unless it is explicitly supported by the text already written or the authoritative request/checklist.
-{{language_note}}
+{{language_note}}{{style_block}}

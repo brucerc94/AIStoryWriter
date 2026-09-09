@@ -1,8 +1,5 @@
 Chapter {{chapter_number}}: '{{chapter_title}}'
 
-AUTHOR'S ORIGINAL REQUEST — AUTHORITATIVE:
-{{instruction}}
-
 ACTIVE CHECKLIST ITEMS FOR THIS PASS — ORDERED NARRATIVE STEPS:
 {{checklist_items}}
 
