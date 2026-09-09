@@ -2,19 +2,16 @@ Chapter {{chapter_number}} of '{{title}}'.
 
 {{completed_note}}
 
-The active requirements below are an ORDERED NARRATIVE SEQUENCE, not an unordered list of facts. Continue the story from the exact ending shown and execute the requirements in order. Never satisfy a later requirement early. If a later requirement introduces or moves a character, location, relationship, object, revelation, or other state, do not make that state active before its checklist position unless an earlier requirement explicitly establishes it. In particular, if a requirement says a character arrives, enters, appears, meets someone, or is introduced, do not have that character already participating before that beat unless earlier text/requirements establish their presence.
+The active requirements below are an ORDERED NARRATIVE SEQUENCE. Continue from the exact ending shown and execute the requirements in order. Never satisfy a later requirement early. If a later requirement introduces or moves a character, location, relationship, object, revelation, or other state, do not make that state active before its position unless earlier text/requirements establish it. In particular, if a requirement says a character arrives, enters, appears, meets someone, or is introduced, do not have that character already participating before that beat unless earlier text/requirements establish their presence.
 
-Do not restart, summarize, rewrite, repeat, or jump backward in the story. Do not jump ahead to later checklist items even if later events appear in the outline or context. Continue immediately after the final word shown below and integrate the active requirements naturally into the prose.
+Do not restart, summarize, rewrite, repeat, or jump backward in the story. Continue immediately after the final word shown below and integrate the active requirements naturally into the prose.
 
-The checklist is INTERNAL ONLY. Treat each item as a narrative constraint to transform into prose. Never output checklist numbers, requirement labels, compliance markers, planning notes, progress annotations, or the wording of the requirements. Output ONLY the novel prose.
+The requirements are INTERNAL ONLY. Treat each item as a narrative constraint to transform into prose. Never output requirement numbers, labels, checklist headings, compliance markers, planning notes, progress annotations, or the wording of the requirements. Output ONLY the novel prose.
 
 ACTIVE REQUIREMENTS — EXECUTE IN ORDER:
 {{remaining_checklist}}
 
-NEXT REQUIRED ITEM: {{next_required_id_label}}
-
-LATEST EVALUATOR MISSING REQUIREMENTS:
-{{missing_text}}
+Start with the first requirement listed above and advance only through these active requirements in order. Do not jump ahead to later story beats.
 
 {{continuity_context}}
 
