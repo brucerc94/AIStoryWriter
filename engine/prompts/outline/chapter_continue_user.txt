@@ -1,6 +1,6 @@
 CHAPTER NUMBER: {{chapter_number}}
 
-The outline entry below is partially written. Continue ONLY from the exact end of the partial outline until the chapter entry is complete.
+The outline entry below is partially written. Continue only the missing portion. This is a fresh inference with no chat history.
 
 === CHAPTER SOURCE BLOCK ===
 {{source_block}}
@@ -22,8 +22,23 @@ The outline entry below is partially written. Continue ONLY from the exact end o
 {{previous_continuity}}
 === END PREVIOUS CHAPTER CONTINUITY ===
 
-=== PARTIAL OUTLINE ALREADY WRITTEN ===
-{{partial_outline}}
-=== END PARTIAL OUTLINE ===
+=== CONTINUATION TARGET ===
+{{continuation_target}}
+=== END CONTINUATION TARGET ===
 
-Continue the existing Chapter Plan and finish Continuity. Do NOT repeat any text already present. Do NOT restart the chapter. Do NOT introduce new story events. Return only the missing continuation text.
+=== NEXT NEW BEAT NUMBER ===
+{{next_beat_number}}
+=== END NEXT NEW BEAT NUMBER ===
+
+=== RECENT OUTLINE CHECKPOINT ===
+{{partial_checkpoint}}
+=== END RECENT OUTLINE CHECKPOINT ===
+
+Rules:
+- Continue from the checkpoint; do not restart the chapter.
+- Do not repeat or rewrite any beat already completed.
+- Do not output the chapter heading, Chapter Plan heading, or Continuity heading unless the target explicitly requires starting the Continuity section.
+- If continuing Chapter Plan, start with the next new beat number and add only new beats.
+- If finishing Continuity, add only new continuity bullets and do not repeat existing bullets.
+- Do not introduce new story events, characters, places, objects, facts, or consequences.
+- Return only the missing continuation text.
