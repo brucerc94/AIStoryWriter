@@ -1,5 +1,5 @@
-CURRENT CHAPTER TEXT:
+USER CHANGE REQUEST:
 
-{{chapter_content}}
+{{change_request}}
 
-Evaluate only the chapter's internal continuity. Return only the required JSON object.
+Evaluate ONLY the internal consistency of this requested change. Check its temporal order, causal order, character/location state changes, and whether one requested event contradicts or makes another impossible. Do not use the existing chapter or any project context. Return only the required JSON object.
