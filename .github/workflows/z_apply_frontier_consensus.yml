@@ -1,0 +1,70 @@
+name: Run evaluator frontier patch
+
+on:
+  push:
+    branches: [bugfixes]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: bugfixes
+          fetch-depth: 2
+
+      - name: Patch evaluator
+        shell: python
+        run: |
+          from pathlib import Path
+
+          change = Path('engine/change_chapter.py')
+          text = change.read_text(encoding='utf-8')
+
+          start = text.index('def parse_checklist_eval_result(')
+          end = text.index('\ndef evaluate_change(', start)
+          new_parse = '''def parse_checklist_eval_result(text: str, checklist: str) -> dict:\n    """Parse compact frontier-only evaluator output."""\n    raw = (text or '').strip()\n    expected = dict(parse_checklist_items(checklist))\n    try:\n        start = raw.find('{')\n        end = raw.rfind('}')\n        if start < 0 or end <= start:\n            raise ValueError('no JSON object')\n        data = json.loads(raw[start:end + 1])\n        frontier_raw = data.get('furthest_completed_id')\n        frontier = None if frontier_raw in (None, '', 'null') else int(frontier_raw)\n        if frontier is not None and frontier not in expected:\n            raise ValueError(f'frontier {frontier} is not an active checklist ID')\n        truncated = bool(data.get('truncated', False))\n        return {'valid': True, 'completed': False, 'frontier_id': frontier, 'truncated': truncated, 'missing': [], 'missing_ids': [], 'done_ids': [], 'raw': raw}\n    except (ValueError, TypeError, json.JSONDecodeError) as exc:\n        logger.debug('[change_chapter] Could not parse frontier evaluator JSON: %s', exc)\n        return {'valid': False, 'completed': False, 'frontier_id': None, 'truncated': False, 'missing': [], 'missing_ids': [], 'done_ids': [], 'raw': raw}\n\n\ndef _result_from_frontier(frontier: int | None, truncated: bool, checklist: str, accumulated_done: set[int], active_items: list[tuple[int, str]]) -> dict:\n    active_ids = [item_id for item_id, _ in active_items]\n    active_expected = dict(active_items)\n    prefix_count = 0 if frontier is None else active_ids.index(frontier) + 1\n    done_ids = active_ids[:prefix_count]\n    missing_ids = active_ids[prefix_count:]\n    missing = [f'{item_id}: {active_expected[item_id]}' for item_id in missing_ids]\n    all_expected = {item_id for item_id, _ in parse_checklist_items(checklist)}\n    all_confirmed = set(accumulated_done) | set(done_ids)\n    completed = bool(all_expected) and all_expected.issubset(all_confirmed) and not missing_ids and not truncated\n    if truncated:\n        missing.append('Chapter appears truncated.')\n        missing_ids = list(missing_ids) + [0]\n    return {'valid': True, 'completed': completed, 'frontier_id': frontier, 'truncated': truncated, 'missing': missing, 'missing_ids': sorted(set(missing_ids)), 'done_ids': done_ids, 'raw': ''}\n\n\ndef _frontier_vote(worker, system: str, user: str, active_checklist: str, max_tokens: int, temperature: float, label: str) -> dict:\n    for attempt in range(1, MAX_CHANGE_EVAL_RETRIES + 1):\n        raw = worker._run_lean_inference(TaskType.REVIEW_CHAPTER, system, user, max_tokens=max_tokens, temperature=temperature, top_p=0.95)\n        parsed = parse_checklist_eval_result(raw, active_checklist)\n        if parsed['valid']:\n            logger.info('[%s] vote %s attempt %d: frontier=%s truncated=%s', label, label, attempt, parsed.get('frontier_id'), parsed.get('truncated', False))\n            return parsed\n        logger.warning('[%s] vote %s attempt %d/%d invalid: %r', label, label, attempt, MAX_CHANGE_EVAL_RETRIES, (raw or '').strip()[:200])\n    return {'valid': False, 'frontier_id': None, 'truncated': False, 'raw': ''}\n\n\ndef _evaluate_frontier_consensus(worker, system: str, user: str, active_items: list[tuple[int, str]], active_checklist: str, checklist: str, accumulated_done: set[int], label: str, max_tokens: int) -> dict:\n    if not active_items:\n        return _result_from_frontier(None, False, checklist, accumulated_done, active_items)\n    system_b = system + '\\n\\nINDEPENDENT SECOND EVALUATION: re-read the chapter endpoint from scratch. Be skeptical and conservative. Identify only the furthest ordered checklist step actually reached.'\n    votes = [\n        _frontier_vote(worker, system, user, active_checklist, max_tokens, 0.10, f'{label}:A'),\n        _frontier_vote(worker, system_b, user, active_checklist, max_tokens, 0.20, f'{label}:B'),\n    ]\n    valid_votes = [v for v in votes if v.get('valid')]\n    if len(valid_votes) >= 2 and valid_votes[0].get('frontier_id') != valid_votes[1].get('frontier_id'):\n        system_c = system + '\\n\\nTHIRD TIE-BREAK EVALUATION: determine the furthest ordered step actually reached. Prefer the earlier step when uncertain.'\n        votes.append(_frontier_vote(worker, system_c, user, active_checklist, max_tokens, 0.15, f'{label}:C'))\n        valid_votes = [v for v in votes if v.get('valid')]\n    if not valid_votes:\n        return {'valid': False, 'completed': False, 'frontier_id': None, 'truncated': False, 'missing': [], 'missing_ids': [], 'done_ids': [], 'raw': ''}\n    frontiers = [v.get('frontier_id') for v in valid_votes]\n    counts = {}\n    for frontier in frontiers:\n        counts[frontier] = counts.get(frontier, 0) + 1\n    best_count = max(counts.values())\n    candidates = [frontier for frontier, count in counts.items() if count == best_count]\n    if len(candidates) == 1:\n        chosen = candidates[0]\n    else:\n        order = {None: -1, **{item_id: index for index, (item_id, _) in enumerate(active_items)}}\n        chosen = min(candidates, key=lambda value: order.get(value, -1))\n    truncated = any(v.get('truncated', False) for v in valid_votes if v.get('frontier_id') == chosen)\n    result = _result_from_frontier(chosen, truncated, checklist, accumulated_done, active_items)\n    result['raw'] = ' | '.join(v.get('raw', '') for v in valid_votes)\n    logger.info('[%s] frontier consensus: votes=%s chosen=%s truncated=%s', label, frontiers, chosen, truncated)\n    return result\n'''
+          text = text[:start] + new_parse + text[end:]
+
+          def replace_function(src, name, next_name, body):
+              start = src.index(f'def {name}(')
+              end = src.index(f'\ndef {next_name}(', start)
+              return src[:start] + body.rstrip() + '\n' + src[end+1:]
+
+          text = replace_function(text, 'evaluate_change', 'ends_abruptly', '''def evaluate_change(\n    worker, chapter_num: int, chapter_content: str, checklist: str, pass_number: int,\n    accumulated_done: set[int] | None = None,\n) -> dict:\n    accumulated = set(accumulated_done or ())\n    system, user, active_items = _build_eval_prompt(worker, chapter_num, chapter_content, checklist, accumulated)\n    active_checklist = '\\n'.join(f'{iid}. {txt}' for iid, txt in active_items)\n    max_eval_tokens = min(128, max(64, 32 + len(active_items) * 4))\n    final = _evaluate_frontier_consensus(worker, system, user, active_items, active_checklist, checklist, accumulated, 'change_chapter', max_eval_tokens)\n    if not final['valid']:\n        worker.step_started.emit(f'Change Chapter verification — PARSE FAILURE (pass {pass_number}); evaluator returned no valid frontier.')\n        return final\n    if final['completed']:\n        worker.step_started.emit(f'Change Chapter verification — COMPLETE (pass {pass_number})')\n    else:\n        missing_text = '\\n'.join(f'- {item}' for item in final['missing'])\n        worker.step_started.emit(f'Change Chapter verification — INCOMPLETE (pass {pass_number})\\nMissing:\\n{missing_text or "- evaluator did not identify specific items"}')\n    return final\n''')
+
+          text = replace_function(text, 'evaluate_chapter', 'ends_abruptly', '''def evaluate_chapter(\n    worker, chapter_num: int, chapter_title: str, chapter_content: str, checklist: str,\n    pass_number: int, accumulated_done: set[int] | None = None,\n) -> dict:\n    accumulated = set(accumulated_done or ())\n    system, user, active_items = _build_chapter_eval_prompt(chapter_num, chapter_title, chapter_content, checklist, accumulated)\n    active_checklist = '\\n'.join(f'{iid}. {txt}' for iid, txt in active_items)\n    max_eval_tokens = min(128, max(64, 32 + len(active_items) * 4))\n    final = _evaluate_frontier_consensus(worker, system, user, active_items, active_checklist, checklist, accumulated, 'write_chapter', max_eval_tokens)\n    if not final['valid']:\n        worker.step_started.emit(f'Write Chapter verification — PARSE FAILURE (pass {pass_number}); evaluator returned no valid frontier.')\n        return final\n    if final['completed']:\n        worker.step_started.emit(f'Write Chapter verification — COMPLETE (pass {pass_number})')\n    else:\n        missing_text = '\\n'.join(f'- {item}' for item in final['missing'])\n        worker.step_started.emit(f'Write Chapter verification — INCOMPLETE (pass {pass_number})\\nMissing:\\n{missing_text or "- evaluator did not identify specific items"}')\n    return final\n''')
+
+          wf = Path('engine/workflow.py')
+          wtext = wf.read_text(encoding='utf-8')
+          old_sig = '''    def _run_lean_inference(\n        self,\n        task: TaskType,\n        system_content: str,\n        user_content: str,\n        max_tokens: int = 500,\n    ) -> str:\n'''
+          new_sig = '''    def _run_lean_inference(\n        self,\n        task: TaskType,\n        system_content: str,\n        user_content: str,\n        max_tokens: int = 500,\n        temperature: float | None = None,\n        top_p: float | None = None,\n        top_k: int | None = None,\n    ) -> str:\n'''
+          if old_sig not in wtext:\n              raise SystemExit('workflow inference signature not found')\n          wtext = wtext.replace(old_sig, new_sig, 1)
+          old_sampling = '''        temperature = self._task_temperature(task)\n        top_p = self._task_top_p(task)\n        top_k = self._task_top_k(task)\n'''
+          new_sampling = '''        temperature = self._task_temperature(task) if temperature is None else temperature\n        top_p = self._task_top_p(task) if top_p is None else top_p\n        top_k = self._task_top_k(task) if top_k is None else top_k\n'''
+          if old_sampling not in wtext:\n              raise SystemExit('workflow sampling block not found')\n          wtext = wtext.replace(old_sampling, new_sampling, 1)
+          wf.write_text(wtext, encoding='utf-8')
+
+          system_text = '''You are a strict ordered-progress evaluator for a novel chapter. The checklist is an ORDERED NARRATIVE EXECUTION SEQUENCE. Determine the single furthest checklist ID that the CURRENT CHAPTER TEXT has actually reached at its narrative endpoint. Do not report individual done IDs. A later item does NOT count merely because its event or outcome appears earlier, in a flashback, as foreshadowing, in dialogue, in a summary, or out of sequence. Stop at the first active item not actually reached/completed in order. If no active item was reached, use null. If the chapter is truncated or cut off, set truncated=true. Return ONLY compact valid JSON: {"furthest_completed_id":N|null,"truncated":true|false}. Only the current chapter text establishes completion; do not infer from outline, synopsis, memory, canon, or prior state.'''
+          change_user = '''Chapter {{chapter_number}}: '{{chapter_title}}'\\n\\nACTIVE CHECKLIST ITEMS — ORDERED NARRATIVE STEPS:\\n{{checklist_items}}\\n\\nCURRENT FULL CHAPTER:\\n{{chapter_content}}\\n\\nFind the furthest active checklist ID actually completed in order by the END of the current chapter. Be conservative: when uncertain between two IDs, choose the earlier one. Return only the required JSON object.'''.replace('\\\\n','\\n')
+          write_user = '''Chapter {{chapter_number}}: '{{chapter_title}}'\\n\\nACTIVE CHECKLIST ITEMS — ORDERED NARRATIVE STEPS:\\n{{checklist_items}}\\n\\nCURRENT CHAPTER DRAFT:\\n{{chapter_content}}\\n\\nFind the furthest active checklist ID actually completed in order by the END of the current draft. Be conservative: when uncertain between two IDs, choose the earlier one. Return only the required JSON object.'''.replace('\\\\n','\\n')
+          Path('engine/prompts/change_chapter/eval_system.txt').write_text(system_text, encoding='utf-8')
+          Path('engine/prompts/change_chapter/eval_user.txt').write_text(change_user, encoding='utf-8')
+          Path('engine/prompts/write_chapter/eval_system.txt').write_text(system_text, encoding='utf-8')
+          Path('engine/prompts/write_chapter/eval_user.txt').write_text(write_user, encoding='utf-8')
+
+          Path('.github/workflows/_apply_frontier_consensus.yml').unlink(missing_ok=True)
+          Path('.github/workflows/z_apply_frontier_consensus.yml').unlink(missing_ok=True)
+          print('PATCH_OK')
+
+      - name: Commit patched code
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add engine/change_chapter.py engine/workflow.py engine/prompts/change_chapter/eval_system.txt engine/prompts/change_chapter/eval_user.txt engine/prompts/write_chapter/eval_system.txt engine/prompts/write_chapter/eval_user.txt .github/workflows/_apply_frontier_consensus.yml .github/workflows/z_apply_frontier_consensus.yml
+          git commit -m "fix: use frontier consensus evaluator"
+          git push origin bugfixes
