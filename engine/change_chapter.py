@@ -139,34 +139,59 @@ def _reconcile_active_window_result(
     Reconcile the evaluator's result for the ACTIVE WINDOW only.
 
     The evaluator only saw active_items (i.e. the items not yet confirmed by
-    accumulated_done). We trust its output for those IDs without injecting
-    prior confirmations. Python state (accumulated_done) tracks what was
+    accumulated_done). Python state (accumulated_done) tracks what was
     already confirmed in prior passes.
 
+    IMPORTANT — narrative order is enforced here in Python, not merely
+    requested in the prompt: an LLM evaluator can mark a later requirement
+    "done" even though the chapter text never actually reached it in
+    sequence (foreshadowing, miscounting, etc.). We do NOT trust
+    `done_ids` at face value. `done` is only accepted as a CONTIGUOUS
+    PREFIX of the active IDs in ascending/narrative order, starting from
+    the first active ID. The first active ID the evaluator did not mark
+    done breaks the sequence; every ID from that point on — even one the
+    evaluator explicitly claimed as done — is demoted back to missing.
+
     Returns a result dict updated with:
-      done_ids   – IDs the evaluator confirmed complete in this window
-      missing_ids – IDs the evaluator found incomplete in this window
-      missing    – human-readable missing descriptions
+      done_ids   – IDs confirmed complete in this window (contiguous prefix only)
+      missing_ids – IDs still incomplete in this window
+      missing    – human-readable missing requirement strings
       completed  – True only if all checklist items (full list) are now done
     """
     all_expected = dict(parse_checklist_items(checklist))
     active_expected = dict(active_items)
     active_ids = set(active_expected)
+    ordered_active_ids = sorted(active_ids)
 
     # Evaluator's raw output for the active window.
     evaluator_done = set(result.get("done_ids", []))
     evaluator_missing_ids = set(result.get("missing_ids", []))
 
-    # Only accept evaluator verdicts for active IDs; ignore any stray IDs.
-    active_done = evaluator_done & active_ids
+    # Only consider evaluator verdicts for active IDs; ignore any stray IDs.
+    raw_active_done = evaluator_done & active_ids
     active_missing_ids = evaluator_missing_ids & active_ids
 
-    # IDs in the active window that the evaluator didn't mention → treat as missing.
-    unaccounted = active_ids - active_done - active_missing_ids
+    # Enforce the contiguous narrative-order prefix. Anything the evaluator
+    # claimed done AFTER the first gap is demoted — the code, not the
+    # model, owns the real progress frontier.
+    active_done: set[int] = set()
+    demoted: set[int] = set()
+    broke_sequence = False
+    for item_id in ordered_active_ids:
+        if not broke_sequence and item_id in raw_active_done:
+            active_done.add(item_id)
+        else:
+            broke_sequence = True
+            if item_id in raw_active_done:
+                demoted.add(item_id)
+
+    # IDs in the active window the evaluator didn't mention, or that were
+    # demoted for breaking narrative order → treated as missing.
+    unaccounted = (active_ids - active_done - active_missing_ids) | demoted
     for item_id in sorted(unaccounted):
         active_missing_ids.add(item_id)
 
-    # Rebuild missing list: take evaluator entries for active IDs, add unaccounted.
+    # Rebuild missing list: take evaluator entries for active IDs, add unaccounted/demoted.
     filtered_missing: list[str] = []
     seen_missing: set[str] = set()
     for entry in result.get("missing", []) or []:
@@ -179,7 +204,13 @@ def _reconcile_active_window_result(
             seen_missing.add(text)
 
     for item_id in sorted(unaccounted):
-        label = f"{item_id}: not evaluated — {active_expected[item_id]}"
+        if item_id in demoted:
+            label = (
+                f"{item_id}: evaluator marked complete out of narrative order — "
+                f"not accepted until earlier active items are confirmed in sequence"
+            )
+        else:
+            label = f"{item_id}: not evaluated — {active_expected[item_id]}"
         if label not in seen_missing:
             filtered_missing.append(label)
             seen_missing.add(label)
@@ -488,6 +519,12 @@ def _build_continuation_prompt(
     what is actually still needed. Completed requirements are referenced by a
     human-readable progress label managed entirely by Python state.
 
+    It also does NOT display the chapter's outline/plan text as continuity
+    context — only the active checklist and the exact prose tail drive what
+    comes next, so the model can't jump ahead to future beats it finds in
+    the outline. The outline text is still used, internally and silently,
+    to help select which characters/world entries are relevant.
+
     Uses a dynamic budget so continuity anchors are never silently truncated
     before the recent prose tail.
     """
@@ -514,7 +551,13 @@ def _build_continuation_prompt(
     next_required_label = str(next_id) if next_id is not None else "(all items pending or complete)"
 
     project = worker.project
-    outline_raw    = (extract_outline_section(project.outline, chapter_num) or "").strip() or "(none)"
+    # The outline/chapter-plan text is used ONLY to help select relevant
+    # canon below — it is deliberately NOT displayed to the model in this
+    # continuation prompt. Showing a chapter's full plan here would expose
+    # future beats not yet reached and risks the model jumping ahead; the
+    # only forward-looking instruction a continuation should see is the
+    # ACTIVE/REMAINING checklist and its NEXT REQUIRED ITEM.
+    outline_raw    = (extract_outline_section(project.outline, chapter_num) or "").strip()
     prose_tail_raw = chapter_content.strip()
     selection_source = "\n\n".join(
         part for part in (outline_raw, active_remaining, missing_text, prose_tail_raw) if part
@@ -528,10 +571,10 @@ def _build_continuation_prompt(
     fixed_chars = len(active_remaining) + len(missing_text)
     variable_budget = max(400, total_chars - fixed_chars)
 
-    # Priority order: outline > characters > world > prose tail.
+    # Priority order: characters > world > prose tail. The outline/chapter
+    # plan is intentionally excluded from the displayed slots — see above.
     slots = [
         # (name,         full_text,      min_chars)
-        ("outline",     outline_raw,    min(len(outline_raw),    800)),
         ("characters",  characters_raw, min(len(characters_raw), 600)),
         ("world",       world_raw,      min(len(world_raw),      400)),
         ("prose_tail",  prose_tail_raw, min(len(prose_tail_raw), 1600)),
@@ -542,7 +585,6 @@ def _build_continuation_prompt(
         "change_chapter/section",
         heading="CONTINUITY ANCHORS — AUTHORITATIVE",
         body=(
-            f"Current chapter plan:\n{allocated['outline']}\n\n"
             f"Established characters:\n{allocated['characters']}\n\n"
             f"World/setting anchors:\n{allocated['world']}\n\n"
         ),
@@ -550,9 +592,9 @@ def _build_continuation_prompt(
 
     logger.debug(
         "[change_chapter] continuation budget: ctx=%d reply=%d prompt_budget=%d chars "
-        "outline=%d chars=%d world=%d tail=%d active_remaining=%d",
+        "chars=%d world=%d tail=%d active_remaining=%d",
         ctx_tokens, reply_tokens, total_chars,
-        len(allocated["outline"]), len(allocated["characters"]),
+        len(allocated["characters"]),
         len(allocated["world"]), len(allocated["prose_tail"]),
         len(active_remaining),
     )

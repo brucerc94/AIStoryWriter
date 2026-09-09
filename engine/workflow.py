@@ -2063,7 +2063,12 @@ class WorkflowWorker(QObject):
         next_required_label = str(next_id) if next_id is not None else "(all items pending or complete)"
         missing_text = "\n".join(f"- {item}" for item in (missing or [])) or "(none)"
 
-        # Collect raw content for each slot (un-capped).
+        # outline_raw is used ONLY to help select relevant canon below — it
+        # is deliberately NOT displayed to the model in this continuation
+        # prompt. Showing the chapter's full outline/plan here would expose
+        # future beats not yet reached and risks the model jumping ahead;
+        # the only forward-looking instruction a continuation should see is
+        # the ACTIVE/REMAINING checklist and its NEXT REQUIRED ITEM.
         outline_raw   = (self._extract_chapter_outline_section(chapter_num) or chapter_goal or "").strip()
         prev_tail_raw = "(none)"
         if chapter_num > 1:
@@ -2091,9 +2096,11 @@ class WorkflowWorker(QObject):
         fixed_chars = len(completed_note) + len(active_remaining) + len(missing_text)
         variable_budget = max(400, total_chars - fixed_chars)
 
+        # Priority order: characters > world > prev_tail > prose tail. The
+        # outline/chapter plan is intentionally excluded from the displayed
+        # slots — see above.
         slots = [
             # (name,         full_text,     min_chars)
-            ("outline",     outline_raw,   min(len(outline_raw),  800)),
             ("characters",  chars_raw,     min(len(chars_raw),    600)),
             ("world",       world_raw,     min(len(world_raw),    400)),
             ("prev_tail",   prev_tail_raw, min(len(prev_tail_raw), 300)),
@@ -2110,7 +2117,6 @@ class WorkflowWorker(QObject):
             "change_chapter/section",
             heading="CONTINUITY ANCHORS — AUTHORITATIVE",
             body=(
-                f"Chapter outline:\n{allocated['outline'] or '(none)'}\n\n"
                 f"Established characters:\n{allocated['characters'] or '(none)'}\n\n"
                 f"World/setting anchors:\n{allocated['world'] or '(none)'}\n\n"
                 f"End of previous chapter (continuity only):\n{allocated['prev_tail'] or '(none)'}\n\n"
@@ -2120,9 +2126,9 @@ class WorkflowWorker(QObject):
 
         logger.debug(
             "[write_chapter] continuation budget: ctx=%d reply=%d prompt_budget=%d chars "
-            "outline=%d chars=%d world=%d prev=%d tail=%d active_remaining=%d",
+            "chars=%d world=%d prev=%d tail=%d active_remaining=%d",
             ctx_tokens, reply_tokens, total_chars,
-            len(allocated["outline"]), len(allocated["characters"]),
+            len(allocated["characters"]),
             len(allocated["world"]), len(allocated["prev_tail"]), len(allocated["prose_tail"]),
             len(active_remaining),
         )
