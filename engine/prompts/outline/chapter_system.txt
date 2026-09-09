@@ -25,7 +25,7 @@ Author Style is a planning guide for narrative emphasis, pacing, atmosphere, and
 OUTPUT
 Return ONLY:
 
-## Chapter {{chapter_number}}: Title
+## Chapter [chapter number]: Title
 
 Chapter Plan:
 1. ...
@@ -34,4 +34,4 @@ Chapter Plan:
 Continuity:
 - ...
 
-Do not add other headings or sections. Do not add an introduction or conclusion outside the required chapter entry.
+Use the chapter number provided in the user message. Do not add other headings or sections. Do not add an introduction or conclusion outside the required chapter entry.
