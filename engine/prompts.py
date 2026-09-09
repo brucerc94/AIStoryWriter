@@ -24,18 +24,20 @@ template is edited while the app is running.
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from typing import Any
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 
+logger = logging.getLogger("workflow")
+
 _PLACEHOLDER_RE = re.compile(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}")
 _CHECKLIST_ITEM_RE = re.compile(r"^\s*(\d+)\s*[.)-]\s+(.+?)\s*$", re.MULTILINE)
 
-# These templates feed prose generation. Keep checklist IDs internal to
-# planners/evaluators; the writer needs the requirement text and order, not
-# the numeric labels that the model may accidentally reproduce in the story.
+# Prose-generation templates get checklist requirements without numeric IDs;
+# planner/evaluator templates retain the original numbered form.
 _WRITER_CHECKLIST_TEMPLATES = {
     "change_chapter/full_rewrite_user",
     "change_chapter/continue_user",
@@ -61,7 +63,6 @@ def load_raw(name: str, reload: bool = False) -> str:
             "Prompt text belongs in engine/prompts/, not inline in Python."
         )
     text = path.read_text(encoding="utf-8")
-
     if text.endswith("\n"):
         text = text[:-1]
     _cache[name] = text
@@ -134,12 +135,56 @@ def _format_writer_checklist(value: Any) -> str:
     return "\n".join(f"- {item}" for item in items) or text
 
 
+def _ansi(code: str, text: Any) -> str:
+    """Wrap text in an ANSI color sequence for terminal diagnostics."""
+    return f"\033[{code}m{str(text)}\033[0m"
+
+
+def _log_change_continuation_debug(name: str, values: dict[str, Any]) -> None:
+    """Log the exact continuation inputs by semantic block without changing them."""
+    if name == "change_chapter/continue_system":
+        logger.info(
+            "\n%s\n%s\n%s",
+            _ansi("1;36", "[CHANGE CHAPTER] CONTINUATION SYSTEM"),
+            _ansi("35", values.get("style_block", "") or "(no Author Style)"),
+            _ansi("0", "-- END SYSTEM --"),
+        )
+        return
+
+    if name != "change_chapter/continue_user":
+        return
+
+    blocks = [
+        ("1;36", "PASS / CHAPTER", f"Chapter {values.get('chapter_number', '?')}: {values.get('chapter_title', '')}"),
+        ("33", "LAST COMPLETED ID", values.get("last_completed_id_label", "(none)")),
+        ("32", "LAST COMPLETED BEAT", values.get("last_completed_beat", "(not available)")),
+        ("33", "ACTIVE REQUIREMENTS", values.get("remaining_checklist", "(none)")),
+        ("31", "MISSING FROM EVALUATOR", values.get("missing_text", "(none)")),
+        ("35", "CONTINUITY CONTEXT (Characters / World)", values.get("continuity_context", "(none)")),
+        ("36", "CURRENT CHAPTER END / TAIL", values.get("chapter_tail", "(empty)")),
+    ]
+    rendered_blocks = []
+    for color, title, value in blocks:
+        rendered_blocks.append(
+            f"{_ansi(color, f'=== {title} ===')}\n{value if str(value).strip() else '(empty)'}"
+        )
+
+    logger.info(
+        "\n%s\n%s\n%s\n[change_chapter] continuation sizes: "
+        "active=%d chars, missing=%d chars, continuity=%d chars, tail=%d chars",
+        _ansi("1;36", "[CHANGE CHAPTER] CONTINUATION INPUTS"),
+        "\n\n".join(rendered_blocks),
+        _ansi("90", "=== END CONTINUATION INPUTS ==="),
+        len(str(values.get("remaining_checklist", ""))),
+        len(str(values.get("missing_text", ""))),
+        len(str(values.get("continuity_context", ""))),
+        len(str(values.get("chapter_tail", ""))),
+    )
+
+
 def render(name: str, **variables: Any) -> str:
     """
-    Load the named template and substitute every {{placeholder}} with the
-    matching keyword argument. Raises KeyError with the template name and
-    missing variable if the caller forgot to supply something the template
-    needs — fails loudly instead of silently sending "{{foo}}" to a model.
+    Load a template and substitute its supplied variables.
 
     Prose-generation templates receive a writer-safe checklist view: item
     numbers are stripped while preserving the requirement text and order.
@@ -148,12 +193,9 @@ def render(name: str, **variables: Any) -> str:
     text = load_raw(name)
     render_vars = dict(variables)
 
-    # Capture the original checklist only when a prose-generation call sees
-    # the full checklist. Continuation subsets never overwrite this state.
-    if name in _WRITER_CHECKLIST_TEMPLATES and "checklist" in render_vars:
-        _remember_writer_checklist(render_vars["checklist"])
-
     if name in _WRITER_CHECKLIST_TEMPLATES:
+        if "checklist" in render_vars:
+            _remember_writer_checklist(render_vars["checklist"])
         for key in ("checklist", "remaining_checklist"):
             if key in render_vars:
                 render_vars[key] = _format_writer_checklist(render_vars[key])
@@ -165,14 +207,17 @@ def render(name: str, **variables: Any) -> str:
             )
 
     # Write Chapter's initial checklist is embedded through a generic section
-    # template. Only checklist/requirements sections are transformed so
-    # canon, style, intent, and other section bodies remain untouched.
+    # template. Only checklist/requirements sections are transformed so canon,
+    # style, intent, and other section bodies remain untouched.
     if name == "change_chapter/section":
         heading = str(render_vars.get("heading", "")).lower()
         if "checklist" in heading or "story requirements" in heading:
             if "body" in render_vars:
                 _remember_writer_checklist(render_vars["body"])
                 render_vars["body"] = _format_writer_checklist(render_vars["body"])
+
+    if name in {"change_chapter/continue_system", "change_chapter/continue_user"}:
+        _log_change_continuation_debug(name, render_vars)
 
     def _substitute(match: re.Match) -> str:
         key = match.group(1)
