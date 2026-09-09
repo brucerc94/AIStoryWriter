@@ -2,7 +2,12 @@ Chapter {{chapter_number}} of '{{title}}'.
 
 {{completed_note}}
 
-The active requirements below are an ORDERED NARRATIVE SEQUENCE. Continue from the exact ending shown and execute the requirements in order. Never satisfy a later requirement early. If a later requirement introduces or moves a character, location, relationship, object, revelation, or other state, do not make that state active before its position unless earlier text/requirements establish it. In particular, if a requirement says a character arrives, enters, appears, meets someone, or is introduced, do not have that character already participating before that beat unless earlier text/requirements establish their presence.
+LAST COMPLETED NARRATIVE BEAT:
+{{last_completed_beat}}
+
+This beat is already established. Preserve its resulting location, character presence, relationships, and immediate state, then continue from there. Do not reinterpret or redo it.
+
+The active requirements below are an ORDERED NARRATIVE SEQUENCE. Continue from the exact ending shown and execute the requirements in order. Never satisfy a later requirement early. If a later requirement introduces or moves a character, location, relationship, object, revelation, or other state, do not make that state active before its position unless earlier text/requirements establish their presence.
 
 Do not restart, summarize, rewrite, repeat, or jump backward in the story. Continue immediately after the final word shown below and integrate the active requirements naturally into the prose.
 
