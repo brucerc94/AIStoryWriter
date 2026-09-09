@@ -42,6 +42,8 @@ _WRITER_CHECKLIST_TEMPLATES = {
     "write_chapter/continuation_user",
 }
 
+_cache: dict[str, str] = {}
+
 
 def _path_for(name: str) -> Path:
     return PROMPTS_DIR / f"{name}.txt"
