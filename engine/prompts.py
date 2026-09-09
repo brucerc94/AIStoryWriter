@@ -31,8 +31,16 @@ from typing import Any
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 _PLACEHOLDER_RE = re.compile(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}")
+_CHECKLIST_ITEM_RE = re.compile(r"^\s*\d+\s*[.)-]\s+(.+?)\s*$", re.MULTILINE)
 
-_cache: dict[str, str] = {}
+# These templates feed prose generation. Keep checklist IDs internal to
+# planners/evaluators; the writer needs the requirement text and order, not
+# the numeric labels that the model may accidentally reproduce in the story.
+_WRITER_CHECKLIST_TEMPLATES = {
+    "change_chapter/full_rewrite_user",
+    "change_chapter/continue_user",
+    "write_chapter/continuation_user",
+}
 
 
 def _path_for(name: str) -> Path:
@@ -57,23 +65,56 @@ def load_raw(name: str, reload: bool = False) -> str:
     return text
 
 
+def _format_writer_checklist(value: Any) -> str:
+    """Return checklist requirements in writer-safe bullet form, without IDs."""
+    text = str(value or "").strip()
+    if not text:
+        return text
+
+    matches = list(_CHECKLIST_ITEM_RE.finditer(text))
+    if not matches:
+        return text
+
+    items = [m.group(1).strip() for m in matches if m.group(1).strip()]
+    return "\n".join(f"- {item}" for item in items) or text
+
+
 def render(name: str, **variables: Any) -> str:
     """
     Load the named template and substitute every {{placeholder}} with the
     matching keyword argument. Raises KeyError with the template name and
     missing variable if the caller forgot to supply something the template
     needs — fails loudly instead of silently sending "{{foo}}" to a model.
+
+    Prose-generation templates receive a writer-safe checklist view: item
+    numbers are stripped while preserving the requirement text and order.
+    Planner/evaluator templates retain the original numbered checklist.
     """
     text = load_raw(name)
+    render_vars = dict(variables)
+
+    if name in _WRITER_CHECKLIST_TEMPLATES:
+        for key in ("checklist", "remaining_checklist"):
+            if key in render_vars:
+                render_vars[key] = _format_writer_checklist(render_vars[key])
+
+    # Write Chapter's initial checklist is embedded through a generic section
+    # template. Only checklist/requirements sections are transformed so
+    # canon, style, intent, and other section bodies remain untouched.
+    if name == "change_chapter/section":
+        heading = str(render_vars.get("heading", "")).lower()
+        if "checklist" in heading or "story requirements" in heading:
+            if "body" in render_vars:
+                render_vars["body"] = _format_writer_checklist(render_vars["body"])
 
     def _substitute(match: re.Match) -> str:
         key = match.group(1)
-        if key not in variables:
+        if key not in render_vars:
             raise KeyError(
                 f"Prompt template '{name}' requires variable "
                 f"'{{{{{key}}}}}' but it wasn't provided."
             )
-        return str(variables[key])
+        return str(render_vars[key])
 
     return _PLACEHOLDER_RE.sub(_substitute, text)
 
