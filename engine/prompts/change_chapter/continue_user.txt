@@ -2,11 +2,6 @@ Chapter {{chapter_number}}: '{{chapter_title}}'
 
 Previously satisfied requirements are already complete. Do not repeat or regress them.
 
-LAST COMPLETED NARRATIVE BEAT:
-{{last_completed_beat}}
-
-This beat is already established. Preserve its resulting location, character presence, relationships, and immediate state, then continue from there. Do not reinterpret or redo it.
-
 ACTIVE REQUIREMENTS — ADDRESS IN ORDER:
 {{remaining_checklist}}
 
