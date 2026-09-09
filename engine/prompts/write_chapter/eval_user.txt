@@ -1,8 +1,5 @@
 Chapter {{chapter_number}}: '{{chapter_title}}'
 
-CHAPTER OUTLINE ENTRY — FOR CONTEXT ONLY:
-{{outline_entry}}
-
 ACTIVE CHECKLIST ITEMS FOR THIS PASS — ORDERED NARRATIVE STEPS:
 {{checklist_items}}
 
@@ -11,4 +8,4 @@ CURRENT CHAPTER DRAFT:
 
 Evaluate the ACTIVE checklist as an ordered narrative sequence. Start at the first active ID and determine the furthest step actually reached by the END of the current draft. A later step does not count as progress just because its event, detail, or outcome appears earlier, in a flashback, as foreshadowing, in dialogue, in a summary, or out of sequence. Once the first active item that has not actually been reached/completed is found, stop the progress frontier: that item and ALL later active IDs must be in missing, even if later material happens to be mentioned elsewhere in the draft. Therefore done MUST be a contiguous prefix of the active IDs.
 
-Do not use the outline as proof that an event has occurred. Only the current chapter text establishes completion. Do not return complete=true unless EVERY active ID is in done, the chapter has a natural complete ending, and the chapter is not truncated. If the chapter is truncated, include id 0 in missing.
+Do not infer completion from the outline, synopsis, memory, or any project context. Only the current chapter text establishes completion. Do not return complete=true unless EVERY active ID in [{{id_list}}] is in done, the chapter has a natural complete ending, and the chapter is not truncated. If the chapter is truncated, include id 0 in missing.
