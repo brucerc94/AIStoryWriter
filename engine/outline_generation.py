@@ -29,6 +29,7 @@ _MAX_OUTLINE_PASSES = 8
 _MIN_SOURCE_CHARS = 200
 _MAX_CHARACTER_CHARS = 4200
 _MAX_WORLD_CHARS = 5000
+_CONTINUATION_CHECKPOINT_CHARS = 2400
 
 
 def _parse_json_object(raw: str) -> dict | None:
@@ -86,7 +87,7 @@ def _normalize_outline_entry(text: str, chapter_num: int) -> str:
     if fenced:
         text = fenced.group(1).strip()
     heading = re.search(
-        rf"(?im)^\s*##\s*Chapter\s+{chapter_num}\b[^\n]*$",
+        rf"(?im)^\s*##\s*(?:Chapter|Cap[ií]tulo)\s+{chapter_num}\b[^\n]*$",
         text,
     )
     if heading:
@@ -97,21 +98,49 @@ def _normalize_outline_entry(text: str, chapter_num: int) -> str:
 def _strip_duplicate_heading(text: str, chapter_num: int) -> str:
     text = (text or "").strip()
     return re.sub(
-        rf"(?im)^\s*##\s*Chapter\s+{chapter_num}\b[^\n]*\s*",
+        rf"(?im)^\s*##\s*(?:Chapter|Cap[ií]tulo)\s+{chapter_num}\b[^\n]*\s*",
         "",
         text,
         count=1,
     ).strip()
 
 
+def _chapter_plan_match(text: str):
+    return re.search(r"(?mi)^\s*Chapter\s+Plan:\s*$", text or "")
+
+
+def _continuity_match(text: str):
+    return re.search(r"(?mi)^\s*Continuity:\s*$", text or "")
+
+
+def _existing_beat_numbers(text: str) -> list[int]:
+    continuity = _continuity_match(text or "")
+    plan_text = (text or "")[: continuity.start()] if continuity else (text or "")
+    values = {
+        int(match.group(1))
+        for match in re.finditer(r"(?m)^\s*(\d+)\.\s+", plan_text)
+    }
+    return sorted(values)
+
+
+def _continuity_lines(text: str) -> list[str]:
+    match = _continuity_match(text or "")
+    if not match:
+        return []
+    return [line.strip() for line in (text[match.end():] or "").splitlines() if line.strip()]
+
+
 def _outline_entry_complete(text: str, chapter_num: int) -> bool:
     normalized = _normalize_outline_entry(text, chapter_num)
     if not normalized:
         return False
-    if not re.search(rf"(?im)^\s*##\s*Chapter\s+{chapter_num}\b", normalized):
+    if not re.search(
+        rf"(?im)^\s*##\s*(?:Chapter|Cap[ií]tulo)\s+{chapter_num}\b",
+        normalized,
+    ):
         return False
-    plan_match = re.search(r"(?mi)^\s*Chapter\s+Plan:\s*$", normalized)
-    continuity_match = re.search(r"(?mi)^\s*Continuity:\s*$", normalized)
+    plan_match = _chapter_plan_match(normalized)
+    continuity_match = _continuity_match(normalized)
     if not plan_match or not continuity_match:
         return False
     if continuity_match.start() <= plan_match.end():
@@ -123,11 +152,84 @@ def _outline_entry_complete(text: str, chapter_num: int) -> bool:
 
 
 def _previous_continuity(entry: str) -> str:
-    match = re.search(r"(?mi)^\s*Continuity:\s*$", entry or "")
+    match = _continuity_match(entry or "")
     if not match:
         return "(none — this is the first chapter)"
     value = entry[match.end():].strip()
     return value or "(none)"
+
+
+def _continuation_checkpoint(partial: str) -> tuple[str, str, int]:
+    """Return bounded continuation context without sending the whole partial outline."""
+    text = (partial or "").strip()
+    beat_numbers = _existing_beat_numbers(text)
+    next_beat = (max(beat_numbers) + 1) if beat_numbers else 1
+    continuity_exists = _continuity_match(text) is not None
+
+    if len(text) > _CONTINUATION_CHECKPOINT_CHARS:
+        checkpoint = text[-_CONTINUATION_CHECKPOINT_CHARS:].lstrip()
+    else:
+        checkpoint = text
+
+    target = (
+        "Finish the Continuity section only. Do not create new Chapter Plan beats."
+        if continuity_exists
+        else f"Continue the Chapter Plan starting at new beat {next_beat}. Do not restart earlier beats."
+    )
+    return checkpoint, target, next_beat
+
+
+def _sanitize_continuation_addition(addition: str, partial: str, chapter_num: int) -> str:
+    """Remove repeated headings/beats before appending a continuation."""
+    text = (addition or "").strip()
+    if not text:
+        return ""
+
+    fenced = re.match(r"^\s*```(?:[a-zA-Z]*)\n(.*)\n```\s*$", text, re.DOTALL)
+    if fenced:
+        text = fenced.group(1).strip()
+
+    current_has_continuity = _continuity_match(partial) is not None
+    addition_has_continuity_heading = _continuity_match(text) is not None
+    existing_beats = set(_existing_beat_numbers(partial))
+    next_beat = (max(existing_beats) + 1) if existing_beats else 1
+    existing_continuity = {
+        re.sub(r"\s+", " ", line).strip().lower()
+        for line in _continuity_lines(partial)
+    }
+
+    cleaned: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if re.match(rf"^##\s*(?:Chapter|Cap[ií]tulo)\s+{chapter_num}\b", line, re.I):
+            continue
+        if re.match(r"^(?:Chapter Plan|Continuity):\s*$", line, re.I):
+            continue
+
+        beat_match = re.match(r"^(\d+)\.\s+(.*)$", line)
+        if beat_match:
+            beat_number = int(beat_match.group(1))
+            if current_has_continuity or beat_number in existing_beats or beat_number < next_beat:
+                continue
+
+        normalized_line = re.sub(r"\s+", " ", line).strip().lower()
+        if current_has_continuity and normalized_line in existing_continuity:
+            continue
+        if normalized_line in {
+            re.sub(r"\s+", " ", item).strip().lower() for item in cleaned
+        }:
+            continue
+        cleaned.append(line)
+
+    if not cleaned:
+        return ""
+
+    result = "\n".join(cleaned).strip()
+    if not current_has_continuity and addition_has_continuity_heading:
+        result = "Continuity:\n" + result
+    return result
 
 
 def _story_source(worker, requested_count: int) -> str:
@@ -237,6 +339,7 @@ def _build_continuation_prompt(
     language_note = f" Write in {language}." if language else ""
     style = worker.project.writing_style.to_prompt_fragment().strip() or "(none specified)"
     previous = _previous_continuity(previous_entry) if previous_entry else "(none — this is the first chapter)"
+    checkpoint, target, next_beat = _continuation_checkpoint(partial)
     system = prompts.render("outline/chapter_system", language_note=language_note)
     user = prompts.render(
         "outline/chapter_continue_user",
@@ -246,7 +349,9 @@ def _build_continuation_prompt(
         characters=characters,
         world=world,
         previous_continuity=previous,
-        partial_outline=partial,
+        partial_checkpoint=checkpoint,
+        continuation_target=target,
+        next_beat_number=next_beat,
     )
     return system, user
 
@@ -276,11 +381,14 @@ def _write_chapter_outline(worker, chapter_num: int, source_block: str, previous
             )
             return partial
 
+        checkpoint, target, next_beat = _continuation_checkpoint(partial)
         logger.info(
-            "[generate_outline] Chapter %d truncated/incomplete; RESET continuation %d/%d.",
+            "[generate_outline] Chapter %d truncated/incomplete; RESET continuation %d/%d (checkpoint=%d chars, next_beat=%d).",
             chapter_num,
             continuation_pass,
             _MAX_OUTLINE_PASSES,
+            len(checkpoint),
+            next_beat,
         )
         system, user = _build_continuation_prompt(
             worker,
@@ -297,11 +405,15 @@ def _write_chapter_outline(worker, chapter_num: int, source_block: str, previous
             user,
             max_tokens=worker._content_max_tokens(),
         ).strip()
+        addition = _sanitize_continuation_addition(addition, partial, chapter_num)
         if not addition:
+            logger.warning(
+                "[generate_outline] Chapter %d continuation %d produced no new content; stopping.",
+                chapter_num,
+                continuation_pass,
+            )
             break
-        addition = _strip_duplicate_heading(addition, chapter_num)
-        if not addition:
-            break
+
         partial = (partial.rstrip() + "\n\n" + addition).strip()
         partial = _normalize_outline_entry(partial, chapter_num)
 
