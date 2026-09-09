@@ -1,15 +1,14 @@
 Chapter {{chapter_number}}: '{{chapter_title}}'
 
-CHAPTER OUTLINE ENTRY — FOR CONTEXT:
+CHAPTER OUTLINE ENTRY — FOR CONTEXT ONLY:
 {{outline_entry}}
 
-ACTIVE CHECKLIST ITEMS FOR THIS PASS — EVALUATE EVERY ONE:
+ACTIVE CHECKLIST ITEMS FOR THIS PASS — ORDERED NARRATIVE STEPS:
 {{checklist_items}}
-
-EVALUATION SCOPE:
-Evaluate only the active checklist items listed above against the full chapter text below. These are the requirements that have not yet been confirmed complete by prior passes. Items from earlier passes are already confirmed complete in Python state and are NOT re-evaluated here.
 
 CURRENT CHAPTER DRAFT:
 {{chapter_content}}
 
-Evaluate every active checklist item one by one against the CURRENT CHAPTER DRAFT. Do not return complete=true unless EVERY active ID in [{{id_list}}] is in done and missing is empty. A requirement is DONE only when the current draft actually satisfies it — judge substance, not verbatim phrasing.
+Evaluate the ACTIVE checklist as an ordered narrative sequence. Start at the first active ID and determine the furthest step actually reached by the END of the current draft. A later step does not count as progress just because its event, detail, or outcome appears earlier, in a flashback, as foreshadowing, in dialogue, in a summary, or out of sequence. Once the first active item that has not actually been reached/completed is found, stop the progress frontier: that item and ALL later active IDs must be in missing, even if later material happens to be mentioned elsewhere in the draft. Therefore done MUST be a contiguous prefix of the active IDs.
+
+Do not use the outline as proof that an event has occurred. Only the current chapter text establishes completion. Do not return complete=true unless EVERY active ID is in done, the chapter has a natural complete ending, and the chapter is not truncated. If the chapter is truncated, include id 0 in missing.
