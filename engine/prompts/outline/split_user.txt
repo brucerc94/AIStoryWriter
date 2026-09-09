@@ -1,0 +1,6 @@
+REQUESTED CHAPTER COUNT: {{requested_count}}
+
+STORY SOURCE:
+{{story_source}}
+
+Partition this source into exactly {{requested_count}} chronological chapter blocks. Preserve every meaningful story event and its causal order. Do not write finished prose or an outline. Return only the JSON object required by the system prompt.

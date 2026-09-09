@@ -31,22 +31,19 @@ def _budget_allocate_preserving_tails(total_chars, slots):
 _context.budget_allocate = _budget_allocate_preserving_tails
 
 
-# The chapter evaluator is intentionally isolated from the large chapter
-# workflow module. It returns a single ordered frontier, using two independent
-# reads and a third tie-break only when they disagree. This makes the Python
-# checklist state authoritative and prevents the evaluator from over-reporting
-# arbitrary done IDs.
+# Chapter evaluators are isolated from the large workflow modules.
 import importlib.abc
 import sys
 from importlib.machinery import PathFinder
 
 
-_TARGET_CHANGE_CHAPTER = "engine.change_chapter"
+_TARGETS = {"engine.change_chapter", "engine.workflow"}
 
 
-class _FrontierLoader(importlib.abc.Loader):
-    def __init__(self, wrapped):
+class _EngineModuleLoader(importlib.abc.Loader):
+    def __init__(self, wrapped, fullname):
         self._wrapped = wrapped
+        self._fullname = fullname
 
     def create_module(self, spec):
         create = getattr(self._wrapped, "create_module", None)
@@ -54,29 +51,33 @@ class _FrontierLoader(importlib.abc.Loader):
 
     def exec_module(self, module):
         self._wrapped.exec_module(module)
-        from engine.frontier_consensus import install
-        install(module)
-        from engine.consistency_precheck import install_change_run
-        install_change_run(module)
+        if self._fullname == "engine.change_chapter":
+            from engine.frontier_consensus import install as install_frontier
+            install_frontier(module)
+            from engine.consistency_precheck import install_change_run
+            install_change_run(module)
+        elif self._fullname == "engine.workflow":
+            from engine.outline_generation import install as install_outline
+            install_outline(module)
 
 
-class _FrontierFinder(importlib.abc.MetaPathFinder):
-    _ai_story_frontier_finder = True
+class _EngineModuleFinder(importlib.abc.MetaPathFinder):
+    _ai_story_engine_finder = True
 
     def find_spec(self, fullname, path=None, target=None):
-        if fullname != _TARGET_CHANGE_CHAPTER:
+        if fullname not in _TARGETS:
             return None
         spec = PathFinder.find_spec(fullname, path)
         if spec is None or spec.loader is None:
             return spec
-        if isinstance(spec.loader, _FrontierLoader):
+        if isinstance(spec.loader, _EngineModuleLoader):
             return spec
-        spec.loader = _FrontierLoader(spec.loader)
+        spec.loader = _EngineModuleLoader(spec.loader, fullname)
         return spec
 
 
 if not any(
-    getattr(finder, "_ai_story_frontier_finder", False)
+    getattr(finder, "_ai_story_engine_finder", False)
     for finder in sys.meta_path
 ):
-    sys.meta_path.insert(0, _FrontierFinder())
+    sys.meta_path.insert(0, _EngineModuleFinder())

@@ -1,0 +1,29 @@
+CHAPTER NUMBER: {{chapter_number}}
+
+The outline entry below is partially written. Continue ONLY from the exact end of the partial outline until the chapter entry is complete.
+
+=== CHAPTER SOURCE BLOCK ===
+{{source_block}}
+=== END CHAPTER SOURCE BLOCK ===
+
+=== AUTHOR STYLE ===
+{{author_style}}
+=== END AUTHOR STYLE ===
+
+=== ESTABLISHED CHARACTERS ===
+{{characters}}
+=== END ESTABLISHED CHARACTERS ===
+
+=== RELEVANT WORLD ===
+{{world}}
+=== END RELEVANT WORLD ===
+
+=== PREVIOUS CHAPTER CONTINUITY ===
+{{previous_continuity}}
+=== END PREVIOUS CHAPTER CONTINUITY ===
+
+=== PARTIAL OUTLINE ALREADY WRITTEN ===
+{{partial_outline}}
+=== END PARTIAL OUTLINE ===
+
+Continue the existing Chapter Plan and finish Continuity. Do NOT repeat any text already present. Do NOT restart the chapter. Do NOT introduce new story events. Return only the missing continuation text.

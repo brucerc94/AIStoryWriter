@@ -1,0 +1,23 @@
+CHAPTER NUMBER: {{chapter_number}}
+
+=== CHAPTER SOURCE BLOCK ===
+{{source_block}}
+=== END CHAPTER SOURCE BLOCK ===
+
+=== AUTHOR STYLE ===
+{{author_style}}
+=== END AUTHOR STYLE ===
+
+=== ESTABLISHED CHARACTERS ===
+{{characters}}
+=== END ESTABLISHED CHARACTERS ===
+
+=== RELEVANT WORLD ===
+{{world}}
+=== END RELEVANT WORLD ===
+
+=== PREVIOUS CHAPTER CONTINUITY ===
+{{previous_continuity}}
+=== END PREVIOUS CHAPTER CONTINUITY ===
+
+Write the complete outline entry for this one chapter. Preserve the source block's sequence and detail. Make the Chapter Plan granular enough that the prose writer can execute the story without inventing core events.
