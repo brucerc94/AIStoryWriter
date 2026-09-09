@@ -104,6 +104,22 @@ def _last_completed_beat(completed_ids: Any) -> str:
     return "(none — use the exact current chapter ending as the starting point)"
 
 
+def _last_completed_beat_from_label(label: Any) -> str:
+    """Return the checklist beat represented by a human-readable progress label."""
+    numbers = re.findall(r"\d+", str(label or ""))
+    if not numbers or not _last_writer_checklist_items:
+        return "(none — use the exact current chapter ending as the starting point)"
+    try:
+        last_id = int(numbers[-1])
+    except (TypeError, ValueError):
+        return "(none — use the exact current chapter ending as the starting point)"
+
+    for item_id, text in reversed(_last_writer_checklist_items):
+        if item_id == last_id:
+            return text
+    return "(none — use the exact current chapter ending as the starting point)"
+
+
 def _format_writer_checklist(value: Any) -> str:
     """Return checklist requirements in writer-safe bullet form, without IDs."""
     text = str(value or "").strip()
@@ -143,6 +159,10 @@ def render(name: str, **variables: Any) -> str:
                 render_vars[key] = _format_writer_checklist(render_vars[key])
         if "completed_ids" in render_vars:
             render_vars["last_completed_beat"] = _last_completed_beat(render_vars["completed_ids"])
+        elif "last_completed_id_label" in render_vars:
+            render_vars["last_completed_beat"] = _last_completed_beat_from_label(
+                render_vars["last_completed_id_label"]
+            )
 
     # Write Chapter's initial checklist is embedded through a generic section
     # template. Only checklist/requirements sections are transformed so
