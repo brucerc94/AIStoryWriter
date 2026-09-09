@@ -1,9 +1,9 @@
-"""Preflight consistency check for Change Chapter.
+"""Preflight consistency check for a Change Chapter request.
 
-This runs before the change-request planner. It only inspects the current
-chapter text, detects internal continuity problems, and repairs them when
-needed. It deliberately receives no user change request, canon, memory,
-outline, author style, or chat history.
+This runs before the change-request planner. It inspects ONLY the user's
+requested change, detects contradictions or impossible sequencing inside that
+request, and rewrites the REQUEST minimally when needed. The existing chapter
+is not modified during this phase.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from engine.models import TaskType
 logger = logging.getLogger("workflow")
 
 _CONSISTENCY_EVAL_TOKENS = 384
-_MIN_REPAIR_RATIO = 0.70
+_MIN_REPAIR_RATIO = 0.60
 
 
 def _parse_result(raw: str) -> dict:
@@ -41,7 +41,7 @@ def _issues_text(issues: list[object]) -> str:
     lines: list[str] = []
     for issue in issues[:12]:
         if isinstance(issue, dict):
-            kind = str(issue.get("type", "continuity" )).strip()
+            kind = str(issue.get("type", "continuity")).strip()
             desc = str(issue.get("description", issue.get("issue", ""))).strip()
             if desc:
                 lines.append(f"- {kind}: {desc}")
@@ -49,7 +49,7 @@ def _issues_text(issues: list[object]) -> str:
             value = str(issue).strip()
             if value:
                 lines.append(f"- {value}")
-    return "\n".join(lines) or "- Internal continuity problem detected; repair only clear contradictions."
+    return "\n".join(lines) or "- Clear internal contradiction or sequencing problem detected."
 
 
 def _looks_like_wrapped_output(text: str) -> bool:
@@ -58,25 +58,25 @@ def _looks_like_wrapped_output(text: str) -> bool:
     return (
         stripped.startswith("```")
         or lowered.startswith("consistent:")
-        or lowered.startswith("repaired chapter:")
+        or lowered.startswith("corrected request:")
         or lowered.startswith("here is the corrected")
     )
 
 
-def evaluate_and_repair(worker, chapter_num: int, chapter_content: str) -> str:
-    """Check only internal chapter consistency and minimally repair clear issues."""
-    content = chapter_content or ""
-    if not content.strip():
-        return content
+def evaluate_and_repair_request(worker, change_request: str) -> str:
+    """Validate only the user change request and minimally repair contradictions."""
+    request = (change_request or "").strip()
+    if not request:
+        return request
 
-    worker.step_started.emit(f"Evaluating consistency of Chapter {chapter_num}...")
+    worker.step_started.emit("Evaluating Change Chapter request consistency...")
 
     from engine import prompts
 
     system = prompts.render("change_chapter/consistency_system")
     user = prompts.render(
         "change_chapter/consistency_user",
-        chapter_content=content,
+        change_request=request,
     )
     raw = worker._run_lean_inference(
         TaskType.REVIEW_CHAPTER,
@@ -86,83 +86,75 @@ def evaluate_and_repair(worker, chapter_num: int, chapter_content: str) -> str:
     )
     result = _parse_result(raw)
     if not result["valid"]:
-        logger.warning(
-            "[change_chapter] Consistency evaluator returned invalid JSON; keeping original chapter."
-        )
-        worker.step_started.emit(
-            "Consistency check could not be parsed; continuing with the original chapter."
-        )
-        return content
+        logger.warning("[change_chapter] Request consistency evaluator returned invalid JSON; keeping original request.")
+        worker.step_started.emit("Change request consistency check could not be parsed; using the original request.")
+        return request
 
     issues = result["issues"]
     if result["consistent"] or not issues:
-        logger.info("[change_chapter] Consistency check: no internal continuity problems detected.")
-        worker.step_started.emit("Chapter consistency check passed.")
-        return content
+        logger.info("[change_chapter] Change request consistency check: no internal problems detected.")
+        worker.step_started.emit("Change request consistency check passed.")
+        return request
 
-    logger.info("[change_chapter] Consistency check found %d issue(s); repairing before planning change.", len(issues))
+    logger.info("[change_chapter] Change request consistency found %d issue(s); repairing request before planning.", len(issues))
     worker.step_started.emit(
-        f"Chapter consistency found {len(issues)} issue(s). Repairing before applying the requested change..."
+        f"Change request has {len(issues)} consistency issue(s). Repairing request before planning..."
     )
 
     repair_system = prompts.render("change_chapter/consistency_repair_system")
     repair_user = prompts.render(
         "change_chapter/consistency_repair_user",
-        chapter_content=content,
+        change_request=request,
         issues=_issues_text(issues),
     )
     repaired = worker._run_lean_inference(
         TaskType.CHANGE_CHAPTER,
         repair_system,
         repair_user,
-        max_tokens=worker._content_max_tokens(),
+        max_tokens=min(worker._content_max_tokens(), 1024),
     )
     repaired = (repaired or "").strip()
-    original_len = max(1, len(content.split()))
-    repaired_len = len(repaired.split())
 
+    original_len = max(1, len(request.split()))
+    repaired_len = len(repaired.split())
     if (
         not repaired
         or _looks_like_wrapped_output(repaired)
         or repaired_len < int(original_len * _MIN_REPAIR_RATIO)
     ):
         logger.warning(
-            "[change_chapter] Consistency repair looked unsafe (words %d -> %d); keeping original chapter.",
+            "[change_chapter] Repaired request looked unsafe (words %d -> %d); keeping original request.",
             original_len,
             repaired_len,
         )
-        worker.step_started.emit(
-            "Consistency repair was unsafe or incomplete; keeping the original chapter."
-        )
-        return content
+        worker.step_started.emit("Request repair was unsafe or incomplete; using the original request.")
+        return request
 
     logger.info(
-        "[change_chapter] Consistency repair accepted (words %d -> %d).",
+        "[change_chapter] Change request repair accepted (words %d -> %d).",
         original_len,
         repaired_len,
     )
-    worker.step_started.emit("Chapter consistency repaired; proceeding to Change Chapter planning.")
+    worker.step_started.emit("Change request repaired; proceeding to Change Chapter planning.")
     return repaired
 
 
 def install_change_run(module) -> None:
-    """Wrap Change Chapter's entry point with the consistency precheck once."""
+    """Wrap Change Chapter's entry point with a request-consistency precheck once."""
     if getattr(module, "_consistency_precheck_installed", False):
         return
 
     original_run = module.run
 
     def run_with_consistency(worker) -> None:
-        chapter_num = worker.project.current_chapter or len(worker.project.chapters)
-        chapter = next((c for c in worker.project.chapters if c.number == chapter_num), None)
-
-        if chapter is None or not chapter.content.strip() or not worker.extra_input.strip():
+        request = worker.extra_input.strip()
+        if not request:
             original_run(worker)
             return
 
-        checked_content = evaluate_and_repair(worker, chapter_num, chapter.content)
-        if checked_content and checked_content != chapter.content:
-            chapter.content = checked_content
+        checked_request = evaluate_and_repair_request(worker, request)
+        if checked_request and checked_request != request:
+            worker.extra_input = checked_request
 
         original_run(worker)
 
