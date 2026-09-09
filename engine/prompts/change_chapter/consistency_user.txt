@@ -1,0 +1,5 @@
+CURRENT CHAPTER TEXT:
+
+{{chapter_content}}
+
+Evaluate only the chapter's internal continuity. Return only the required JSON object.
