@@ -62,8 +62,21 @@ class _EngineModuleLoader(importlib.abc.Loader):
             install_outline(module)
             from engine.synopsis_draft import install as install_synopsis_draft
             install_synopsis_draft(module)
-            from engine.outline_ui_status import install as install_outline_ui_status
-            install_outline_ui_status(module)
+
+            # Show immediate feedback while Generate Outline is performing
+            # its initial semantic split. The outline module itself reports
+            # the chapter-level states afterward.
+            worker_cls = getattr(module, "WorkflowWorker", None)
+            outline_runner = getattr(worker_cls, "_run_generate_outline", None) if worker_cls else None
+            if worker_cls and outline_runner and not getattr(worker_cls, "_outline_start_status_installed", False):
+                def _run_generate_outline_with_start_status(worker, _runner=outline_runner):
+                    extra = worker.extra_input or ""
+                    if not extra.startswith("__AI_STORY_WRITER_OUTLINE_EXTEND__"):
+                        worker.step_started.emit("Starting outline generation — dividing story into chapter blocks...")
+                    return _runner(worker)
+
+                worker_cls._run_generate_outline = _run_generate_outline_with_start_status
+                worker_cls._outline_start_status_installed = True
 
 
 class _EngineModuleFinder(importlib.abc.MetaPathFinder):
