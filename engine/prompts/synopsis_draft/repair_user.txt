@@ -1,0 +1,8 @@
+STORY DRAFT:
+
+{{draft}}
+
+CLEAR CONSISTENCY PROBLEMS:
+{{issues}}
+
+Rewrite ONLY the user's story draft so it is internally coherent. Keep the author's story intact. Repair only the listed contradictions or impossible sequencing. Preserve all explicit events, named characters, locations, relationships, actions, motivations, and outcomes whenever they can coexist. Return ONLY the corrected draft text.
