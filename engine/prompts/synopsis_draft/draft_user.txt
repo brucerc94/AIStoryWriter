@@ -1,7 +1,7 @@
 NOVEL TITLE:
 {{title}}
 
-AUTHOR PROFILE:
+{{language_note}}AUTHOR PROFILE:
 {{author_profile}}
 
 CHECKED STORY DRAFT:
