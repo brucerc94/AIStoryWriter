@@ -62,6 +62,8 @@ class _EngineModuleLoader(importlib.abc.Loader):
             install_outline(module)
             from engine.synopsis_draft import install as install_synopsis_draft
             install_synopsis_draft(module)
+            from engine.outline_ui_status import install as install_outline_ui_status
+            install_outline_ui_status(module)
 
 
 class _EngineModuleFinder(importlib.abc.MetaPathFinder):
