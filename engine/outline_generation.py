@@ -19,6 +19,9 @@ from engine import prompts, storage
 
 logger = logging.getLogger("workflow")
 
+OUTLINE_SUGGESTION_MARKER = "__AI_STORY_WRITER_OUTLINE_SUGGESTION__"
+OUTLINE_EXTEND_MARKER = "__AI_STORY_WRITER_OUTLINE_EXTEND__"
+
 _MAX_SPLIT_TOKENS = 3500
 _MAX_OUTLINE_PASSES = 8
 _MIN_SOURCE_CHARS = 200
@@ -68,9 +71,7 @@ def _parse_json_object(raw: str) -> tuple[dict | None, str]:
                 f"JSON after cleanup parsed but top-level type is "
                 f"{type(value).__name__!r}"
             )
-        logger.info(
-            "[generate_outline] Stage 1 JSON parsed after local-model cleanup."
-        )
+        logger.info("[generate_outline] Stage 1 JSON parsed after local-model cleanup.")
         return value, "ok"
     except json.JSONDecodeError as second_error:
         return None, (
@@ -83,8 +84,7 @@ def _extract_chapter_blocks(raw: str, requested_count: int) -> list[str]:
     data, reason = _parse_json_object(raw)
     if data is None:
         logger.error(
-            "[generate_outline] Stage 1 JSON parse failed — %s. "
-            "Raw output (first 500 chars): %r",
+            "[generate_outline] Stage 1 JSON parse failed — %s. Raw output (first 500 chars): %r",
             reason,
             (raw or "")[:500],
         )
@@ -93,8 +93,7 @@ def _extract_chapter_blocks(raw: str, requested_count: int) -> list[str]:
     chapters = data.get("chapters")
     if not isinstance(chapters, list):
         logger.error(
-            "[generate_outline] Stage 1 JSON has no 'chapters' list. "
-            "Top-level keys: %s",
+            "[generate_outline] Stage 1 JSON has no 'chapters' list. Top-level keys: %s",
             list(data.keys()),
         )
         return []
@@ -110,9 +109,7 @@ def _extract_chapter_blocks(raw: str, requested_count: int) -> list[str]:
         try:
             number = int(entry.get("number"))
         except (TypeError, ValueError):
-            skipped.append(
-                f"item[{i}]: invalid chapter number {entry.get('number')!r}"
-            )
+            skipped.append(f"item[{i}]: invalid chapter number {entry.get('number')!r}")
             continue
         if number < 1 or number > requested_count:
             skipped.append(
@@ -130,10 +127,7 @@ def _extract_chapter_blocks(raw: str, requested_count: int) -> list[str]:
         blocks.append((number, source))
 
     if skipped:
-        logger.warning(
-            "[generate_outline] Stage 1 skipped entries: %s",
-            "; ".join(skipped),
-        )
+        logger.warning("[generate_outline] Stage 1 skipped entries: %s", "; ".join(skipped))
 
     blocks.sort(key=lambda item: item[0])
     numbers = [number for number, _ in blocks]
@@ -142,8 +136,7 @@ def _extract_chapter_blocks(raw: str, requested_count: int) -> list[str]:
         missing = sorted(set(expected) - set(numbers))
         extra = sorted(set(numbers) - set(expected))
         logger.error(
-            "[generate_outline] Stage 1 numbering mismatch. "
-            "Expected %s, got %s. Missing=%s Extra=%s.",
+            "[generate_outline] Stage 1 numbering mismatch. Expected %s, got %s. Missing=%s Extra=%s.",
             expected,
             numbers,
             missing,
@@ -159,11 +152,7 @@ def _normalize_outline_entry(text: str, chapter_num: int) -> str:
     if not text:
         return ""
 
-    fenced = re.match(
-        r"^\s*```(?:[a-zA-Z]*)\n(.*)\n```\s*$",
-        text,
-        re.DOTALL,
-    )
+    fenced = re.match(r"^\s*```(?:[a-zA-Z]*)\n(.*)\n```\s*$", text, re.DOTALL)
     if fenced:
         text = fenced.group(1).strip()
 
@@ -193,11 +182,7 @@ def _truncate_after_target_chapter(text: str, chapter_num: int) -> str:
         return text.strip()
 
     start = matches[target_index].start()
-    end = (
-        matches[target_index + 1].start()
-        if target_index + 1 < len(matches)
-        else len(text)
-    )
+    end = matches[target_index + 1].start() if target_index + 1 < len(matches) else len(text)
     return text[start:end].strip()
 
 
@@ -217,9 +202,7 @@ def _treatment_complete(text: str, chapter_num: int) -> bool:
     body = _strip_duplicate_heading(normalized, chapter_num)
     if len(body) < _MIN_TREATMENT_CHARS:
         return False
-    paragraphs = [
-        part.strip() for part in re.split(r"\n\s*\n", body) if part.strip()
-    ]
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", body) if part.strip()]
     if len(paragraphs) < 2:
         return False
     return bool(re.search(r'[.!?"\')\]]\s*$', body))
@@ -242,11 +225,7 @@ def _sanitize_continuation_addition(addition: str, chapter_num: int) -> str:
     if not text:
         return ""
 
-    fenced = re.match(
-        r"^\s*```(?:[a-zA-Z]*)\n(.*)\n```\s*$",
-        text,
-        re.DOTALL,
-    )
+    fenced = re.match(r"^\s*```(?:[a-zA-Z]*)\n(.*)\n```\s*$", text, re.DOTALL)
     if fenced:
         text = fenced.group(1).strip()
 
@@ -307,17 +286,13 @@ def _build_chapter_prompt(
 ) -> tuple[str, str]:
     language = worker._response_language()
     language_note = f" Write in {language}." if language else ""
-    author_profile = _build_author_profile(worker)
     previous = _previous_chapter_context(previous_entry)
-    system = prompts.render(
-        "outline/chapter_system",
-        language_note=language_note,
-    )
+    system = prompts.render("outline/chapter_system", language_note=language_note)
     user = prompts.render(
         "outline/chapter_user",
         chapter_number=chapter_num,
         source_block=source_block,
-        author_profile=author_profile,
+        author_profile=_build_author_profile(worker),
         characters=characters,
         world=world,
         previous_continuity=previous,
@@ -336,40 +311,24 @@ def _build_continuation_prompt(
 ) -> tuple[str, str]:
     language = worker._response_language()
     language_note = f" Write in {language}." if language else ""
-    author_profile = _build_author_profile(worker)
-    previous = _previous_chapter_context(previous_entry)
-    checkpoint = _continuation_checkpoint(partial)
-    system = prompts.render(
-        "outline/chapter_system",
-        language_note=language_note,
-    )
+    system = prompts.render("outline/chapter_system", language_note=language_note)
     user = prompts.render(
         "outline/chapter_continue_user",
         chapter_number=chapter_num,
         source_block=source_block,
-        author_profile=author_profile,
+        author_profile=_build_author_profile(worker),
         characters=characters,
         world=world,
-        previous_continuity=previous,
-        partial_checkpoint=checkpoint,
+        previous_continuity=_previous_chapter_context(previous_entry),
+        partial_checkpoint=_continuation_checkpoint(partial),
     )
     return system, user
 
 
-def _write_chapter_outline(
-    worker,
-    chapter_num: int,
-    source_block: str,
-    previous_entry: str,
-) -> str:
+def _write_chapter_outline(worker, chapter_num: int, source_block: str, previous_entry: str) -> str:
     characters, world = _select_relevant_canon(worker, source_block)
     system, user = _build_chapter_prompt(
-        worker,
-        chapter_num,
-        source_block,
-        previous_entry,
-        characters,
-        world,
+        worker, chapter_num, source_block, previous_entry, characters, world
     )
     partial = worker._run_lean_inference(
         TaskType.GENERATE_OUTLINE,
