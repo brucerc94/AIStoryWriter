@@ -275,7 +275,7 @@ The goal is to reduce irrelevant prompt context and keep each generation focused
 
 Memory is a separate story-state feature used to preserve important information across the larger workflow.
 
-It can be inspected and edited manually, and longer sequential book-generation workflows can update it between chapters.
+It can be inspected and edited manually. `Generate Full Book` does not automatically update Story Memory between chapters.
 
 Memory is not silently treated as the same thing as chapter prose. The chapter writing workflows use their defined chapter context rather than relying on UI Chat history.
 
@@ -301,7 +301,7 @@ Chat history remains separate from the controlled context used by the dedicated 
 | 👤 **Characters** | Manage characters, traits, backstories, relationships, and portraits. |
 | 🌍 **World** | Manage reusable setting and world information. |
 | 📖 **Chapters** | Generate chapters, continue them, review them, change them, edit them manually, and generate the remaining book. |
-| 🧠 **Memory** | Maintain reusable story-state information and sequential workflow memory. |
+| 🧠 **Memory** | Maintain reusable story-state information. |
 | 🎨 **Author** | Define creative intent and writing-style preferences. |
 | 💬 **Chat** | General writing assistance with optional project context and chapter attachment. |
 | 🖼️ **Images** | Generate book covers, scene illustrations, locations, objects/items, and character portraits locally. |
@@ -521,6 +521,23 @@ run.bat
 6. Generate the Outline with the desired chapter count.
 7. Generate and revise chapters.
 8. Export the finished book.
+
+---
+
+## TODO
+
+### Character Generation / Extraction
+
+- Control the maximum number of traits per character.
+- Avoid redundant or overly generic traits.
+- Improve trait selection so only story-relevant traits are retained.
+- Validate relationships before adding them.
+- Prevent the model from inventing unsupported relationships.
+- Prevent duplicate or contradictory relationships.
+- Ensure both characters involved in a relationship actually exist.
+- Properly separate `role`, `traits`, `description`, and `backstory`.
+- Improve merging with existing characters without overwriting valid information.
+- Make Character Generation rely only on information explicitly stated or strongly supported by the Synopsis/Draft, Outline, and Chapters.
 
 ---
 
