@@ -16,10 +16,13 @@
   </p>
 
   <p>
+    <a href="#demo">Demo</a> ·
+    <a href="#screenshots">Screenshots</a> ·
     <a href="#how-it-works">How it works</a> ·
     <a href="#features">Features</a> ·
     <a href="#using-the-ui">Using the UI</a> ·
     <a href="#workflow-architecture">Architecture</a> ·
+    <a href="#todo">TODO</a> ·
     <a href="#quick-start">Quick Start</a>
   </p>
 </div>
@@ -35,6 +38,40 @@ AI Story Studio is a desktop application for writers who want to build novels wi
 The application combines story drafting, outline planning, character and world management, chapter generation and revision, author preferences, contextual chat, memory, local image generation, statistics, search, and export in one workspace.
 
 The writing pipeline is deliberately separated into stages so that each model call has a clear job and receives only the context it needs.
+
+---
+
+## Demo
+
+<div align="center">
+  <img src="docs/screenshots/Animation.gif" alt="AI Story Studio demo" width="900" />
+</div>
+
+<p align="center"><sub>A quick look at the writing workflow inside AI Story Studio.</sub></p>
+
+---
+
+## Screenshots
+
+<div align="center">
+  <img src="docs/screenshots/story.jpg" alt="AI Story Studio — Story workspace" width="900" />
+</div>
+
+<p align="center"><sub>Story workspace — build the story from Synopsis / Draft and Outline through chapters.</sub></p>
+
+<div align="center">
+  <img src="docs/screenshots/chat.jpg" alt="AI Story Studio — Chat" width="900" />
+</div>
+
+<p align="center"><sub>Chat with project context and chapter-aware assistance.</sub></p>
+
+<div align="center">
+  <img src="docs/screenshots/book.jpg" alt="AI Story Studio — Book reader" width="900" />
+</div>
+
+<p align="center"><sub>Book-style reader for reviewing generated chapters as a finished manuscript.</sub></p>
+
+---
 
 ## How it works
 
@@ -55,81 +92,52 @@ Chapters
       ↓
 Review / Change / Continue
       ↓
-Memory / Finalization
-      ↓
 Export
 ```
 
-The important distinction is that **Synopsis / Draft is the author's story source and normalization stage**, while **Outline is the structured chapter blueprint** used to drive chapter generation.
+`Synopsis / Draft` is the author's story source and normalization stage. `Outline` is the structured chapter blueprint used to drive chapter generation.
 
 ---
 
 ## Synopsis / Draft
 
-The Story tab now treats the Synopsis area as **Synopsis / Draft**.
+The Story tab presents the story source as **Synopsis / Draft**.
 
-The user can write or paste raw story material directly into the editor and press **Generate Draft**. The current editor text is submitted directly, so the user does not need to save it first for the generation request to use it.
+The user can write or paste raw story material directly into the editor and press **Generate Draft**. The current editor text is used directly, so it does not need to be saved first.
 
-The generation pipeline is:
+The pipeline is:
 
 ```text
 User story text
       ↓
 Consistency check
       ↓
- ┌───────────────┐
- │ Problems found│
- └───────┬───────┘
-         │ yes
-         ▼
-   Repair contradictions
-         │
-         ▼
-   Fresh consistency check
-         │
-         ▼
-      Checked story
-         │
-         └──────────────┐
-                        │
-                        ▼
-                 Draft development
-                        │
-                 Author Profile
-                        │
-                        ▼
-                Final Synopsis / Draft
-                        │
-              ┌─────────┴─────────┐
-              ▼                   ▼
-        Characters              World
+If problems exist → repair contradictions
+      ↓
+Fresh consistency check
+      ↓
+Draft development + Author Profile
+      ↓
+Final Synopsis / Draft
+      ↓
+Characters + World
 ```
 
-The consistency phase checks the user's story for internal problems such as ordering, causal contradictions, character state conflicts, location conflicts, identity conflicts, and incompatible events. When a problem is found, the repair step changes only what is necessary to make the story coherent while preserving the intended events.
+The consistency stage checks problems such as contradictory ordering, causal conflicts, character-state conflicts, location conflicts, identity conflicts, and incompatible events. Repairs are intended to change only what is necessary to make the story coherent.
 
-The final draft is then developed using the project's **Author Profile**, including creative intent and writing-style preferences. This stage is intentionally a **draft/planning form of the story**, not finished novel prose: it can be richer and more developed than the raw input, but it is not supposed to behave like a finished chapter full of scene-level dialogue.
+The final result is a **developed draft**, not finished chapter prose. It can be substantially richer than the user's raw material, but it is not intended to turn into a full scene-by-scene chapter with extensive dialogue.
 
-Only after that final draft is successfully created are Characters and World extracted or updated from it.
+Characters and World are extracted or updated **only after the final draft exists**.
 
-### Important behavior
-
-- The user's raw story is the source for this stage.
-- Each processing stage uses a fresh inference context.
-- A failed repair does not silently replace the user's story with an unsafe result.
-- Characters and World are updated only after the final normalized draft exists.
-- The internal project field remains `project.synopsis` for compatibility, while the UI presents it as **Synopsis / Draft**.
+The internal project field remains `project.synopsis` for compatibility while the UI presents it as **Synopsis / Draft**.
 
 ---
 
 ## Outline
 
-The Outline is the application's **chapter blueprint**.
-
 ### Generate Outline
 
-`Generate Outline` takes the completed Synopsis / Draft and a requested chapter count, then partitions the story into exactly that many chronological source blocks.
-
-The process is:
+`Generate Outline` takes the completed Synopsis / Draft and the requested chapter count, then partitions the story into exactly that number of chronological source blocks.
 
 ```text
 Synopsis / Draft
@@ -139,64 +147,37 @@ Semantic chronological split
 Exactly N chapter source blocks
       ↓
 For each chapter:
-      ├── select relevant Characters
-      ├── select relevant World
-      ├── load full Author Profile
-      └── generate detailed chapter treatment
-```
-
-The chapter source blocks are kept focused and information-dense. They preserve the story events and causal order so the second-stage chapter writer does not need the full synopsis again.
-
-Before each chapter treatment is generated, the workflow selects only the **relevant Character records and World information for that chapter's source block**. This avoids sending the entire project canon to the model for every chapter.
-
-The chapter treatment itself is intentionally rich: it expands the source block into a detailed narrative plan with character actions, motivations, interactions, important dialogue content, emotional movement, setting-dependent details, turning points, and consequences. It is still a planning artifact, not the finished chapter prose.
-
-### Outline continuation
-
-Long chapter treatments can continue in additional passes. The continuation receives a bounded checkpoint from the previously generated treatment and continues the same chapter without asking the model to regenerate earlier material.
-
-### Generate Outline does not create Characters or World
-
-The current `Generate Outline` flow focuses on the **outline itself**. It does not create or update the Characters and World databases as a side effect.
-
-That separation matters because Characters and World are prepared from the finalized Synopsis / Draft before outline generation, while later outline extensions may update them explicitly from new user-provided story material.
-
----
-
-## Extend Outline
-
-`Extend Outline` is different from `Generate Outline`.
-
-Instead of re-partitioning the original synopsis, the user supplies new material in the extension dialog. The workflow uses the existing outline and the new user material to build additional chapter plans, while selecting relevant Characters and World for each new chapter from its own source block.
-
-After **all requested extension chapters are successfully generated**, the workflow updates Characters and World using the **user's original extension material**. This lets the extension introduce new characters, relationships, locations, rules, or other world information that was not present in the original Synopsis / Draft.
-
-```text
-Existing Outline
-      +
-User extension material
-      ↓
-Semantic split into new chapter source blocks
-      ↓
-For each new chapter:
       ├── relevant Characters
       ├── relevant World
-      ├── Author Profile
-      └── detailed chapter treatment
-      ↓
-Complete extension
-      ↓
-Update Characters + World
-      ↓
-Save
+      ├── full Author Profile
+      └── rich chapter treatment
 ```
 
-This means the two outline actions serve different purposes:
+Each source block preserves meaningful events, causal order, motivations, relationships, descriptive details, turning points, and consequences needed by the chapter-treatment writer.
 
-| Action | Purpose |
-|---|---|
-| **Generate Outline** | Turn the current Synopsis / Draft into the requested number of chapter source blocks and detailed chapter treatments. |
-| **Extend Outline** | Add new chapters from new user-provided material to an existing outline, then update Characters and World from the original extension material. |
+The chapter treatment is a **rich planning artifact**. It can contain character actions, emotional movement, interactions, dialogue content, sensory details, turning points, and consequences. It is still not the finished novel chapter.
+
+`Generate Outline` does **not** create or update Characters or World as a side effect.
+
+### Extend Outline
+
+`Extend Outline` works from an existing outline plus new material entered by the user. It generates the requested new chapters without rewriting earlier ones.
+
+For each new chapter it uses:
+
+```text
+New chapter source
+      +
+Relevant Characters
+      +
+Relevant World
+      +
+Author Profile
+      ↓
+Rich chapter treatment
+```
+
+After all requested chapters have been successfully generated, **Characters and World are updated from the user's original extension material**. This allows a user extension to introduce new characters, relationships, locations, or world information that did not exist in the original draft.
 
 ---
 
@@ -206,23 +187,28 @@ Characters and World are reusable project canon.
 
 ### Characters
 
-The Characters area stores named characters, roles, descriptions, backstories, traits, and relationships. Character portraits can also be generated locally.
+Characters can contain:
 
-Characters derived from Synopsis / Draft or later outline extension material are merged with existing records rather than being treated as unrelated duplicates whenever the application can identify the same character.
+- name and role
+- description
+- backstory
+- traits
+- relationships
+- generated portraits
+
+Automatic character extraction attempts to merge candidates with existing records when they represent the same character.
 
 ### World
 
-World stores reusable setting information such as geography, culture/customs, history, locations, factions, and other project setting material supported by the current workflow.
-
-The chapter workflows do not need to inject the entire World document. They can select a relevant subset for the current chapter.
+World stores reusable setting information. Chapter workflows can select only the relevant portion of the world for the current chapter instead of sending the entire document every time.
 
 ---
 
 ## Author Profile
 
-The Author area stores the preferences that guide generated story material.
+The Author area stores long-term creative preferences used by planning and writing workflows where appropriate.
 
-The profile can include creative intent and writing-style choices such as:
+It can include creative intent and writing-style preferences such as:
 
 - emotional journey and lasting reader impression
 - themes and unique elements
@@ -234,50 +220,83 @@ The profile can include creative intent and writing-style choices such as:
 - violence and romance level
 - genre and other chapter-writing preferences
 
-The full Author Profile is available to the workflows that are designed to apply it, including Synopsis / Draft and chapter outline generation.
-
 ---
 
 ## Chapter generation
 
-Chapter workflows execute the outline rather than replacing it.
-
 ### Write Chapter
 
-`Write Chapter` uses the selected chapter's outline plan plus a planning checklist and the **relevant Characters and World** selected for that chapter. For normal sequential writing, the ending of the previous chapter can also be used for immediate continuity.
+`Write Chapter` uses the selected outline entry, a planning checklist, relevant Characters and World, the Author Profile, and immediate previous-chapter continuity where applicable.
 
-The workflow follows a planner → writer → evaluator → continuation pattern. Long chapters can continue through multiple passes while preserving the end-of-chapter checkpoint.
+Its generation pattern is:
+
+```text
+Planner
+   ↓
+Writer
+   ↓
+Evaluator
+   ↓
+Complete? ── Yes → Save
+   │
+   No
+   ↓
+Fresh continuation pass
+```
+
+Continuation passes use bounded checkpoints and rebuild their prompts from Python state instead of depending on prior UI Chat turns.
 
 ### Change Chapter
 
-`Change Chapter` rewrites an existing chapter according to a user request.
+`Change Chapter` performs a targeted rewrite of an existing chapter. Its request can go through a consistency precheck before the rewrite planner continues.
 
-Before planning the change, the user's request can go through an internal consistency precheck. When clear contradictions or impossible sequencing are found inside the request, the request is minimally repaired before the rewrite planner continues.
+The rewrite uses scoped chapter context and does not automatically import UI Chat history as hidden context.
 
-The chapter rewrite receives scoped project context and does not automatically use the previous chapter or the UI Chat conversation as hidden context.
+### Generate Full Book
 
-### Chapter-scoped context
+`Generate Full Book` is an orchestration layer over `Write Chapter`.
+
+It:
+
+- writes remaining chapters sequentially using the normal `Write Chapter` workflow;
+- keeps Chat cleanup between chapters;
+- reloads the project between chapters;
+- stops if a chapter is incomplete;
+- does **not** automatically update Story Memory.
+
+---
+
+## Context and workflow boundaries
+
+Dedicated chapter workflows deliberately use scoped context.
 
 ```text
-Full Character DB ──────┐
-                        ├──> Relevant chapter context ──> Chapter workflow
-Full World ─────────────┘
+Full Character DB ───┐
+                     ├──> Relevant chapter context ──> Chapter workflow
+Full World ──────────┘
 
-Outline Chapter N ──────────────────────────────────────> Chapter workflow
-Author Profile ─────────────────────────────────────────> Chapter workflow
+Outline Chapter N ────────────────────────────────────> Chapter workflow
+Author Profile ───────────────────────────────────────> Chapter workflow
 ```
 
-The goal is to reduce irrelevant prompt context and keep each generation focused on the current chapter.
+Write Chapter and Change Chapter do not automatically use:
+
+```text
+UI Chat history        ❌
+Chat Summary           ❌
+Story Memory           ❌
+Unrelated project data ❌
+```
+
+This keeps model prompts focused on the current task.
 
 ---
 
 ## Memory
 
-Memory is a separate story-state feature used to preserve important information across the larger workflow.
+Story Memory is a separate project feature. It can be inspected and edited manually.
 
-It can be inspected and edited manually. `Generate Full Book` does not automatically update Story Memory between chapters.
-
-Memory is not silently treated as the same thing as chapter prose. The chapter writing workflows use their defined chapter context rather than relying on UI Chat history.
+`Generate Full Book` does not automatically update Story Memory between chapters. Memory therefore remains separate from the chapter-writing input context unless a dedicated workflow explicitly uses it.
 
 ---
 
@@ -285,9 +304,9 @@ Memory is not silently treated as the same thing as chapter prose. The chapter w
 
 The top-level Chat tab is a general-purpose writing assistant.
 
-With story context enabled, Chat can work with broader project information and its own conversation history. You can also attach a chapter to a chat message for focused discussion.
+With project context enabled, Chat can work with broader project information and its own conversation history. A chapter can also be attached for focused discussion.
 
-Chat history remains separate from the controlled context used by the dedicated chapter-writing workflows.
+Chat history is not automatically carried into Write Chapter or Change Chapter.
 
 ---
 
@@ -296,18 +315,18 @@ Chat history remains separate from the controlled context used by the dedicated 
 | Area | What it does |
 |---|---|
 | 📚 **Projects** | Create, open, search, rename, and delete projects. |
-| ✍️ **Synopsis / Draft** | Write or paste raw story material, validate consistency, repair contradictions when needed, develop a structured draft with the Author Profile, then build Characters and World from the finalized draft. |
-| 🧭 **Outline** | Generate a fixed number of chronological chapter source blocks, turn them into detailed chapter treatments, edit them, and extend an existing outline. |
-| 👤 **Characters** | Manage characters, traits, backstories, relationships, and portraits. |
+| ✍️ **Synopsis / Draft** | Write or paste story material, validate consistency, repair contradictions, develop the draft with the Author Profile, then build Characters and World from the finalized draft. |
+| 🧭 **Outline** | Split the story into chronological chapter source blocks, generate rich chapter treatments, edit them, and extend an existing outline. |
+| 👤 **Characters** | Manage character details, traits, backstories, relationships, and portraits. |
 | 🌍 **World** | Manage reusable setting and world information. |
-| 📖 **Chapters** | Generate chapters, continue them, review them, change them, edit them manually, and generate the remaining book. |
-| 🧠 **Memory** | Maintain reusable story-state information. |
+| 📖 **Chapters** | Generate, continue, review, change, edit, save, and delete chapters. Generate the remaining book sequentially. |
+| 🧠 **Memory** | Maintain separate reusable story-state information. |
 | 🎨 **Author** | Define creative intent and writing-style preferences. |
 | 💬 **Chat** | General writing assistance with optional project context and chapter attachment. |
-| 🖼️ **Images** | Generate book covers, scene illustrations, locations, objects/items, and character portraits locally. |
+| 🖼️ **Images** | Generate book covers, scenes, locations, objects/items, and character portraits locally. |
 | 📊 **Stats** | Inspect word counts, chapter counts, reading-time information, review state, and progress. |
 | 🔎 **Search** | Search project content with normal, case-sensitive, or regex-based matching. |
-| ⚙️ **Models & Settings** | Configure local GGUF models, context size, GPU layers, threads, generation parameters, language, and other exposed options. |
+| ⚙️ **Models & Settings** | Configure GGUF models, context size, hardware options, generation parameters, and response language. |
 | 🖥️ **Console** | Inspect runtime logs and generation diagnostics. |
 | ⇩ **Export Book** | Export the finished book to Word, PDF, Markdown, or plain text. |
 
@@ -317,37 +336,31 @@ Chat history remains separate from the controlled context used by the dedicated 
 
 ### 1. Create or open a project
 
-Use the **Projects** panel to create a new project or continue an existing one.
+Use **Projects** to create a project or continue an existing one.
 
-### 2. Configure local models
+### 2. Configure models
 
-Open **Settings** and configure the models directory and hardware/generation settings. Open **Models** to assign GGUF models to the tasks you intend to use.
+Open **Settings** to configure the models directory and local generation settings. Use **Models** to assign GGUF models to the required tasks.
 
-### 3. Write the story in Synopsis / Draft
+### 3. Write the story
 
-Go to **Story → Synopsis / Draft** and write or paste your story material into the editor.
+Open **Story → Synopsis / Draft**, write or paste your story, then press **Generate Draft**.
 
-Press **Generate Draft** to run the normalization pipeline. The current text in the editor is sent directly to the workflow, even when it has not been saved manually yet.
+### 4. Generate the outline
 
-When the operation finishes, the result becomes the project's normalized Synopsis / Draft and Characters/World are updated from that final result.
+Open **Story → Outline**, choose the chapter count, and press **Generate Outline**.
 
-### 4. Generate the Outline
+### 5. Extend the outline
 
-Go to **Story → Outline**, choose the requested number of chapters, and run **Generate Outline**.
+Use **Extend Outline** when you want to add new story material and additional chapters to an existing outline.
 
-Each chapter is generated from its own source block with relevant canon and Author Profile context.
+### 6. Review the canon
 
-### 5. Extend the Outline
-
-Use **Extend Outline** when you want to add new chapter material to an existing outline. Provide the new story information in the extension dialog.
-
-### 6. Review Characters and World
-
-Inspect the Characters and World tabs after the draft or outline-extension workflow has updated them. Manual edits remain available at any time.
+Inspect **Characters** and **World** after the draft or an outline extension has updated them. Manual editing remains available.
 
 ### 7. Write chapters
 
-Go to **Story → Chapters**, select a chapter, and use the available generation actions.
+Open **Story → Chapters** and use:
 
 ```text
 Generate Chapter
@@ -362,15 +375,11 @@ Delete
 
 ### 8. Export
 
-Use **Export Book** from the application window to create the final manuscript in one of the supported formats.
+Use **Export Book** to create the final manuscript in a supported format.
 
 ---
 
 ## Workflow Architecture
-
-The current design separates source drafting, story structure, canon, and chapter execution.
-
-### End-to-end pipeline
 
 ```text
                     AUTHOR STORY INPUT
@@ -384,7 +393,6 @@ The current design separates source drafting, story structure, canon, and chapte
                            │
                     repair if needed
                            │
-                           ▼
                     draft development
                     + Author Profile
                            │
@@ -399,11 +407,12 @@ The current design separates source drafting, story structure, canon, and chapte
                            ▼
                        OUTLINE
                            │
-            ┌──────────────┴──────────────┐
-            ▼                             ▼
-     semantic chapter split        relevant canon
-            │                             │
-            └──────────────┬──────────────┘
+                  semantic split
+                           │
+                relevant canon per chunk
+                           │
+                    Author Profile
+                           │
                            ▼
                  detailed chapter plans
                            │
@@ -416,56 +425,38 @@ The current design separates source drafting, story structure, canon, and chapte
                          BOOK
 ```
 
-### Generate Outline context flow
+### Generate Outline
 
 ```text
 Final Synopsis / Draft
-        │
-        ▼
-Semantic split into exactly N blocks
-        │
-        ├──────── Chapter 1 source ──> relevant Characters + World ──┐
-        ├──────── Chapter 2 source ──> relevant Characters + World ──┤
-        ├──────── Chapter 3 source ──> relevant Characters + World ──┤
-        └──────── Chapter N source ──> relevant Characters + World ──┘
-                                                                     │
-                         Author Profile ─────────────────────────────┤
-                                                                     ▼
-                                                     Chapter treatment generation
-                                                                     │
-                                                                     ▼
-                                                           Bounded continuation
+        ↓
+Split into exactly N chronological blocks
+        ↓
+Chunk N
+   ├── relevant Characters
+   ├── relevant World
+   └── Author Profile
+        ↓
+Rich chapter treatment
 ```
 
-### Chapter writing context
+### Chapter writing
 
 ```text
-               Outline Chapter N
-                      │
-                      ├── Chapter plan
-                      ├── Continuity
-                      ├── Planning checklist
-                      └── Previous chapter ending* 
-                              │
-                              ▼
-                  Relevant Characters / World
-                              │
-                              ▼
-                       Author Profile
-                              │
-                              ▼
-                       Chapter writer
-                              │
-                         evaluator
-                       ┌──────┴──────┐
-                       ▼             ▼
-                   complete     incomplete
-                                    │
-                                    ▼
-                               continuation
+Outline Chapter N
+      ↓
+Planning checklist
+      ↓
+Relevant Characters + World
+      ↓
+Author Profile
+      ↓
+Write Chapter
+      ↓
+Evaluator
+      ├── complete → save
+      └── incomplete → fresh continuation
 ```
-
-`*` Previous-chapter continuity is used by the normal sequential Write Chapter flow where applicable; it is not automatically injected into Change Chapter.
 
 ---
 
@@ -473,9 +464,7 @@ Semantic split into exactly N blocks
 
 The application is designed around local inference with GGUF models through `llama-cpp-python`.
 
-The model layer can unload and reload models as tasks change, supports GPU layer configuration, CPU thread settings, and exposes generation controls such as temperature, Top P, and Top K.
-
-The application also includes hardware-aware behavior for local CUDA setups and model-specific handling for supported MoE configurations.
+The model layer supports GPU layer configuration, CPU thread settings, context-size configuration, and generation controls such as temperature, Top P, and Top K.
 
 ---
 
@@ -489,7 +478,24 @@ The Images area provides separate local image-generation workflows for:
 - locations
 - object/item images
 
-Image generation is intentionally separate from the text-generation pipeline so a story-writing operation does not require an image model.
+Image generation is intentionally separate from the text-generation pipeline.
+
+---
+
+## TODO
+
+### Character Generation / Extraction
+
+- Control the maximum number of traits per character.
+- Avoid redundant or overly generic traits.
+- Improve trait selection so only story-relevant traits are retained.
+- Validate relationships before adding them.
+- Prevent the model from inventing unsupported relationships.
+- Prevent duplicate or contradictory relationships.
+- Ensure both characters involved in a relationship actually exist.
+- Properly separate `role`, `traits`, `description`, and `backstory`.
+- Improve merging with existing characters without overwriting valid information.
+- Make Character Generation rely only on information explicitly stated or strongly supported by the Synopsis/Draft, Outline, and Chapters.
 
 ---
 
@@ -501,7 +507,7 @@ Image generation is intentionally separate from the text-generation pipeline so 
 - PySide6
 - `llama-cpp-python`
 - Local GGUF language models
-- Optional CUDA-capable GPU configuration for accelerated inference
+- Optional CUDA-capable GPU configuration
 
 ### Run on Windows
 
@@ -524,26 +530,9 @@ run.bat
 
 ---
 
-## TODO
-
-### Character Generation / Extraction
-
-- Control the maximum number of traits per character.
-- Avoid redundant or overly generic traits.
-- Improve trait selection so only story-relevant traits are retained.
-- Validate relationships before adding them.
-- Prevent the model from inventing unsupported relationships.
-- Prevent duplicate or contradictory relationships.
-- Ensure both characters involved in a relationship actually exist.
-- Properly separate `role`, `traits`, `description`, and `backstory`.
-- Improve merging with existing characters without overwriting valid information.
-- Make Character Generation rely only on information explicitly stated or strongly supported by the Synopsis/Draft, Outline, and Chapters.
-
----
-
 ## Development status
 
-AI Story Studio is an active development project. The workflow architecture is evolving, and local-model behavior can vary by model family, quantization, context size, and hardware.
+AI Story Studio is an active development project. Local-model behavior can vary by model family, quantization, context size, and hardware.
 
 The repository contains automated tests covering important workflow, context, continuation, and outline behaviors.
 
