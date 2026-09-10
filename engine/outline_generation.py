@@ -40,6 +40,48 @@ def _clean_json_for_local_models(text: str) -> str:
     return text.strip()
 
 
+def _recover_malformed_chapter_json(raw: str, requested_count: int) -> dict | None:
+    """Recover chapter objects when a local model emits invalid JSON prose.
+
+    Local models sometimes put unescaped quotes inside the source strings or
+    omit commas between adjacent chapter objects. Since the splitter's
+    contract is structurally simple, recover each number/source pair directly
+    from the raw text instead of asking the model to regenerate it.
+    """
+    text = (raw or "").strip()
+    pattern = re.compile(
+        r'(?m)(?:^|[\r\n])\s*\{\s*"number"\s*:\s*(\d+)\s*,\s*"source"\s*:\s*"',
+        re.DOTALL,
+    )
+    matches = list(pattern.finditer(text))
+    if len(matches) != requested_count:
+        return None
+
+    chapters: list[dict[str, object]] = []
+    for index, match in enumerate(matches):
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        segment = text[start:end].rstrip()
+        if not segment:
+            return None
+
+        if index + 1 < len(matches):
+            # Normal or malformed inter-object ending: ..."}, or ..."}
+            segment = re.sub(r'"\s*\}\s*,?\s*$', '', segment)
+        else:
+            # Final object normally ends with ..."}]}; tolerate whitespace.
+            segment = re.sub(r'"\s*\]\s*\}\s*$', '', segment)
+            if segment == text[start:end].rstrip():
+                segment = re.sub(r'"\s*\}\s*\]\s*\}\s*$', '', segment)
+
+        source = segment.strip()
+        if not source:
+            return None
+        chapters.append({"number": int(match.group(1)), "source": source})
+
+    return {"chapters": chapters}
+
+
 def _parse_json_object(raw: str) -> tuple[dict | None, str]:
     text = (raw or "").strip()
     if not text:
@@ -66,11 +108,21 @@ def _parse_json_object(raw: str) -> tuple[dict | None, str]:
             return value, "ok"
         return None, f"top-level JSON type after cleanup is {type(value).__name__!r}"
     except json.JSONDecodeError as second_error:
+        recovered = _recover_malformed_chapter_json(raw, requested_count=_infer_requested_count_from_raw(raw))
+        if recovered is not None:
+            logger.warning("[generate_outline] Stage 1 recovered malformed chapter JSON directly from raw output.")
+            return recovered, "recovered malformed chapter JSON"
         return None, f"JSONDecodeError (original: {first_message!r}; after cleanup: {str(second_error)!r})"
 
 
+def _infer_requested_count_from_raw(raw: str) -> int:
+    text = raw or ""
+    matches = re.findall(r'(?m)(?:^|[\r\n])\s*\{\s*"number"\s*:\s*(\d+)\s*,\s*"source"', text)
+    return len(matches)
+
+
 def _extract_chapter_blocks(raw: str, requested_count: int) -> list[str]:
-    data, reason = _parse_json_object(raw)
+    data, reason = _parse_json_object_with_count(raw, requested_count)
     if data is None:
         logger.error("[generate_outline] Stage 1 JSON parse failed — %s. Raw: %r", reason, (raw or "")[:1000])
         return []
@@ -111,6 +163,39 @@ def _extract_chapter_blocks(raw: str, requested_count: int) -> list[str]:
         logger.error("[generate_outline] Stage 1 numbering mismatch. Expected=%s got=%s missing=%s", expected, numbers, sorted(set(expected) - set(numbers)))
         return []
     return [source for _, source in blocks]
+
+
+def _parse_json_object_with_count(raw: str, requested_count: int) -> tuple[dict | None, str]:
+    text = (raw or "").strip()
+    if not text:
+        return None, "empty input"
+    start = text.find("{")
+    end = text.rfind("}")
+    if start < 0:
+        return None, "no opening brace '{' found in model output"
+    if end <= start:
+        return None, "no closing brace '}' found after opening brace"
+    candidate = text[start:end + 1]
+    try:
+        value = json.loads(candidate)
+        if isinstance(value, dict):
+            return value, "ok"
+        return None, f"top-level JSON type is {type(value).__name__!r}, expected object"
+    except json.JSONDecodeError as first_error:
+        first_message = str(first_error)
+    cleaned = _clean_json_for_local_models(candidate)
+    try:
+        value = json.loads(cleaned)
+        if isinstance(value, dict):
+            logger.info("[generate_outline] Stage 1 JSON parsed after local-model cleanup.")
+            return value, "ok"
+        return None, f"top-level JSON type after cleanup is {type(value).__name__!r}"
+    except json.JSONDecodeError as second_error:
+        recovered = _recover_malformed_chapter_json(raw, requested_count)
+        if recovered is not None:
+            logger.warning("[generate_outline] Stage 1 recovered %d chapter object(s) from malformed raw JSON.", requested_count)
+            return recovered, "recovered malformed chapter JSON"
+        return None, f"JSONDecodeError (original: {first_message!r}; after cleanup: {str(second_error)!r})"
 
 
 def _truncate_after_target_chapter(text: str, chapter_num: int) -> str:
