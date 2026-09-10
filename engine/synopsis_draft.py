@@ -197,6 +197,17 @@ def run_write_synopsis(worker) -> None:
     )
 
 
+def _schedule_ui_patch() -> None:
+    try:
+        from PySide6.QtCore import QTimer
+        from engine.synopsis_draft_ui import patch_loaded_story_ui
+
+        for delay_ms in (0, 250, 1000):
+            QTimer.singleShot(delay_ms, patch_loaded_story_ui)
+    except Exception:
+        logger.exception("[synopsis_draft] Could not schedule Synopsis UI patch.")
+
+
 def install(module) -> None:
     if getattr(module, "_synopsis_draft_installed", False):
         return
@@ -206,4 +217,5 @@ def install(module) -> None:
     worker_cls._run_write_synopsis = run_write_synopsis
     worker_cls._synopsis_draft_installed = True
     module._synopsis_draft_installed = True
+    _schedule_ui_patch()
     logger.info("[synopsis_draft] Synopsis / Draft pipeline installed.")
