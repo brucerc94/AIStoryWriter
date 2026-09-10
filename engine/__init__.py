@@ -107,7 +107,7 @@ class _EngineModuleLoader(importlib.abc.Loader):
                         quote_index = segment.rfind('"')
                         if quote_index >= 0:
                             tail = segment[quote_index + 1 :].strip()
-                            if not tail or re.fullmatch(r'[,\]\}]*', tail):
+                            if not tail or re.fullmatch(r'[\s,\]\}]*', tail):
                                 source = segment[:quote_index].rstrip()
                             else:
                                 source = segment
