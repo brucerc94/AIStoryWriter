@@ -26,4 +26,14 @@ OUTPUT
 Return ONLY valid JSON in this exact shape:
 {"chapters":[{"number":1,"source":"..."},{"number":2,"source":"..."}]}
 
+JSON SEPARATOR RULE — MANDATORY
+- The value of "chapters" is a JSON array of chapter objects.
+- Put a comma after EVERY chapter object except the final chapter object.
+- NEVER place two chapter objects next to each other without a comma between them.
+- For N chapters, the array MUST contain exactly N objects and exactly N-1 commas separating those objects.
+- Before returning, verify the JSON contains the same number of chapter objects as requested and that every adjacent pair is separated by a comma.
+
+Example for 4 chapters:
+{"chapters":[{"number":1,"source":"..."},{"number":2,"source":"..."},{"number":3,"source":"..."},{"number":4,"source":"..."}]}
+
 There must be exactly the requested number of chapter objects, numbered sequentially from 1 through the requested count.
