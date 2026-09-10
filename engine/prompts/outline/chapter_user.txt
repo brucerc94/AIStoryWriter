@@ -4,9 +4,9 @@ CHAPTER NUMBER: {{chapter_number}}
 {{source_block}}
 === END CHAPTER SOURCE BLOCK ===
 
-=== AUTHOR STYLE ===
-{{author_style}}
-=== END AUTHOR STYLE ===
+=== AUTHOR PROFILE ===
+{{author_profile}}
+=== END AUTHOR PROFILE ===
 
 === ESTABLISHED CHARACTERS ===
 {{characters}}
@@ -16,8 +16,8 @@ CHAPTER NUMBER: {{chapter_number}}
 {{world}}
 === END RELEVANT WORLD ===
 
-=== PREVIOUS CHAPTER CONTINUITY ===
+=== PREVIOUS CHAPTER CONTEXT ===
 {{previous_continuity}}
-=== END PREVIOUS CHAPTER CONTINUITY ===
+=== END PREVIOUS CHAPTER CONTEXT ===
 
-Write the complete outline entry for this one chapter. Preserve the source block's sequence and detail. Make the Chapter Plan granular enough that the prose writer can execute the story without inventing core events.
+Develop this chapter source block into the complete rich narrative treatment for this chapter. Expand the supplied material into coherent, chronological scenes with concrete character behavior, interactions, representative dialogue, emotional responses, setting, sensory detail, pacing, and transitions. Preserve the source's story events and meaning. Do not reduce the chapter to a summary or numbered checklist. The Author Profile must directly shape how the treatment is developed.

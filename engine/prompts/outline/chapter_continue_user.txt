@@ -1,14 +1,14 @@
 CHAPTER NUMBER: {{chapter_number}}
 
-The outline entry below is partially written. Continue only the missing portion. This is a fresh inference with no chat history.
+The chapter treatment below is partially written. Continue only the missing portion. This is a fresh inference with no chat history.
 
 === CHAPTER SOURCE BLOCK ===
 {{source_block}}
 === END CHAPTER SOURCE BLOCK ===
 
-=== AUTHOR STYLE ===
-{{author_style}}
-=== END AUTHOR STYLE ===
+=== AUTHOR PROFILE ===
+{{author_profile}}
+=== END AUTHOR PROFILE ===
 
 === ESTABLISHED CHARACTERS ===
 {{characters}}
@@ -18,27 +18,16 @@ The outline entry below is partially written. Continue only the missing portion.
 {{world}}
 === END RELEVANT WORLD ===
 
-=== PREVIOUS CHAPTER CONTINUITY ===
+=== PREVIOUS CHAPTER CONTEXT ===
 {{previous_continuity}}
-=== END PREVIOUS CHAPTER CONTINUITY ===
+=== END PREVIOUS CHAPTER CONTEXT ===
 
-=== CONTINUATION TARGET ===
-{{continuation_target}}
-=== END CONTINUATION TARGET ===
-
-=== NEXT NEW BEAT NUMBER ===
-{{next_beat_number}}
-=== END NEXT NEW BEAT NUMBER ===
-
-=== RECENT OUTLINE CHECKPOINT ===
+=== RECENT TREATMENT CHECKPOINT ===
 {{partial_checkpoint}}
-=== END RECENT OUTLINE CHECKPOINT ===
+=== END RECENT TREATMENT CHECKPOINT ===
 
-Rules:
-- Continue from the checkpoint; do not restart the chapter.
-- Do not repeat or rewrite any beat already completed.
-- Do not output the chapter heading, Chapter Plan heading, or Continuity heading unless the target explicitly requires starting the Continuity section.
-- If continuing Chapter Plan, start with the next new beat number and add only new beats.
-- If finishing Continuity, add only new continuity bullets and do not repeat existing bullets.
-- Do not introduce new story events, characters, places, objects, facts, or consequences.
-- Return only the missing continuation text.
+Continue the rich narrative treatment from the checkpoint. Do not restart the chapter, repeat the checkpoint, or turn the continuation into a checklist. Keep the same narrative voice, level of detail, pacing, dialogue style, emotional depth, and descriptive density established by the Author Profile.
+
+Continue developing the supplied source material into concrete scene treatment: character actions and reactions, interactions, representative dialogue, thoughts and emotions, setting and sensory detail, transitions, and consequences. Preserve chronology and do not introduce new major plot facts, characters, relationships, revelations, or outcomes that are not supported by the source or established canon.
+
+Return ONLY the missing treatment text. Do not output the chapter heading, labels, bullets, numbered items, or Markdown section headings.
