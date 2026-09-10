@@ -76,26 +76,33 @@ class _EngineModuleLoader(importlib.abc.Loader):
                 worker_cls._run_generate_outline = _run_generate_outline_with_start_status
                 worker_cls._outline_start_status_installed = True
 
-            # Generate Full Book is deliberately only a sequential orchestrator
-            # for the already-correct Write Chapter workflow. It must not update
-            # Story Memory, clear the Chat history, or reload the project between
-            # chapters. Write Chapter owns all chapter-generation behavior.
+            # Generate Full Book is a sequential orchestrator around Write
+            # Chapter. Keep its established chat reset/reload lifecycle, but do
+            # not run Story Memory between chapters.
             original_write_book = getattr(worker_cls, "_run_write_book", None) if worker_cls else None
             if worker_cls and original_write_book and not getattr(worker_cls, "_write_book_no_memory_installed", False):
                 def _run_write_book_without_memory(worker):
+                    logger = getattr(module, "logger", None)
+                    logger.info("[write_book] Clearing chat before Chapter 1.") if logger else None
+                    worker._clear_temporary_chat_history()
+                    worker.clear_chat_requested.emit()
+                    worker.step_started.emit("Clearing chat...")
+
                     outline_numbers = worker._outline_chapter_numbers()
                     total = len(outline_numbers) if outline_numbers else max(1, len(worker.project.chapters) + 1)
                     written = 0
 
                     worker.step_started.emit(f"Writing Full Book (0/{total})...")
-                    logger = getattr(module, "logger", None)
 
                     while not worker._cancelled:
+                        if not worker._reload_project_from_storage():
+                            break
+
+                        current_outline_numbers = worker._outline_chapter_numbers()
                         pending = worker._next_chapter_number()
                         if pending <= 0:
                             break
 
-                        current_outline_numbers = worker._outline_chapter_numbers()
                         if worker.project.outline and not worker._outline_has_chapter(pending):
                             if logger:
                                 logger.info(
@@ -108,7 +115,6 @@ class _EngineModuleLoader(importlib.abc.Loader):
                         worker.step_started.emit(f"Writing Chapter {pending}/{total}...")
                         if logger:
                             logger.info(f"[write_book] Writing Chapter {pending}/{total} via Write Chapter.")
-
                         worker._run_write_chapter()
                         written += 1
 
@@ -144,6 +150,9 @@ class _EngineModuleLoader(importlib.abc.Loader):
                                 logger.info("[write_book] Stop requested after current chapter.")
                             break
 
+                        if not worker._reload_project_from_storage():
+                            break
+
                         next_pending = worker._next_chapter_number()
                         if next_pending <= pending:
                             break
@@ -153,6 +162,11 @@ class _EngineModuleLoader(importlib.abc.Loader):
                                     f"[write_book] Next chapter {next_pending} has no outline entry. Stopping."
                                 )
                             break
+
+                        logger.info(f"[write_book] Clearing chat before Chapter {pending}.") if logger else None
+                        worker._clear_temporary_chat_history()
+                        worker.clear_chat_requested.emit()
+                        worker.step_started.emit("Clearing chat...")
 
                     if logger:
                         if written == 0:
@@ -187,10 +201,6 @@ class _EngineModuleLoader(importlib.abc.Loader):
                         if not segment:
                             continue
 
-                        # Prefer the final quote in each segment as the JSON
-                        # string terminator. This deliberately ignores broken
-                        # escaping inside the model's prose and lets the later
-                        # chapter validation enforce the requested numbering.
                         quote_index = segment.rfind('"')
                         if quote_index >= 0:
                             tail = segment[quote_index + 1 :].strip()
