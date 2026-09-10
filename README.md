@@ -12,7 +12,7 @@
     <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+" />
     <img src="https://img.shields.io/badge/UI-PySide6-41CD52?style=flat-square&logo=qt&logoColor=white" alt="PySide6" />
     <img src="https://img.shields.io/badge/LLM-GGUF-111827?style=flat-square" alt="GGUF" />
-    <img src="https://img.shields.io/badge/License-MIT-0F766E" alt="MIT License" />
+    <img src="https://img.shields.io/badge/License-MIT-0F7660" alt="MIT License" />
   </p>
 
   <p>
@@ -45,9 +45,11 @@ Create Project
       ↓
 Synopsis / Draft
       ↓
-Outline
+Consistency + Draft Development
       ↓
 Characters + World
+      ↓
+Outline
       ↓
 Chapters
       ↓
@@ -58,7 +60,7 @@ Memory / Finalization
 Export
 ```
 
-The important distinction is that **Synopsis / Draft is the author's story source**, while **Outline is the structured chapter blueprint** used to drive chapter generation.
+The important distinction is that **Synopsis / Draft is the author's story source and normalization stage**, while **Outline is the structured chapter blueprint** used to drive chapter generation.
 
 ---
 
@@ -157,7 +159,7 @@ Long chapter treatments can continue in additional passes. The continuation rece
 
 The current `Generate Outline` flow focuses on the **outline itself**. It does not create or update the Characters and World databases as a side effect.
 
-That separation matters because Characters and World are now derived from the finalized Synopsis / Draft or updated explicitly through their own workflows.
+That separation matters because Characters and World are prepared from the finalized Synopsis / Draft before outline generation, while later outline extensions may update them explicitly from new user-provided story material.
 
 ---
 
@@ -165,22 +167,28 @@ That separation matters because Characters and World are now derived from the fi
 
 `Extend Outline` is different from `Generate Outline`.
 
-Instead of re-partitioning the original synopsis, the user supplies new material in the extension dialog. The workflow uses the existing outline and project context to build additional chapter plans.
+Instead of re-partitioning the original synopsis, the user supplies new material in the extension dialog. The workflow uses the existing outline and the new user material to build additional chapter plans, while selecting relevant Characters and World for each new chapter from its own source block.
 
-After the extension is fully generated, the newly introduced story information can be used to update Characters and World.
+After **all requested extension chapters are successfully generated**, the workflow updates Characters and World using the **user's original extension material**. This lets the extension introduce new characters, relationships, locations, rules, or other world information that was not present in the original Synopsis / Draft.
 
 ```text
 Existing Outline
       +
 User extension material
-      +
-Existing project context
       ↓
-Extended chapter plans
+Semantic split into new chapter source blocks
       ↓
-Final extension
+For each new chapter:
+      ├── relevant Characters
+      ├── relevant World
+      ├── Author Profile
+      └── detailed chapter treatment
       ↓
-Update relevant Characters / World
+Complete extension
+      ↓
+Update Characters + World
+      ↓
+Save
 ```
 
 This means the two outline actions serve different purposes:
@@ -188,7 +196,7 @@ This means the two outline actions serve different purposes:
 | Action | Purpose |
 |---|---|
 | **Generate Outline** | Turn the current Synopsis / Draft into the requested number of chapter source blocks and detailed chapter treatments. |
-| **Extend Outline** | Add new chapters from new user-provided material to an existing outline, then update canon from the completed extension. |
+| **Extend Outline** | Add new chapters from new user-provided material to an existing outline, then update Characters and World from the original extension material. |
 
 ---
 
