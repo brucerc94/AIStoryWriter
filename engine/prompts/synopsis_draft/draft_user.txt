@@ -1,0 +1,10 @@
+NOVEL TITLE:
+{{title}}
+
+AUTHOR PROFILE:
+{{author_profile}}
+
+CHECKED STORY DRAFT:
+{{source}}
+
+Develop this checked story into the final Synopsis / Draft. Preserve the actual story and its chronology, while making the narrative concrete, ordered, developed, and rich enough to serve as the source for semantic chapter splitting and later chapter treatment. Use names and established relationships. Do not add direct dialogue. Do not turn it into a chapter outline or finished novel prose.
