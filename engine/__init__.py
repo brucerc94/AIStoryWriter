@@ -85,7 +85,8 @@ class _EngineModuleLoader(importlib.abc.Loader):
 
                     text = (raw or "").strip()
                     pattern = re.compile(
-                        r'(?m)^\s*\{\s*"number"\s*:\s*(\d+)\s*,\s*"source"\s*:\s*"'
+                        r'\{\s*"number"\s*:\s*(\d+)\s*,\s*"source"\s*:\s*"',
+                        re.DOTALL,
                     )
                     matches = list(pattern.finditer(text))
                     if not matches:
@@ -94,16 +95,33 @@ class _EngineModuleLoader(importlib.abc.Loader):
                     chapters = []
                     for index, match in enumerate(matches):
                         start = match.end()
-                        end = matches[index + 1].start() if index + 1 < len(matches) else text.rfind("}")
-                        if end <= start:
+                        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+                        segment = text[start:end].rstrip()
+                        if not segment:
                             continue
-                        source = text[start:end].strip()
-                        if source.endswith(","):
+
+                        # Prefer the final quote in each segment as the JSON
+                        # string terminator. This deliberately ignores broken
+                        # escaping inside the model's prose and lets the later
+                        # chapter validation enforce the requested numbering.
+                        quote_index = segment.rfind('"')
+                        if quote_index >= 0:
+                            tail = segment[quote_index + 1 :].strip()
+                            if not tail or re.fullmatch(r'[,\]\}]*', tail):
+                                source = segment[:quote_index].rstrip()
+                            else:
+                                source = segment
+                        else:
+                            source = segment
+
+                        source = source.rstrip().rstrip(',').rstrip()
+                        if source.endswith('}'):
                             source = source[:-1].rstrip()
-                        if source.endswith("}"):
+                        if source.endswith(']'):
                             source = source[:-1].rstrip()
                         if source.endswith('"'):
                             source = source[:-1]
+
                         if source.strip():
                             chapters.append({"number": int(match.group(1)), "source": source.strip()})
 
