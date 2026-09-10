@@ -176,7 +176,6 @@ def run_write_synopsis(worker) -> None:
         return
 
     worker.project.synopsis = final_draft
-    worker.project.chat_messages.clear()
 
     # Canon is created only AFTER the final normalized draft exists.
     worker.step_started.emit("Building Characters from final draft...")
