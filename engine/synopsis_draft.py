@@ -82,7 +82,11 @@ def _check_consistency(worker, draft: str) -> dict:
     system = prompts.load_raw("synopsis_draft/consistency_system")
     user = prompts.render("synopsis_draft/consistency_user", draft=draft)
     for attempt in range(1, _MAX_CONSISTENCY_CHECKS + 1):
-        logger.info("[synopsis_draft] Consistency check %d/%d (fresh context).", attempt, _MAX_CONSISTENCY_CHECKS)
+        logger.info(
+            "[synopsis_draft] Consistency check %d/%d (fresh context).",
+            attempt,
+            _MAX_CONSISTENCY_CHECKS,
+        )
         raw = worker._run_lean_inference(
             TaskType.REVIEW_CHAPTER,
             system,
@@ -92,7 +96,10 @@ def _check_consistency(worker, draft: str) -> dict:
         result = _parse_consistency_result(raw)
         if result["valid"]:
             return result
-        logger.warning("[synopsis_draft] Consistency check parse failed: %s", result.get("error", "invalid result"))
+        logger.warning(
+            "[synopsis_draft] Consistency check parse failed: %s",
+            result.get("error", "invalid result"),
+        )
     return {"valid": False, "consistent": True, "issues": [], "raw": ""}
 
 
@@ -133,17 +140,20 @@ def _generate_draft(worker, source: str) -> str:
     )
     worker.step_started.emit("Developing Synopsis / Draft with Author Profile...")
     logger.info("[synopsis_draft] Draft generation in a fresh context.")
-    draft = worker._run_lean_inference(
+    return worker._run_lean_inference(
         TaskType.WRITE_SYNOPSIS,
         system,
         user,
         max_tokens=worker._content_max_tokens(),
     ).strip()
-    return draft
 
 
 def run_write_synopsis(worker) -> None:
-    source = (worker.project.synopsis or "").strip()
+    submitted_source = (worker.extra_input or "").strip()
+    saved_source = (worker.project.synopsis or "").strip()
+    source = submitted_source or saved_source
+    if submitted_source:
+        logger.info("[synopsis_draft] Using story text submitted by the UI task request.")
     if not source:
         worker.error_occurred.emit(
             "Synopsis / Draft is empty. Write your story first, then generate the draft."
@@ -156,8 +166,6 @@ def run_write_synopsis(worker) -> None:
 
     if result["valid"] and not result["consistent"] and result["issues"]:
         checked_source = _repair_draft(worker, checked_source, result["issues"])
-
-        # Fresh context: validate the repaired draft independently.
         worker.step_started.emit("Rechecking repaired Synopsis / Draft consistency...")
         result = _check_consistency(worker, checked_source)
         if result["valid"] and not result["consistent"] and result["issues"]:
@@ -167,7 +175,6 @@ def run_write_synopsis(worker) -> None:
             )
             return
 
-    # Fresh context: the final draft writer sees only the checked source + Author Profile.
     final_draft = _generate_draft(worker, checked_source)
     if len(final_draft) < _MIN_DRAFT_CHARS:
         worker.error_occurred.emit(
