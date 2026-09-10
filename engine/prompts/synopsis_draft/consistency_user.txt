@@ -1,0 +1,5 @@
+STORY DRAFT:
+
+{{draft}}
+
+Evaluate ONLY the draft's internal consistency. Check temporal and causal order, character and location states, and whether one event contradicts or makes another event impossible. Return only the required JSON object. Do not rewrite the draft.
