@@ -31,7 +31,8 @@ def _budget_allocate_preserving_tails(total_chars, slots):
 _context.budget_allocate = _budget_allocate_preserving_tails
 
 
-# Chapter evaluators are isolated from the large workflow modules.
+# Chapter evaluators and authoring-stage hooks are isolated from the large
+# workflow modules.
 import importlib.abc
 import sys
 from importlib.machinery import PathFinder
@@ -59,6 +60,8 @@ class _EngineModuleLoader(importlib.abc.Loader):
         elif self._fullname == "engine.workflow":
             from engine.outline_generation import install as install_outline
             install_outline(module)
+            from engine.synopsis_draft import install as install_synopsis_draft
+            install_synopsis_draft(module)
 
 
 class _EngineModuleFinder(importlib.abc.MetaPathFinder):
