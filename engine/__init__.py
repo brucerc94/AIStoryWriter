@@ -76,6 +76,93 @@ class _EngineModuleLoader(importlib.abc.Loader):
                 worker_cls._run_generate_outline = _run_generate_outline_with_start_status
                 worker_cls._outline_start_status_installed = True
 
+            # Generate Full Book is deliberately only a sequential orchestrator
+            # for the already-correct Write Chapter workflow. It must not update
+            # Story Memory, clear the Chat history, or reload the project between
+            # chapters. Write Chapter owns all chapter-generation behavior.
+            original_write_book = getattr(worker_cls, "_run_write_book", None) if worker_cls else None
+            if worker_cls and original_write_book and not getattr(worker_cls, "_write_book_no_memory_installed", False):
+                def _run_write_book_without_memory(worker):
+                    outline_numbers = worker._outline_chapter_numbers()
+                    total = len(outline_numbers) if outline_numbers else max(1, len(worker.project.chapters) + 1)
+                    written = 0
+
+                    worker.step_started.emit(f"Writing Full Book (0/{total})...")
+                    logger = getattr(module, "logger", None)
+
+                    while not worker._cancelled:
+                        pending = worker._next_chapter_number()
+                        if pending <= 0:
+                            break
+
+                        current_outline_numbers = worker._outline_chapter_numbers()
+                        if worker.project.outline and not worker._outline_has_chapter(pending):
+                            if logger:
+                                logger.info(
+                                    f"[write_book] Chapter {pending} has no outline entry "
+                                    f"(outline covers: {current_outline_numbers}). Stopping."
+                                )
+                            break
+
+                        worker.project.current_chapter = pending - 1
+                        worker.step_started.emit(f"Writing Chapter {pending}/{total}...")
+                        if logger:
+                            logger.info(f"[write_book] Writing Chapter {pending}/{total} via Write Chapter.")
+
+                        worker._run_write_chapter()
+                        written += 1
+
+                        if worker._cancelled:
+                            break
+
+                        chapter = next(
+                            (c for c in worker.project.chapters if c.number == pending),
+                            None,
+                        )
+                        if chapter is None:
+                            if logger:
+                                logger.warning(
+                                    f"[write_book] Chapter {pending} was not produced; stopping."
+                                )
+                            break
+
+                        if chapter.generation_status == "incomplete":
+                            worker.step_started.emit(
+                                f"Chapter {pending} did not pass completion checks. "
+                                "Stopping book generation — please review or regenerate it."
+                            )
+                            if logger:
+                                logger.warning(
+                                    f"[write_book] Chapter {pending} is incomplete; stopping full-book generation."
+                                )
+                            break
+
+                        worker.project.current_chapter = pending
+
+                        if worker._stop_after_current_chapter:
+                            if logger:
+                                logger.info("[write_book] Stop requested after current chapter.")
+                            break
+
+                        next_pending = worker._next_chapter_number()
+                        if next_pending <= pending:
+                            break
+                        if worker.project.outline and not worker._outline_has_chapter(next_pending):
+                            if logger:
+                                logger.info(
+                                    f"[write_book] Next chapter {next_pending} has no outline entry. Stopping."
+                                )
+                            break
+
+                    if logger:
+                        if written == 0:
+                            logger.info("[write_book] No pending outline chapters found.")
+                        else:
+                            logger.info(f"[write_book] Finished writing {written} chapter(s).")
+
+                worker_cls._run_write_book = _run_write_book_without_memory
+                worker_cls._write_book_no_memory_installed = True
+
             original_parse_json_object = getattr(module, "_parse_json_object", None)
             if original_parse_json_object is not None and not getattr(module, "_loose_json_parser_installed", False):
                 def _parse_json_object_with_recovery(raw, _original=original_parse_json_object):
