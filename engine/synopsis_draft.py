@@ -132,14 +132,17 @@ def _repair_draft(worker, draft: str, issues: list[object]) -> str:
 
 def _generate_draft(worker, source: str) -> str:
     system = prompts.load_raw("synopsis_draft/draft_system")
+    language = worker._response_language()
+    language_note = f"RESPONSE LANGUAGE: {language}\n\n" if language else ""
     user = prompts.render(
         "synopsis_draft/draft_user",
         source=source,
         author_profile=_build_author_profile(worker),
         title=worker.project.title,
+        language_note=language_note,
     )
     worker.step_started.emit("Developing Synopsis / Draft with Author Profile...")
-    logger.info("[synopsis_draft] Draft generation in a fresh context.")
+    logger.info("[synopsis_draft] Draft generation in a fresh context (response language=%r).", language)
     return worker._run_lean_inference(
         TaskType.WRITE_SYNOPSIS,
         system,
