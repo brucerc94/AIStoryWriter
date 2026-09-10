@@ -33,52 +33,162 @@ _MAX_WORLD_CHARS = 5000
 _CONTINUATION_CHECKPOINT_CHARS = 2400
 
 
-def _parse_json_object(raw: str) -> dict | None:
+# ---------------------------------------------------------------------------
+# JSON parsing — tolerant of imperfect local-model output
+# ---------------------------------------------------------------------------
+
+def _clean_json_for_local_models(text: str) -> str:
+    """Apply lightweight fixes that make imperfect local-model JSON parseable.
+
+    Fixes applied (in order, each idempotent):
+    1. Remove trailing commas before ] or } (invalid JSON, common LLM mistake).
+    2. Strip a leading BOM or stray whitespace.
+    """
+    # Remove trailing commas before closing brackets/braces
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+    return text.strip()
+
+
+def _parse_json_object(raw: str) -> tuple[dict | None, str]:
+    """Parse the first JSON object found in *raw*.
+
+    Returns (parsed_dict, reason_string). On success reason is 'ok'.
+    On failure reason describes exactly what went wrong.
+    """
     text = (raw or "").strip()
     if not text:
-        return None
+        return None, "empty input"
+
     start = text.find("{")
     end = text.rfind("}")
-    if start < 0 or end <= start:
-        return None
+    if start < 0:
+        return None, "no opening brace '{' found in model output"
+    if end <= start:
+        return None, "no closing brace '}' found after opening brace"
+
+    candidate = text[start:end + 1]
+
+    # First attempt: strict parse
     try:
-        value = json.loads(text[start:end + 1])
-    except json.JSONDecodeError:
-        return None
-    return value if isinstance(value, dict) else None
+        value = json.loads(candidate)
+        if not isinstance(value, dict):
+            return None, f"JSON parsed but top-level type is {type(value).__name__!r}, expected object"
+        return value, "ok"
+    except json.JSONDecodeError as e:
+        first_error = str(e)
+
+    # Second attempt: apply local-model tolerances
+    cleaned = _clean_json_for_local_models(candidate)
+    try:
+        value = json.loads(cleaned)
+        if not isinstance(value, dict):
+            return None, f"JSON (after cleanup) parsed but top-level type is {type(value).__name__!r}"
+        logger.info("[generate_outline] Stage 1 JSON parsed after cleanup (trailing-comma fix applied).")
+        return value, "ok"
+    except json.JSONDecodeError as e:
+        return None, f"JSONDecodeError (original: {first_error!r}; after cleanup: {e!r})"
 
 
 def _extract_chapter_blocks(raw: str, requested_count: int) -> list[str]:
-    data = _parse_json_object(raw)
-    if not data:
+    """Extract ordered source blocks from Stage 1 JSON output.
+
+    Returns an empty list on any validation failure. All failures are logged
+    with the specific reason so the operator can diagnose the problem.
+    """
+    data, reason = _parse_json_object(raw)
+    if data is None:
+        logger.error(
+            "[generate_outline] Stage 1 JSON parse failed — %s. "
+            "Raw output (first 500 chars): %r",
+            reason,
+            (raw or "")[:500],
+        )
         return []
+
     chapters = data.get("chapters")
     if not isinstance(chapters, list):
+        logger.error(
+            "[generate_outline] Stage 1 JSON has no 'chapters' list. "
+            "Top-level keys: %s",
+            list(data.keys()),
+        )
+        return []
+
+    if len(chapters) == 0:
+        logger.error(
+            "[generate_outline] Stage 1 'chapters' list is empty (0 items)."
+        )
         return []
 
     blocks: list[tuple[int, str]] = []
     seen: set[int] = set()
-    for entry in chapters:
+    skipped: list[str] = []
+
+    for i, entry in enumerate(chapters):
         if not isinstance(entry, dict):
+            skipped.append(f"item[{i}]: not a dict (got {type(entry).__name__!r})")
             continue
+
+        raw_number = entry.get("number")
         try:
-            number = int(entry.get("number"))
+            number = int(raw_number)
         except (TypeError, ValueError):
+            skipped.append(f"item[{i}]: 'number' is {raw_number!r} (not an integer)")
             continue
+
+        if number < 1 or number > requested_count:
+            skipped.append(
+                f"item[{i}]: chapter number {number} out of range 1–{requested_count}"
+            )
+            continue
+
+        if number in seen:
+            skipped.append(f"item[{i}]: duplicate chapter number {number}")
+            continue
+
         source = str(entry.get("source", "")).strip()
-        if number in seen or not source:
+        if not source:
+            skipped.append(f"item[{i}]: chapter {number} has empty 'source'")
             continue
-        if not 1 <= number <= requested_count:
-            continue
+
         seen.add(number)
         blocks.append((number, source))
 
+    if skipped:
+        logger.warning(
+            "[generate_outline] Stage 1 skipped %d chapter entry/entries: %s",
+            len(skipped),
+            "; ".join(skipped),
+        )
+
     blocks.sort(key=lambda item: item[0])
-    expected = list(range(1, requested_count + 1))
-    if [number for number, _ in blocks] != expected:
+    present_numbers = [n for n, _ in blocks]
+    expected_numbers = list(range(1, requested_count + 1))
+
+    if present_numbers != expected_numbers:
+        missing = sorted(set(expected_numbers) - set(present_numbers))
+        extra = sorted(set(present_numbers) - set(expected_numbers))
+        logger.error(
+            "[generate_outline] Stage 1 chapter numbering mismatch. "
+            "Expected %s, got %s. Missing: %s. Extra/out-of-range: %s.",
+            expected_numbers,
+            present_numbers,
+            missing,
+            extra,
+        )
         return []
+
+    logger.info(
+        "[generate_outline] Stage 1 extracted %d/%d chapter block(s) successfully.",
+        len(blocks),
+        requested_count,
+    )
     return [source for _, source in blocks]
 
+
+# ---------------------------------------------------------------------------
+# Outline normalisation helpers
+# ---------------------------------------------------------------------------
 
 def _normalize_outline_entry(text: str, chapter_num: int) -> str:
     text = (text or "").strip()
@@ -166,6 +276,10 @@ def _sanitize_continuation_addition(addition: str, chapter_num: int) -> str:
     return text.strip()
 
 
+# ---------------------------------------------------------------------------
+# Story source construction
+# ---------------------------------------------------------------------------
+
 def _story_source(worker, requested_count: int) -> str:
     synopsis = (worker.project.synopsis or "").strip()
     request = (worker.extra_input or "").strip()
@@ -177,6 +291,10 @@ def _story_source(worker, requested_count: int) -> str:
     parts.append(f"REQUESTED CHAPTER COUNT: {requested_count}")
     return "\n\n".join(parts).strip()
 
+
+# ---------------------------------------------------------------------------
+# Stage 1: semantic split
+# ---------------------------------------------------------------------------
 
 def _split_story(worker, requested_count: int, story_source: str) -> list[str]:
     if len(story_source.strip()) < _MIN_SOURCE_CHARS:
@@ -199,13 +317,28 @@ def _split_story(worker, requested_count: int, story_source: str) -> list[str]:
         user,
         max_tokens=_MAX_SPLIT_TOKENS,
     )
+    logger.info(
+        "[generate_outline] Stage 1 raw output: %d tokens-equivalent, %d chars. Preview: %r",
+        len(raw.split()),
+        len(raw),
+        raw[:300],
+    )
     blocks = _extract_chapter_blocks(raw, requested_count)
     if not blocks:
-        logger.warning("[generate_outline] Stage 1 failed to produce a valid partition.")
+        logger.error(
+            "[generate_outline] Stage 1 failed to produce a valid partition "
+            "for %d chapter(s). Full raw output:\n%s",
+            requested_count,
+            raw,
+        )
         return []
     logger.info("[generate_outline] Stage 1 complete: %d block(s).", len(blocks))
     return blocks
 
+
+# ---------------------------------------------------------------------------
+# Canon preparation and selection
+# ---------------------------------------------------------------------------
 
 def _prepare_base_canon(worker, story_source: str) -> None:
     """Build the established Characters/World base once from the story draft."""
@@ -235,7 +368,17 @@ def _select_relevant_canon(worker, source_block: str, previous_entry: str) -> tu
     return characters or "(none relevant)", world or "(none relevant)"
 
 
+# ---------------------------------------------------------------------------
+# Author profile — full Creative Intent + Writing Style
+# ---------------------------------------------------------------------------
+
 def _build_author_profile(worker) -> str:
+    """Return the full author profile: Creative Intent + Writing Style.
+
+    Both sections must be present so that every chapter-treatment inference
+    receives the author's complete creative vision, not just formatting
+    preferences.
+    """
     intent = worker.project.author_intent.to_prompt_fragment().strip()
     style = worker.project.writing_style.to_prompt_fragment().strip()
 
@@ -246,6 +389,10 @@ def _build_author_profile(worker) -> str:
         parts.append(f"WRITING STYLE:\n{style}")
     return "\n\n".join(parts).strip() or "(none specified)"
 
+
+# ---------------------------------------------------------------------------
+# Stage 2: chapter prompt construction
+# ---------------------------------------------------------------------------
 
 def _build_chapter_prompt(
     worker,
@@ -302,6 +449,10 @@ def _build_continuation_prompt(
     return system, user
 
 
+# ---------------------------------------------------------------------------
+# Stage 2: chapter treatment generation with continuation
+# ---------------------------------------------------------------------------
+
 def _write_chapter_outline(worker, chapter_num: int, source_block: str, previous_entry: str) -> str:
     characters, world = _select_relevant_canon(worker, source_block, previous_entry)
     system, user = _build_chapter_prompt(
@@ -315,6 +466,7 @@ def _write_chapter_outline(worker, chapter_num: int, source_block: str, previous
         max_tokens=worker._content_max_tokens(),
     ).strip()
     if not partial:
+        logger.error("[generate_outline] Chapter %d initial inference returned empty output.", chapter_num)
         return ""
 
     partial = _normalize_outline_entry(partial, chapter_num)
@@ -330,10 +482,12 @@ def _write_chapter_outline(worker, chapter_num: int, source_block: str, previous
 
         checkpoint = _continuation_checkpoint(partial)
         logger.info(
-            "[generate_outline] Chapter %d treatment incomplete; continuation %d/%d (checkpoint=%d chars).",
+            "[generate_outline] Chapter %d treatment incomplete; continuation %d/%d "
+            "(partial=%d chars, checkpoint=%d chars).",
             chapter_num,
             continuation_pass,
             _MAX_OUTLINE_PASSES,
+            len(partial),
             len(checkpoint),
         )
 
@@ -368,12 +522,18 @@ def _write_chapter_outline(worker, chapter_num: int, source_block: str, previous
         return partial
 
     logger.warning(
-        "[generate_outline] Chapter %d remained incomplete after %d inference(s).",
+        "[generate_outline] Chapter %d remained incomplete after %d inference(s). "
+        "Treatment length: %d chars.",
         chapter_num,
         _MAX_OUTLINE_PASSES + 1,
+        len(partial),
     )
     return ""
 
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
 
 def run_generate_outline(worker) -> None:
     requested_count = worker._extract_requested_chapter_count(worker.extra_input)
@@ -409,7 +569,7 @@ def run_generate_outline(worker) -> None:
         )
         logger.info(
             "[generate_outline] RESET: starting Chapter %d/%d with its source block + "
-            "relevant canon + full Author Profile.",
+            "relevant canon + full Author Profile (Creative Intent + Writing Style).",
             chapter_num,
             requested_count,
         )
