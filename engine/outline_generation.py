@@ -316,10 +316,10 @@ def _prepare_base_canon(worker, story_source: str) -> None:
 def _select_relevant_canon(
     worker, source_block: str, previous_entry: str
 ) -> tuple[str, str]:
+    # Relevance must be scoped to the current chapter's source block only.
+    # The previous chapter is continuity context for generation, not evidence
+    # that a character/world section belongs in this chapter.
     selection_source = source_block.strip()
-    previous = _previous_chapter_context(previous_entry)
-    if previous and not previous.startswith("(none"):
-        selection_source += f"\n\nPREVIOUS CHAPTER CONTEXT:\n{previous}"
 
     characters, world = build_relevant_chapter_context(
         worker.project,
@@ -328,7 +328,8 @@ def _select_relevant_canon(
         max_world_chars=_MAX_WORLD_CHARS,
     )
     logger.info(
-        "[generate_outline] Selected canon for chapter: characters=%d chars, world=%d chars.",
+        "[generate_outline] Selected canon from Chapter %s chunk only: characters=%d chars, world=%d chars.",
+        "current",
         len(characters),
         len(world),
     )
