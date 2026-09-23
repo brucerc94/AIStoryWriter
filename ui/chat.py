@@ -475,11 +475,11 @@ class ChatPanel(QWidget):
         self.context_toggle_btn.setCheckable(True)
         self.context_toggle_btn.setChecked(True)
         self.context_toggle_btn.setToolTip(
-            "Toggle story context injection.\n\n"
-            "ON  — sends Synopsis, Outline, Characters (with relationships),\n"
-            "       World Notes, Memory, and Chat Summary with every message.\n"
-            "OFF — sends only your message (and task instructions).\n\n"
-            "Turn OFF for quick questions that don't need the full story loaded."
+            "Toggle between story-aware chat and free chat.\n\n"
+            "ON  — sends the project's story context and recent chat history.\n"
+            "OFF — sends only your current message with the free-chat system prompt.\n"
+            "       The model does not receive the project's story or previous chat history.\n\n"
+            "Turn OFF for a general-purpose conversation unrelated to the project."
         )
         self.context_toggle_btn.setStyleSheet(self._context_toggle_style(True))
         self.context_toggle_btn.clicked.connect(self._on_context_toggle)
