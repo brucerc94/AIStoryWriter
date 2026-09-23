@@ -417,7 +417,6 @@ def build_context_for_model(
     eligible = [
         m for m in project.chat_messages
         if use_history
-        and include_story_context
         and m.role in (MessageRole.USER, MessageRole.ASSISTANT)
         and not m.summarized
     ]
