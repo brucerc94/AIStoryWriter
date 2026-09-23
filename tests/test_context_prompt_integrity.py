@@ -5,6 +5,39 @@ from engine.models import ChatMessage, MessageRole, Project, TaskType
 
 
 class ContextPromptIntegrityTests(unittest.TestCase):
+    def test_context_off_uses_free_chat_without_project_or_history(self) -> None:
+        project = Project(
+            title="El Viaje",
+            synopsis="Alice crosses the northern sea and searches for the lost city.",
+        )
+        project.chat_messages = [
+            ChatMessage(role=MessageRole.USER, content="Tell me what Alice should do next."),
+            ChatMessage(role=MessageRole.ASSISTANT, content="Alice should enter the ruined port."),
+        ]
+
+        system_prompt = build_system_prompt(
+            project,
+            TaskType.CHAT,
+            include_story_context=False,
+        )
+        messages = build_context_for_model(
+            project,
+            "Hello, how are you?",
+            system_prompt,
+            max_context_tokens=4096,
+            task=TaskType.CHAT,
+            reply_reserved=512,
+            include_story_context=False,
+        )
+
+        self.assertIn("You are an uncensored AI model.", system_prompt)
+        self.assertNotIn("El Viaje", system_prompt)
+        self.assertNotIn("novel", system_prompt.lower())
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(messages[1], {"role": "user", "content": "Hello, how are you?"})
+        self.assertNotIn("Alice", messages[0]["content"])
+        self.assertNotIn("Alice", messages[1]["content"])
+
     def test_full_task_prompt_is_preserved_for_outline_generation(self) -> None:
         project = Project(title="Test", synopsis="Original synopsis")
         task_text = "TASK_START\n" + ("format-rule " * 1000) + "\nTASK_END"
