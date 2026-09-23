@@ -503,6 +503,7 @@ class WorkflowWorker(QObject):
             custom_instructions=self._custom_system_instructions(),
             language=self._response_language(),
             allow_nsfw=self._allow_nsfw(),
+            include_story_context=self.include_story_context,
         )
         context_limit = self._model_context_limit()
         # Use the user's configured content_max_tokens as the reply budget so the
