@@ -417,6 +417,7 @@ def build_context_for_model(
     eligible = [
         m for m in project.chat_messages
         if use_history
+        and include_story_context
         and m.role in (MessageRole.USER, MessageRole.ASSISTANT)
         and not m.summarized
     ]
@@ -666,8 +667,12 @@ def build_system_prompt(
     custom_instructions: str = "",
     language: str = "",
     allow_nsfw: bool = False,
+    include_story_context: bool = True,
 ) -> str:
     """Build the complete task system prompt. It must not be silently truncated."""
+    if task == TaskType.CHAT and not include_story_context:
+        return prompts.load_raw("chat/free_system").strip()
+
     creative_tasks = {
         TaskType.WRITE_SYNOPSIS,
         TaskType.GENERATE_OUTLINE,
