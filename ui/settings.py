@@ -487,7 +487,7 @@ class AppSettingsWidget(QWidget):
             "Configure the local image generation backend. "
             "For monolithic checkpoints (SD 1.x, SDXL…) only set "
             "\"Diffusion Model\". For multi-component architectures like "
-            "Z-Image-Turbo, also set \"Text Encoder\" and \"VAE\"."
+            "Z-Image-Turbo and Qwen Image 2.1, also set \"Text Encoder\" and \"VAE\"."
         )
         img_note.setWordWrap(True)
         img_note.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 11px;")
@@ -529,6 +529,7 @@ class AppSettingsWidget(QWidget):
         self.image_text_encoder_input.setToolTip(
             "Standalone text encoder / LLM for multi-component architectures.\n\n"
             "• Z-Image-Turbo: Qwen3-4B-ZImage-Heretic-Genesis-Q8.gguf\n"
+            "• Qwen Image 2.1: Qwen3-VL-8B-Instruct GGUF or INT8 convrot safetensors\n"
             "• Flux 2: Mistral-Small-3.2-…Q4_K_M.gguf\n"
             "• Anima / Klein: Qwen3-4B-Instruct-2507-Q4_K_M.gguf\n\n"
             "Leave empty for monolithic checkpoints (SD 1.x, SDXL, …)."
@@ -550,6 +551,7 @@ class AppSettingsWidget(QWidget):
         self.image_vae_input.setToolTip(
             "Standalone VAE for multi-component architectures.\n\n"
             "• Z-Image-Turbo: ae.safetensors\n"
+            "• Qwen Image 2.1: qwen_image_2.1_vae_bf16.safetensors\n"
             "• Flux (schnell / dev): ae.safetensors or ae-f16.gguf\n\n"
             "Leave empty when the VAE is baked into the main checkpoint."
         )
