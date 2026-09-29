@@ -709,6 +709,44 @@ class StableDiffusionCppEngine(ImageEngine):
         captured = []
         reader_done = threading.Event()
 
+        ansi_escape_re = re.compile(
+            r"\\x1B(?:[@-Z\\-_]|\\[[0-?]*[ -/]*[@-~])"
+        )
+
+        def _emit_progress_from_line(line: str) -> None:
+            if not progress_callback:
+                return
+
+            # stable-diffusion.cpp can print progress using slightly different
+            # formats depending on the model/sampler, for example:
+            #   "1/15 - ..."
+            #   "step 1 / 15 ..."
+            #   "  1 / 15"
+            # ANSI control sequences are also possible when the CLI uses a
+            # terminal-style progress display. Only look for a numeric
+            # current/total pair so unrelated log lines are ignored.
+            clean = ansi_escape_re.sub("", line).replace("\\b", "").strip()
+            match = re.search(r"(?<!\\d)(\\d+)\\s*/\\s*(\\d+)(?!\\d)", clean)
+            if not match:
+                match = re.search(
+                    r"\\bstep\\s+(\\d+)\\s*(?:of|/)\\s*(\\d+)\\b",
+                    clean,
+                    re.IGNORECASE,
+                )
+            if not match:
+                return
+
+            step = int(match.group(1))
+            total = int(match.group(2))
+            if total <= 0 or step < 0:
+                return
+
+            # Do not allow an unrelated counter to move the image progress
+            # backwards or beyond the configured generation range.
+            total = effective_steps if total != effective_steps else total
+            step = min(step, total)
+            progress_callback(step, total)
+
         def _reader() -> None:
             try:
                 if process is None or process.stdout is None:
@@ -719,18 +757,16 @@ class StableDiffusionCppEngine(ImageEngine):
                     if not ch:
                         break
                     if ch in ("\\r", "\\n"):
-                        line = buffer.strip()
+                        line = buffer
                         buffer = ""
-                        if not line:
-                            continue
-                        captured.append(line)
-                        match = re.search(r"(\\d+)\\s*/\\s*(\\d+)\\s*-", line)
-                        if match and progress_callback:
-                            progress_callback(int(match.group(1)), int(match.group(2)))
+                        if line.strip():
+                            captured.append(ansi_escape_re.sub("", line).strip())
+                            _emit_progress_from_line(line)
                     else:
                         buffer += ch
                 if buffer.strip():
-                    captured.append(buffer.strip())
+                    captured.append(ansi_escape_re.sub("", buffer).strip())
+                    _emit_progress_from_line(buffer)
             except Exception as exc:
                 logger.debug("[sd_cpp] CLI output reader stopped: %s", exc)
             finally:
@@ -780,6 +816,12 @@ class StableDiffusionCppEngine(ImageEngine):
                     seed_used = int(img.info.get("seed", request.seed))
             except Exception:
                 pass
+            # The CLI finished successfully, so make sure the UI reaches the
+            # terminal state even when the final progress line was rendered
+            # with terminal control characters that were not parseable.
+            if progress_callback:
+                progress_callback(effective_steps, effective_steps)
+
             logger.info("[sd_cpp] Image saved to %s (seed=%d)", output_path, seed_used)
             return ImageGenerationResult(success=True, image_path=output_path, seed_used=seed_used)
         except Exception as exc:
