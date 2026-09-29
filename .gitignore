@@ -190,3 +190,4 @@ cython_debug/
 run.bat
 setup.bat_old
 /sd-cpp
+/stable-diffusion-cpp-python
