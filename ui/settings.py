@@ -219,7 +219,7 @@ class ModelPicker(QWidget):
             self,
             "Select GGUF Model",
             "",
-            "Model Files (*.gguf *.safetensors);;All Files (*)",
+            "GGUF Models (*.gguf);;All Files (*)",
         )
         if path:
 
@@ -765,7 +765,7 @@ class AppSettingsWidget(QWidget):
             self,
             "Select Text Encoder / LLM",
             "",
-            "GGUF Models (*.gguf);;All Files (*)",
+            "Model Files (*.gguf *.safetensors);;All Files (*)",
         )
         if path:
             self.image_text_encoder_input.setText(path)
