@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
 )
 
 from engine import storage
+from engine.image_engine import get_image_model_profile
 from engine.models import AppSettings, ImageBackend, Project, TaskType
 from ui.styles import (
     COLOR_ACCENT,
@@ -218,7 +219,7 @@ class ModelPicker(QWidget):
             self,
             "Select GGUF Model",
             "",
-            "GGUF Models (*.gguf);;All Files (*)",
+            "Model Files (*.gguf *.safetensors);;All Files (*)",
         )
         if path:
 
@@ -513,11 +514,17 @@ class AppSettingsWidget(QWidget):
         img_model_row.addWidget(browse_img_btn)
         img_form.addRow("Diffusion Model", img_model_row)
 
+        self.image_model_detected_label = QLabel("Detected model: —")
+        self.image_model_detected_label.setStyleSheet(
+            f"color: {COLOR_TEXT_MUTED}; font-size: 11px;"
+        )
+        img_form.addRow("", self.image_model_detected_label)
+
 
         img_enc_row = QHBoxLayout()
         self.image_text_encoder_input = QLineEdit()
         self.image_text_encoder_input.setPlaceholderText(
-            "Optional: path to standalone text encoder / LLM (.gguf)…"
+            "Path to standalone text encoder / LLM (.gguf or .safetensors)…"
         )
         self.image_text_encoder_input.setToolTip(
             "Standalone text encoder / LLM for multi-component architectures.\n\n"
@@ -680,6 +687,8 @@ class AppSettingsWidget(QWidget):
 
         layout.addWidget(img_box)
 
+        self.image_model_input.textChanged.connect(self._update_detected_image_model)
+
         save_btn = QPushButton("Save App Settings")
         save_btn.setObjectName("accent")
         save_btn.clicked.connect(self._save)
@@ -726,6 +735,15 @@ class AppSettingsWidget(QWidget):
                 break
 
 
+
+    def _update_detected_image_model(self, path: str = "") -> None:
+        path = path.strip()
+        profile = get_image_model_profile(path)
+        if not path:
+            self.image_model_detected_label.setText("Detected model: —")
+            return
+
+        self.image_model_detected_label.setText(f"Detected model: {profile.label}")
 
     def _browse_models_dir(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "Select Models Directory")
