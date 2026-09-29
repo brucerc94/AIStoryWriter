@@ -189,3 +189,4 @@ cython_debug/
 *.bat_old
 run.bat
 setup.bat_old
+/sd-cpp
