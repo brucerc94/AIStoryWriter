@@ -88,6 +88,7 @@ import os
 import struct
 import threading
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Callable, Optional
 
 from engine.models import (
@@ -98,6 +99,70 @@ from engine.models import (
 )
 
 logger = logging.getLogger("image_engine")
+
+
+@dataclass(frozen=True)
+class ImageModelProfile:
+    """Centralized behavior for known image-model families."""
+
+    key: str
+    label: str
+    multi_component: bool = False
+    requires_text_encoder: bool = False
+    requires_vae: bool = False
+    default_steps: Optional[int] = None
+    default_cfg_scale: Optional[float] = None
+    sample_method: Optional[str] = None
+
+
+_IMAGE_MODEL_PROFILES: dict[str, ImageModelProfile] = {
+    "generic": ImageModelProfile(key="generic", label="Generic"),
+    "z_image": ImageModelProfile(
+        key="z_image",
+        label="Z-Image",
+        multi_component=True,
+        requires_text_encoder=True,
+        requires_vae=True,
+        default_steps=8,
+        default_cfg_scale=1.0,
+        sample_method="euler",
+    ),
+    "qwen_image_2_1": ImageModelProfile(
+        key="qwen_image_2_1",
+        label="Qwen Image 2.1",
+        multi_component=True,
+        requires_text_encoder=True,
+        requires_vae=True,
+        default_steps=20,
+        default_cfg_scale=6.0,
+        sample_method="euler",
+    ),
+    "flux": ImageModelProfile(
+        key="flux",
+        label="FLUX",
+        multi_component=True,
+        requires_vae=True,
+        default_cfg_scale=1.0,
+        sample_method="euler",
+    ),
+}
+
+
+def detect_image_model_family(path: str) -> str:
+    """Detect family from filename; no model weights are loaded."""
+    name = os.path.basename(path or "").lower().replace("-", "_")
+    if "qwen_image_2.1" in name or "qwen_image_2_1" in name or "qwenimage_2_1" in name:
+        return "qwen_image_2_1"
+    if "z_image" in name or "zimage" in name:
+        return "z_image"
+    if "flux" in name:
+        return "flux"
+    return "generic"
+
+
+def get_image_model_profile(path: str) -> ImageModelProfile:
+    """Return the centralized profile used by settings and runtime."""
+    return _IMAGE_MODEL_PROFILES[detect_image_model_family(path)]
 
 
 
@@ -117,7 +182,8 @@ def _is_diffusion_only_file(path: str) -> bool:
     name = os.path.basename(path).lower()
     keywords = (
         "turbo", "diffusion_model", "flux", "anima", "ovis",
-        "z_image", "zimage", "wan", "chroma", "klein",
+        "z_image", "zimage", "qwen_image_2.1", "qwen_image_2_1", "qwenimage_2_1",
+        "wan", "chroma", "klein",
     )
     return any(kw in name for kw in keywords)
 
@@ -438,6 +504,8 @@ class StableDiffusionCppEngine(ImageEngine):
         self._text_encoder_path: str = ""
         self._vae_path: str = ""
         self._is_multi_component: bool = False
+        self._model_family: str = "generic"
+        self._model_profile: ImageModelProfile = _IMAGE_MODEL_PROFILES["generic"]
         self._loras: list[dict] = []
         self._loaded_lora_dir: str = ""
 
@@ -585,22 +653,14 @@ class StableDiffusionCppEngine(ImageEngine):
             ) from exc
 
 
-        is_multi = bool(text_encoder_path or vae_path) or (
-            _is_diffusion_only_file(model_path)
-            and bool(text_encoder_path or vae_path)
-        )
+        profile = get_image_model_profile(model_path)
+        self._model_profile = profile
+        self._model_family = profile.key
 
-
+        is_multi = profile.multi_component or bool(text_encoder_path or vae_path)
 
         if not is_multi and _is_diffusion_only_file(model_path):
             is_multi = True
-
-
-
-
-
-
-
 
         self._is_multi_component = is_multi
 
@@ -640,7 +700,8 @@ class StableDiffusionCppEngine(ImageEngine):
             )
 
         logger.info(
-            "[sd_cpp] Loading model (mode=%s): %s | encoder=%s | vae=%s",
+            "[sd_cpp] Loading model (family=%s, mode=%s): %s | encoder=%s | vae=%s",
+            profile.label,
             "multi-component" if is_multi else "monolithic",
             model_path,
             text_encoder_path or "(none)",
@@ -729,19 +790,26 @@ class StableDiffusionCppEngine(ImageEngine):
                 ),
             )
 
+        profile = self._model_profile
         effective_steps = request.steps
         effective_cfg = request.cfg_scale
 
-
+        # Replace only the generic UI defaults, preserving explicit user choices.
+        if profile.default_steps is not None and request.steps == 20:
+            effective_steps = profile.default_steps
+        if profile.default_cfg_scale is not None and abs(request.cfg_scale - 7.0) < 1e-6:
+            effective_cfg = profile.default_cfg_scale
 
         logger.info(
-            "[sd_cpp] generate() — task=%s prompt=%.60r size=%dx%d steps=%d cfg=%.1f",
+            "[sd_cpp] generate() — family=%s task=%s prompt=%.60r size=%dx%d steps=%d cfg=%.1f sampler=%s",
+            profile.label,
             request.task_type.value,
             request.prompt,
             request.width,
             request.height,
             effective_steps,
             effective_cfg,
+            profile.sample_method or "(backend default)",
         )
 
 
@@ -761,16 +829,35 @@ class StableDiffusionCppEngine(ImageEngine):
                 )
 
         try:
-            images = self._sd.generate_image(
-                prompt=effective_prompt,
-                negative_prompt=request.negative_prompt or "",
-                width=request.width,
-                height=request.height,
-                sample_steps=effective_steps,
-                cfg_scale=effective_cfg,
-                seed=request.seed,
-                progress_callback=_progress,
-            )
+            generation_kwargs = {
+                "prompt": effective_prompt,
+                "negative_prompt": request.negative_prompt or "",
+                "width": request.width,
+                "height": request.height,
+                "sample_steps": effective_steps,
+                "cfg_scale": effective_cfg,
+                "seed": request.seed,
+                "progress_callback": _progress,
+            }
+
+            if profile.sample_method:
+                try:
+                    generate_sig = inspect.signature(self._sd.generate_image)
+                    if "sample_method" in generate_sig.parameters:
+                        generation_kwargs["sample_method"] = profile.sample_method
+                    else:
+                        logger.warning(
+                            "[sd_cpp] %s: installed binding does not expose sample_method; using backend default.",
+                            profile.label,
+                        )
+                except (TypeError, ValueError):
+                    logger.warning(
+                        "[sd_cpp] %s: could not inspect generate_image(); using backend default sampler.",
+                        profile.label,
+                    )
+
+            images = self._sd.generate_image(**generation_kwargs)
+
 
             if not images:
                 return ImageGenerationResult(
@@ -812,6 +899,8 @@ class StableDiffusionCppEngine(ImageEngine):
         self._text_encoder_path = ""
         self._vae_path = ""
         self._is_multi_component = False
+        self._model_family = "generic"
+        self._model_profile = _IMAGE_MODEL_PROFILES["generic"]
 
 
 
@@ -899,28 +988,26 @@ def load_image_engine_from_settings(settings: AppSettings) -> None:
 
     text_encoder_path = getattr(settings, "image_text_encoder_path", "") or ""
     vae_path = getattr(settings, "image_vae_path", "") or ""
+    profile = get_image_model_profile(settings.image_model_path)
 
-    if _is_diffusion_only_file(settings.image_model_path):
+    if profile.requires_text_encoder or profile.requires_vae or _is_diffusion_only_file(settings.image_model_path):
         missing = []
-        if not text_encoder_path:
+        if (profile.requires_text_encoder or _is_diffusion_only_file(settings.image_model_path)) and not text_encoder_path:
             missing.append("image_text_encoder_path (Settings → Image Generation → Text Encoder)")
-        if not vae_path:
+        if (profile.requires_vae or _is_diffusion_only_file(settings.image_model_path)) and not vae_path:
             missing.append("image_vae_path (Settings → Image Generation → VAE)")
         if missing:
             raise RuntimeError(
-                f"'{os.path.basename(settings.image_model_path)}' is a multi-component "
-                "diffusion-only model (e.g. Z-Image-Turbo) and requires a Text Encoder "
-                "and a VAE, but the following AppSettings field(s) are empty: "
-                + "; ".join(missing) +
-                ". Add these fields to AppSettings (see engine/models.py) and wire "
-                "them up in the Settings dialog before load_image_engine_from_settings "
-                "is called, otherwise StableDiffusion() is invoked with "
-                "llm_path='' / vae_path='' and every text-encoder/VAE tensor will be "
-                "reported 'not in model file'."
+                f"'{os.path.basename(settings.image_model_path)}' is detected as "
+                f"'{profile.label}' and requires companion files, but these AppSettings "
+                "field(s) are empty: " + "; ".join(missing) +
+                ". Set the Text Encoder and VAE in Settings → Image Generation."
             )
 
+
     logger.info(
-        "[image_engine] load_image_engine_from_settings: diffusion=%s | encoder=%s | vae=%s",
+        "[image_engine] load_image_engine_from_settings: family=%s | diffusion=%s | encoder=%s | vae=%s",
+        profile.label,
         settings.image_model_path,
         text_encoder_path or "(none)",
         vae_path or "(none)",
