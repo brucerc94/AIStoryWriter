@@ -406,14 +406,19 @@ def build_context_for_model(
         include_story_context,
     )
 
-    # Outline generation and chapter writing are deterministic workflow steps;
-    # chat history only consumes context and can conflict with the task prompt.
-    use_history = task not in {
-        TaskType.GENERATE_OUTLINE,
-        TaskType.WRITE_CHAPTER,
-        TaskType.REWRITE_CHAPTER,
-        TaskType.CHANGE_CHAPTER,
-    }
+    # Chat can explicitly run without any project/history context.
+    # When Context OFF is selected, the model must receive only the free-chat
+    # system prompt and the current user message — never prior chat messages.
+    # Other workflow tasks retain their existing history rules.
+    use_history = (
+        include_story_context
+        and task not in {
+            TaskType.GENERATE_OUTLINE,
+            TaskType.WRITE_CHAPTER,
+            TaskType.REWRITE_CHAPTER,
+            TaskType.CHANGE_CHAPTER,
+        }
+    )
     eligible = [
         m for m in project.chat_messages
         if use_history
