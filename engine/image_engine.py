@@ -13,23 +13,19 @@ The engine is intentionally generic:
     set diffusion_model_path (= image_model_path in AppSettings),
     plus the optional llm_path and vae_path that the model requires.
 
-Z-Image-Turbo specifics
------------------------
-Z-Image-Turbo is a three-component model:
-  diffusion_model_path  → z_image_turbo-Q4_0.gguf
-  llm_path              → Qwen3-4B-ZImage-Heretic-Genesis-Q8.gguf
-  vae_path              → ae.safetensors
+Multi-component model support
+-----------------------------
+The engine detects known image-model families from filenames and uses a
+centralized profile for each family. Multi-component models are loaded with
+diffusion_model_path plus their standalone text encoder and VAE; legacy
+monolithic checkpoints continue using model_path.
 
-It must be constructed with diffusion_model_path (NOT model_path) or
-the C library tries to auto-detect the SD version from a GGUF that is
-not a full SD checkpoint — hence the "get sd version from file failed"
-and the subsequent NULL pointer error.
+Known profiles currently include:
+  • Z-Image
+  • Qwen Image 2.1
 
-The engine detects a multi-component setup automatically:
-  • If image_text_encoder_path OR image_vae_path is set AND
-    image_model_path looks like a diffusion-only file (not a
-    full checkpoint) → use diffusion_model_path + optional components.
-  • Otherwise fall back to plain model_path for legacy checkpoints.
+Unknown filenames fall back to the generic profile so additional models can
+still be used when stable-diffusion.cpp accepts their component layout.
 
 IMPORTANT — why "load tensors from model loader failed" did NOT raise
 -----------------------------------------------------------------------
@@ -137,14 +133,6 @@ _IMAGE_MODEL_PROFILES: dict[str, ImageModelProfile] = {
         default_cfg_scale=6.0,
         sample_method="euler",
     ),
-    "flux": ImageModelProfile(
-        key="flux",
-        label="FLUX",
-        multi_component=True,
-        requires_vae=True,
-        default_cfg_scale=1.0,
-        sample_method="euler",
-    ),
 }
 
 
@@ -155,8 +143,6 @@ def detect_image_model_family(path: str) -> str:
         return "qwen_image_2_1"
     if "z_image" in name or "zimage" in name:
         return "z_image"
-    if "flux" in name:
-        return "flux"
     return "generic"
 
 
@@ -474,29 +460,14 @@ class StableDiffusionCppEngine(ImageEngine):
       • Monolithic checkpoints  — load via model_path=
       • Multi-component setups — load via diffusion_model_path= + llm_path= + vae_path=
 
-    Z-Image-Turbo defaults
-    ----------------------
-    When a multi-component setup is detected (text_encoder_path or vae_path
-    is set, or the diffusion file name matches known patterns), the engine
-    automatically applies the Z-Image-Turbo recommended defaults:
-        sample_steps         = 8
-        cfg_scale            = 1.0
-        offload_params_to_cpu = True
-        diffusion_flash_attn  = True  (if supported by the installed build)
-
-    These load-time defaults are fixed. The *generation-time* defaults
-    (sample_steps / cfg_scale) are additionally enforced in generate():
-    Z-Image-Turbo is a distilled/turbo model and simply does not behave
-    correctly with generic SD settings (e.g. steps=20, cfg=7.0) — using
-    them isn't "more thorough", it produces broken output. generate()
-    therefore clamps to the recommended values whenever a multi-component
-    model is loaded, unless the caller explicitly opted out via
-    request.allow_custom_sampling (see generate() below).
+    Model-family behavior
+    ---------------------
+    Known profiles provide component requirements and generation defaults.
+    All multi-component models use CPU parameter offload to reduce VRAM use,
+    and diffusion flash attention is enabled when the installed binding
+    exposes that option.
     """
 
-
-    _ZIMAGE_STEPS_DEFAULT: int = 8
-    _ZIMAGE_CFG_DEFAULT: float = 1.0
 
     def __init__(self) -> None:
         self._sd = None
@@ -771,15 +742,9 @@ class StableDiffusionCppEngine(ImageEngine):
         """
         Generate an image from *request* and save it to *output_path*.
 
-        For multi-component / Z-Image-Turbo models, request.steps and
-        request.cfg_scale are clamped to the Z-Image-Turbo recommended
-        values (8 steps, cfg 1.0) regardless of what the caller passed,
-        because the generic SD defaults (e.g. 20 steps / cfg 7.0) are
-        not just suboptimal for a turbo/distilled model — they are wrong
-        and produce degraded or broken output. If request.steps or
-        request.cfg_scale already match the recommended values, nothing
-        changes; otherwise the override is logged so it's visible why the
-        effective settings differ from what was requested.
+        Known model families provide model-specific default sampling values.
+        The generic UI defaults are replaced only when the caller has not
+        explicitly changed them; explicit non-generic values remain intact.
         """
         if not self.is_model_loaded:
             return ImageGenerationResult(
