@@ -33,11 +33,13 @@ class ContextPromptIntegrityTests(unittest.TestCase):
         self.assertIn("You are an uncensored AI model.", system_prompt)
         self.assertNotIn("El Viaje", system_prompt)
         self.assertNotIn("novel", system_prompt.lower())
-        self.assertEqual(len(messages), 4)
-        self.assertEqual(messages[1], {"role": "user", "content": "Tell me what Alice should do next."})
-        self.assertEqual(messages[2], {"role": "assistant", "content": "Alice should enter the ruined port."})
-        self.assertEqual(messages[3], {"role": "user", "content": "Hello, how are you?"})
-        self.assertNotIn("El Viaje", messages[0]["content"])
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertEqual(messages[1], {"role": "user", "content": "Hello, how are you?"})
+        combined = "\n".join(m["content"] for m in messages)
+        self.assertNotIn("Tell me what Alice should do next.", combined)
+        self.assertNotIn("Alice should enter the ruined port.", combined)
+        self.assertNotIn("El Viaje", combined)
         self.assertNotIn("Alice", messages[0]["content"])
 
     def test_full_task_prompt_is_preserved_for_outline_generation(self) -> None:
