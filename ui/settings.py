@@ -502,7 +502,7 @@ class AppSettingsWidget(QWidget):
         self.image_model_input.setToolTip(
             "Primary image model file.\n\n"
             "• Monolithic checkpoints (SD 1.x, SDXL, …): the full checkpoint file.\n"
-            "• Multi-component (Z-Image-Turbo, Flux, Anima, …): the standalone "
+            "• Multi-component (Z-Image-Turbo, Qwen Image 2.1, Flux, Anima, …): the standalone "
             "  diffusion model GGUF — e.g. z_image_turbo-Q4_0.gguf.\n\n"
             "Leave \"Text Encoder\" and \"VAE\" empty for monolithic checkpoints."
         )
@@ -633,7 +633,7 @@ class AppSettingsWidget(QWidget):
         self.image_steps_spin.setFixedWidth(80)
         self.image_steps_spin.setToolTip(
             "Number of diffusion sampling steps.\n"
-            "Recommended: 8 for Z-Image-Turbo, 4 for Flux schnell, 20 for SD."
+            "Recommended defaults are detected from the selected model family."
         )
         gen_row.addWidget(self.image_steps_spin)
 
@@ -649,7 +649,7 @@ class AppSettingsWidget(QWidget):
         self.image_cfg_spin.setFixedWidth(80)
         self.image_cfg_spin.setToolTip(
             "Classifier-free guidance scale.\n"
-            "Recommended: 1.0 for Z-Image-Turbo / Flux, 7.0 for SD."
+            "Recommended defaults are detected from the selected model family."
         )
         gen_row.addWidget(self.image_cfg_spin)
 
