@@ -1510,17 +1510,17 @@ class WorkflowWorker(QObject):
             line = raw_line.strip()
             if not line:
                 continue
-            line = re.sub(r"^\\s*\`{1,3}", "", line)
-            line = re.sub(r"\`{1,3}\\s*$", "", line)
-            line = re.sub(r"^[-*•]\\s+", "", line)
-            line = re.sub(r"^\\s*#+\\s*", "", line)
+            line = re.sub(r"^\s*`{1,3}", "", line)
+            line = re.sub(r"`{1,3}\s*$", "", line)
+            line = re.sub(r"^[-*•]\s+", "", line)
+            line = re.sub(r"^\s*#+\s*", "", line)
             cleaned_lines.append(line.strip())
 
         patterns = (
             # Preferred format from the prompt.
-            re.compile(r"(?i)^chapter\\s+(\\d+)\\s*(?:→|->|–>|—>|:|-|—)\\s*(.+?)\\s*$"),
+            re.compile(r"(?i)^chapter\s+(\d+)\s*(?:→|->|–>|—>|:|-|—)\s*(.+?)\s*$"),
             # Numbered-list variants: "13. ..." / "13) ...".
-            re.compile(r"^\\s*(\\d+)[.)]\\s+(.+?)\\s*$"),
+            re.compile(r"^\s*(\d+)[.)]\s+(.+?)\s*$"),
         )
 
         for line in cleaned_lines:
@@ -1541,7 +1541,7 @@ class WorkflowWorker(QObject):
 
             # If a model emits a markdown heading as the description, keep the
             # useful text but discard only redundant heading punctuation.
-            desc = re.sub(r"^#+\\s*", "", desc).strip()
+            desc = re.sub(r"^#+\s*", "", desc).strip()
             if not desc:
                 continue
             descriptions_by_chapter[ch_num] = desc
