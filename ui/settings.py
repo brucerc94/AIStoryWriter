@@ -1039,6 +1039,48 @@ class ModelsPanel(QWidget):
         assign_all_row.addWidget(assign_all_btn)
         ab_layout.addLayout(assign_all_row)
 
+        params_row = QHBoxLayout()
+        params_lbl = QLabel("Parameters for all:")
+        params_lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM};")
+        params_row.addWidget(params_lbl)
+
+        params_row.addWidget(QLabel("Temp"))
+        self.assign_all_temp_spin = QDoubleSpinBox()
+        self.assign_all_temp_spin.setRange(0.0, 2.0)
+        self.assign_all_temp_spin.setSingleStep(0.05)
+        self.assign_all_temp_spin.setDecimals(2)
+        self.assign_all_temp_spin.setValue(0.7)
+        self.assign_all_temp_spin.setFixedWidth(70)
+        self.assign_all_temp_spin.setToolTip(
+            "Temperature to apply to every task when clicking Assign to All."
+        )
+        params_row.addWidget(self.assign_all_temp_spin)
+
+        params_row.addWidget(QLabel("Top P"))
+        self.assign_all_top_p_spin = QDoubleSpinBox()
+        self.assign_all_top_p_spin.setRange(0.0, 1.0)
+        self.assign_all_top_p_spin.setSingleStep(0.05)
+        self.assign_all_top_p_spin.setDecimals(2)
+        self.assign_all_top_p_spin.setValue(0.9)
+        self.assign_all_top_p_spin.setFixedWidth(70)
+        self.assign_all_top_p_spin.setToolTip(
+            "Top P to apply to every task when clicking Assign to All."
+        )
+        params_row.addWidget(self.assign_all_top_p_spin)
+
+        params_row.addWidget(QLabel("Top K"))
+        self.assign_all_top_k_spin = QSpinBox()
+        self.assign_all_top_k_spin.setRange(0, 1000)
+        self.assign_all_top_k_spin.setSingleStep(1)
+        self.assign_all_top_k_spin.setValue(40)
+        self.assign_all_top_k_spin.setFixedWidth(70)
+        self.assign_all_top_k_spin.setToolTip(
+            "Top K to apply to every task when clicking Assign to All. 0 = disabled/no limit."
+        )
+        params_row.addWidget(self.assign_all_top_k_spin)
+        params_row.addStretch()
+        ab_layout.addLayout(params_row)
+
         outer.addWidget(action_box)
         outer.addStretch()
 
@@ -1049,6 +1091,13 @@ class ModelsPanel(QWidget):
             picker.set_temperature(project.task_temperatures.get(task))
             picker.set_top_p(project.task_temperatures.get_top_p(task))
             picker.set_top_k(project.task_temperatures.get_top_k(task))
+
+        first_task = next(iter(self._pickers), None)
+        if first_task is not None:
+            first_picker = self._pickers[first_task]
+            self.assign_all_temp_spin.setValue(first_picker.get_temperature())
+            self.assign_all_top_p_spin.setValue(first_picker.get_top_p())
+            self.assign_all_top_k_spin.setValue(first_picker.get_top_k())
 
     def update_available_models(self, models_dir: str) -> None:
         models = storage.list_gguf_models(models_dir)
@@ -1106,10 +1155,26 @@ class ModelsPanel(QWidget):
         path = self.assign_all_combo.currentData() or ""
         if not path:
             return
+
+        temperature = self.assign_all_temp_spin.value()
+        top_p = self.assign_all_top_p_spin.value()
+        top_k = self.assign_all_top_k_spin.value()
+
+        # One click applies the selected model and the three generation
+        # parameters to every task. Per-task values remain stored separately,
+        # but the common workflow is configured from one place.
         for task, picker in self._pickers.items():
             picker.set_value(path)
+            picker.set_temperature(temperature)
+            picker.set_top_p(top_p)
+            picker.set_top_k(top_k)
+
             if self._project:
                 self._project.model_assignments.set(task, path)
+                self._project.task_temperatures.set(task, temperature)
+                self._project.task_temperatures.set_top_p(task, top_p)
+                self._project.task_temperatures.set_top_k(task, top_k)
+
         if self._project:
             storage.save_project(self._project)
         self.assignments_changed.emit()
