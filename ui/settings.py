@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
 )
 
 from engine import storage
+from engine.image_engine import get_image_model_profile
 from engine.models import AppSettings, ImageBackend, Project, TaskType
 from ui.styles import (
     COLOR_ACCENT,
@@ -486,7 +487,7 @@ class AppSettingsWidget(QWidget):
             "Configure the local image generation backend. "
             "For monolithic checkpoints (SD 1.x, SDXL…) only set "
             "\"Diffusion Model\". For multi-component architectures like "
-            "Z-Image-Turbo, also set \"Text Encoder\" and \"VAE\"."
+            "Z-Image-Turbo and Qwen Image 2.1, also set \"Text Encoder\" and \"VAE\"."
         )
         img_note.setWordWrap(True)
         img_note.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 11px;")
@@ -501,7 +502,7 @@ class AppSettingsWidget(QWidget):
         self.image_model_input.setToolTip(
             "Primary image model file.\n\n"
             "• Monolithic checkpoints (SD 1.x, SDXL, …): the full checkpoint file.\n"
-            "• Multi-component (Z-Image-Turbo, Flux, Anima, …): the standalone "
+            "• Multi-component (Z-Image-Turbo, Qwen Image 2.1, Flux, Anima, …): the standalone "
             "  diffusion model GGUF — e.g. z_image_turbo-Q4_0.gguf.\n\n"
             "Leave \"Text Encoder\" and \"VAE\" empty for monolithic checkpoints."
         )
@@ -513,15 +514,22 @@ class AppSettingsWidget(QWidget):
         img_model_row.addWidget(browse_img_btn)
         img_form.addRow("Diffusion Model", img_model_row)
 
+        self.image_model_detected_label = QLabel("Detected model: —")
+        self.image_model_detected_label.setStyleSheet(
+            f"color: {COLOR_TEXT_MUTED}; font-size: 11px;"
+        )
+        img_form.addRow("", self.image_model_detected_label)
+
 
         img_enc_row = QHBoxLayout()
         self.image_text_encoder_input = QLineEdit()
         self.image_text_encoder_input.setPlaceholderText(
-            "Optional: path to standalone text encoder / LLM (.gguf)…"
+            "Path to standalone text encoder / LLM (.gguf or .safetensors)…"
         )
         self.image_text_encoder_input.setToolTip(
             "Standalone text encoder / LLM for multi-component architectures.\n\n"
             "• Z-Image-Turbo: Qwen3-4B-ZImage-Heretic-Genesis-Q8.gguf\n"
+            "• Qwen Image 2.1: Qwen3-VL-8B-Instruct GGUF or INT8 convrot safetensors\n"
             "• Flux 2: Mistral-Small-3.2-…Q4_K_M.gguf\n"
             "• Anima / Klein: Qwen3-4B-Instruct-2507-Q4_K_M.gguf\n\n"
             "Leave empty for monolithic checkpoints (SD 1.x, SDXL, …)."
@@ -543,6 +551,7 @@ class AppSettingsWidget(QWidget):
         self.image_vae_input.setToolTip(
             "Standalone VAE for multi-component architectures.\n\n"
             "• Z-Image-Turbo: ae.safetensors\n"
+            "• Qwen Image 2.1: qwen_image_2.1_vae_bf16.safetensors\n"
             "• Flux (schnell / dev): ae.safetensors or ae-f16.gguf\n\n"
             "Leave empty when the VAE is baked into the main checkpoint."
         )
@@ -624,7 +633,7 @@ class AppSettingsWidget(QWidget):
         self.image_steps_spin.setFixedWidth(80)
         self.image_steps_spin.setToolTip(
             "Number of diffusion sampling steps.\n"
-            "Recommended: 8 for Z-Image-Turbo, 4 for Flux schnell, 20 for SD."
+            "Recommended defaults are detected from the selected model family."
         )
         gen_row.addWidget(self.image_steps_spin)
 
@@ -640,7 +649,7 @@ class AppSettingsWidget(QWidget):
         self.image_cfg_spin.setFixedWidth(80)
         self.image_cfg_spin.setToolTip(
             "Classifier-free guidance scale.\n"
-            "Recommended: 1.0 for Z-Image-Turbo / Flux, 7.0 for SD."
+            "Recommended defaults are detected from the selected model family."
         )
         gen_row.addWidget(self.image_cfg_spin)
 
@@ -679,6 +688,8 @@ class AppSettingsWidget(QWidget):
         img_form.addRow("", add_lora_btn)
 
         layout.addWidget(img_box)
+
+        self.image_model_input.textChanged.connect(self._update_detected_image_model)
 
         save_btn = QPushButton("Save App Settings")
         save_btn.setObjectName("accent")
@@ -727,6 +738,15 @@ class AppSettingsWidget(QWidget):
 
 
 
+    def _update_detected_image_model(self, path: str = "") -> None:
+        path = path.strip()
+        profile = get_image_model_profile(path)
+        if not path:
+            self.image_model_detected_label.setText("Detected model: —")
+            return
+
+        self.image_model_detected_label.setText(f"Detected model: {profile.label}")
+
     def _browse_models_dir(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "Select Models Directory")
         if d:
@@ -747,7 +767,7 @@ class AppSettingsWidget(QWidget):
             self,
             "Select Text Encoder / LLM",
             "",
-            "GGUF Models (*.gguf);;All Files (*)",
+            "Model Files (*.gguf *.safetensors);;All Files (*)",
         )
         if path:
             self.image_text_encoder_input.setText(path)
@@ -1019,6 +1039,48 @@ class ModelsPanel(QWidget):
         assign_all_row.addWidget(assign_all_btn)
         ab_layout.addLayout(assign_all_row)
 
+        params_row = QHBoxLayout()
+        params_lbl = QLabel("Parameters for all:")
+        params_lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM};")
+        params_row.addWidget(params_lbl)
+
+        params_row.addWidget(QLabel("Temp"))
+        self.assign_all_temp_spin = QDoubleSpinBox()
+        self.assign_all_temp_spin.setRange(0.0, 2.0)
+        self.assign_all_temp_spin.setSingleStep(0.05)
+        self.assign_all_temp_spin.setDecimals(2)
+        self.assign_all_temp_spin.setValue(0.7)
+        self.assign_all_temp_spin.setFixedWidth(70)
+        self.assign_all_temp_spin.setToolTip(
+            "Temperature to apply to every task when clicking Assign to All."
+        )
+        params_row.addWidget(self.assign_all_temp_spin)
+
+        params_row.addWidget(QLabel("Top P"))
+        self.assign_all_top_p_spin = QDoubleSpinBox()
+        self.assign_all_top_p_spin.setRange(0.0, 1.0)
+        self.assign_all_top_p_spin.setSingleStep(0.05)
+        self.assign_all_top_p_spin.setDecimals(2)
+        self.assign_all_top_p_spin.setValue(0.9)
+        self.assign_all_top_p_spin.setFixedWidth(70)
+        self.assign_all_top_p_spin.setToolTip(
+            "Top P to apply to every task when clicking Assign to All."
+        )
+        params_row.addWidget(self.assign_all_top_p_spin)
+
+        params_row.addWidget(QLabel("Top K"))
+        self.assign_all_top_k_spin = QSpinBox()
+        self.assign_all_top_k_spin.setRange(0, 1000)
+        self.assign_all_top_k_spin.setSingleStep(1)
+        self.assign_all_top_k_spin.setValue(40)
+        self.assign_all_top_k_spin.setFixedWidth(70)
+        self.assign_all_top_k_spin.setToolTip(
+            "Top K to apply to every task when clicking Assign to All. 0 = disabled/no limit."
+        )
+        params_row.addWidget(self.assign_all_top_k_spin)
+        params_row.addStretch()
+        ab_layout.addLayout(params_row)
+
         outer.addWidget(action_box)
         outer.addStretch()
 
@@ -1029,6 +1091,13 @@ class ModelsPanel(QWidget):
             picker.set_temperature(project.task_temperatures.get(task))
             picker.set_top_p(project.task_temperatures.get_top_p(task))
             picker.set_top_k(project.task_temperatures.get_top_k(task))
+
+        first_task = next(iter(self._pickers), None)
+        if first_task is not None:
+            first_picker = self._pickers[first_task]
+            self.assign_all_temp_spin.setValue(first_picker.get_temperature())
+            self.assign_all_top_p_spin.setValue(first_picker.get_top_p())
+            self.assign_all_top_k_spin.setValue(first_picker.get_top_k())
 
     def update_available_models(self, models_dir: str) -> None:
         models = storage.list_gguf_models(models_dir)
@@ -1086,10 +1155,26 @@ class ModelsPanel(QWidget):
         path = self.assign_all_combo.currentData() or ""
         if not path:
             return
+
+        temperature = self.assign_all_temp_spin.value()
+        top_p = self.assign_all_top_p_spin.value()
+        top_k = self.assign_all_top_k_spin.value()
+
+        # One click applies the selected model and the three generation
+        # parameters to every task. Per-task values remain stored separately,
+        # but the common workflow is configured from one place.
         for task, picker in self._pickers.items():
             picker.set_value(path)
+            picker.set_temperature(temperature)
+            picker.set_top_p(top_p)
+            picker.set_top_k(top_k)
+
             if self._project:
                 self._project.model_assignments.set(task, path)
+                self._project.task_temperatures.set(task, temperature)
+                self._project.task_temperatures.set_top_p(task, top_p)
+                self._project.task_temperatures.set_top_k(task, top_k)
+
         if self._project:
             storage.save_project(self._project)
         self.assignments_changed.emit()

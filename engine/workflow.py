@@ -503,6 +503,7 @@ class WorkflowWorker(QObject):
             custom_instructions=self._custom_system_instructions(),
             language=self._response_language(),
             allow_nsfw=self._allow_nsfw(),
+            include_story_context=self.include_story_context,
         )
         context_limit = self._model_context_limit()
         # Use the user's configured content_max_tokens as the reply budget so the
@@ -1183,6 +1184,75 @@ class WorkflowWorker(QObject):
     def _run_chat_with_chapter_attachment(self) -> None:
 
         body = self.extra_input[len(CHAT_CHAPTER_ATTACHMENT_MARKER):].lstrip("\n")
+
+        # New format supports multiple chapter attachments.
+        if body.startswith("===CHAPTER_ATTACHMENT===\n"):
+            try:
+                attachment_text, user_request = body.split(
+                    "===AUTHOR_REQUEST===\n", 1
+                )
+                raw_blocks = attachment_text.split("===CHAPTER_ATTACHMENT===\n")
+                attachments = []
+
+                for raw_block in raw_blocks:
+                    block = raw_block.strip()
+                    if not block:
+                        continue
+
+                    header, rest = block.split("===ATTACHMENT_CONTENT===\n", 1)
+                    content, _tail = rest.split("\n===ATTACHMENT_END===\n", 1)
+                    header_lines = header.strip().split("\n", 1)
+                    chapter_num = header_lines[0].strip()
+                    chapter_title = (
+                        header_lines[1].strip() if len(header_lines) > 1 else ""
+                    )
+                    attachments.append(
+                        (chapter_num, chapter_title, content)
+                    )
+            except ValueError:
+                attachments = []
+
+            if attachments:
+                rendered_attachments = []
+                for chapter_num, chapter_title, content in attachments:
+                    rendered_attachments.append(
+                        f"===== INSERTED CHAPTER {chapter_num}: {chapter_title} =====\n"
+                        f"{content}\n"
+                        f"===== END INSERTED CHAPTER {chapter_num} ====="
+                    )
+
+                prompt = prompts.render(
+                    "chat/chapter_attachments",
+                    attached_chapters="\n\n".join(rendered_attachments),
+                    user_request=user_request.strip(),
+                )
+
+                self.step_started.emit(
+                    f"Reading {len(attachments)} inserted chapter(s)..."
+                )
+                result = self._run_inference(
+                    TaskType.CHAT, prompt, add_to_chat=False
+                )
+                if not result:
+                    return
+
+                chapter_labels = ", ".join(
+                    f"Chapter {chapter_num}"
+                    for chapter_num, _title, _content in attachments
+                )
+                self.project.chat_messages.append(ChatMessage(
+                    role=MessageRole.USER,
+                    content=f"[{chapter_labels} attached] {user_request.strip()}",
+                ))
+                self.project.chat_messages.append(
+                    ChatMessage(role=MessageRole.ASSISTANT, content=result)
+                )
+                self._maybe_summarize()
+                storage.save_project(self.project)
+                self.step_finished.emit("Chat", result)
+                return
+
+        # Backward-compatible single-chapter format.
         try:
             header, rest = body.split("===ATTACHMENT_CONTENT===\n", 1)
             content, user_request = rest.split("\n===ATTACHMENT_END===\n", 1)
@@ -1212,7 +1282,6 @@ class WorkflowWorker(QObject):
         if not result:
             return
 
-  
         self.project.chat_messages.append(ChatMessage(
             role=MessageRole.USER,
             content=f"[Chapter {chapter_num} attached] {user_request.strip()}",
@@ -1421,31 +1490,74 @@ class WorkflowWorker(QObject):
 
 
     def _parse_extend_plan(self, plan_text: str, next_chapter: int, requested_count: int) -> list[str]:
+        """Parse the internal extension plan without being overly strict about formatting.
 
-        descriptions: list[str] = []
-        seen_chapters: set[int] = set()
-        for line in plan_text.splitlines():
-            line = line.strip()
+        The planner prompt asks for:
+            Chapter N → description
 
-            m = re.match(r"(?i)chapter\s+(\d+)\s*(?:→|->|–>|—>)\s*(.*)", line)
-            if not m:
-                continue
-            ch_num = int(m.group(1))
-            desc = m.group(2).strip()
-            if ch_num in seen_chapters:
-                continue
-            seen_chapters.add(ch_num)
-            descriptions.append((ch_num, desc))
-
-        descriptions.sort(key=lambda x: x[0])
+        Small formatting deviations are common with local models (for example
+        using ':' instead of '→', adding bullets, markdown headings, or using
+        a numbered list). Those are presentation differences, not a reason to
+        discard the whole extension request, so we normalize them here while
+        still requiring the exact requested chapter range with no gaps.
+        """
+        descriptions_by_chapter: dict[int, str] = {}
         final_chapter = next_chapter + requested_count - 1
-        valid = [
-            desc for (ch_num, desc) in descriptions
-            if next_chapter <= ch_num <= final_chapter
-        ]
-        if len(valid) != requested_count:
+
+        # Remove common wrappers that models sometimes add around a short plan.
+        cleaned_lines: list[str] = []
+        for raw_line in (plan_text or "").splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            line = re.sub(r"^\s*`{1,3}", "", line)
+            line = re.sub(r"`{1,3}\s*$", "", line)
+            line = re.sub(r"^[-*•]\s+", "", line)
+            line = re.sub(r"^\s*#+\s*", "", line)
+            cleaned_lines.append(line.strip())
+
+        patterns = (
+            # Preferred format from the prompt.
+            re.compile(r"(?i)^chapter\s+(\d+)\s*(?:→|->|–>|—>|:|-|—)\s*(.+?)\s*$"),
+            # Numbered-list variants: "13. ..." / "13) ...".
+            re.compile(r"^\s*(\d+)[.)]\s+(.+?)\s*$"),
+        )
+
+        for line in cleaned_lines:
+            parsed: tuple[int, str] | None = None
+            for pattern in patterns:
+                m = pattern.match(line)
+                if m:
+                    parsed = (int(m.group(1)), m.group(2).strip())
+                    break
+            if parsed is None:
+                continue
+
+            ch_num, desc = parsed
+            if not (next_chapter <= ch_num <= final_chapter):
+                continue
+            if not desc or ch_num in descriptions_by_chapter:
+                continue
+
+            # If a model emits a markdown heading as the description, keep the
+            # useful text but discard only redundant heading punctuation.
+            desc = re.sub(r"^#+\s*", "", desc).strip()
+            if not desc:
+                continue
+            descriptions_by_chapter[ch_num] = desc
+
+        expected_numbers = list(range(next_chapter, final_chapter + 1))
+        if list(sorted(descriptions_by_chapter)) != expected_numbers:
+            logger.warning(
+                "[extend_outline] Could not parse exact chapter plan range. "
+                "Expected=%s Parsed=%s Raw=%r",
+                expected_numbers,
+                sorted(descriptions_by_chapter),
+                (plan_text or "")[:3000],
+            )
             return []
-        return valid
+
+        return [descriptions_by_chapter[n] for n in expected_numbers]
 
     def _build_extend_outline_reference(
         self,

@@ -361,10 +361,50 @@ class LLMEngine:
         except Exception:
             return {"enable_thinking": False}
 
+    def _qwen_sampling_kwargs(self) -> dict:
+        """
+        Apply Qwen3.5's anti-repetition sampling defaults only to Qwen models.
+
+        Qwen recommends presence_penalty=1.5 and repetition_penalty=1.0 for
+        general generation. llama-cpp-python exposes the latter as
+        repeat_penalty. Feature detection keeps older builds safe: an
+        unsupported parameter is simply omitted instead of breaking generation.
+        """
+        model_info = self._last_model_info
+        if not model_info:
+            return {}
+
+        arch = (model_info.architecture or "").lower()
+        if not arch.startswith("qwen"):
+            return {}
+
+        sampling: dict = {}
+
+        if llama_features.supports_chat_completion_param("presence_penalty"):
+            sampling["presence_penalty"] = 1.5
+        if llama_features.supports_chat_completion_param("repeat_penalty"):
+            sampling["repeat_penalty"] = 1.0
+
+        if sampling:
+            logger.info(
+                "[llm_engine] Qwen sampling: presence_penalty=%s, repeat_penalty=%s",
+                sampling.get("presence_penalty", "unsupported"),
+                sampling.get("repeat_penalty", "unsupported"),
+            )
+
+        return sampling
+
     def _create_chat_completion(self, **kwargs):
         chat_template_kwargs = self._chat_template_kwargs()
         if chat_template_kwargs is not None:
             kwargs["chat_template_kwargs"] = chat_template_kwargs
+
+        # Keep Qwen-specific anti-repetition handling centralized so every
+        # chat-completion path (streaming and non-streaming) gets the same
+        # behavior without duplicating generation code.
+        for name, value in self._qwen_sampling_kwargs().items():
+            kwargs.setdefault(name, value)
+
         return self._model.create_chat_completion(**kwargs)
 
     def unload(self) -> None:

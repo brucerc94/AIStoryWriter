@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
 )
 
 from engine import storage
+from engine.image_engine import get_image_model_profile
 from engine.image_workflow import ImageWorkflowThread, generate_character_image
 from engine.models import (
     AppSettings,
@@ -336,13 +337,23 @@ class _ImageTaskSection(QGroupBox):
 
 
     def apply_settings(self, settings: AppSettings) -> None:
-        """Pre-fill dimensions and sampling defaults from AppSettings."""
+        """Apply global image settings plus the selected model family's defaults."""
         if self.width_spin:
             self.width_spin.setValue(getattr(settings, "image_default_width", 512))
         if self.height_spin:
             self.height_spin.setValue(getattr(settings, "image_default_height", 512))
-        self.steps_spin.setValue(getattr(settings, "image_default_steps", 20))
-        self.cfg_spin.setValue(getattr(settings, "image_default_cfg_scale", 7.0))
+
+        profile = get_image_model_profile(getattr(settings, "image_model_path", ""))
+        steps = profile.default_steps
+        cfg = profile.default_cfg_scale
+
+        if steps is None:
+            steps = getattr(settings, "image_default_steps", 20)
+        if cfg is None:
+            cfg = getattr(settings, "image_default_cfg_scale", 7.0)
+
+        self.steps_spin.setValue(steps)
+        self.cfg_spin.setValue(cfg)
 
     def set_busy(self, busy: bool) -> None:
         self.generate_btn.setEnabled(not busy)
@@ -625,7 +636,10 @@ class ImagesPanel(QWidget):
         friendly = {
             "stable_diffusion_cpp": "stable-diffusion.cpp",
         }.get(backend_raw, backend_raw)
-        self._backend_badge.setText(f"Backend: {friendly}")
+
+        model_path = getattr(settings, "image_model_path", "") or ""
+        family = get_image_model_profile(model_path).label if model_path else "No model"
+        self._backend_badge.setText(f"Backend: {friendly} · {family}")
         self._backend_badge.setVisible(True)
 
         self._update_notices()

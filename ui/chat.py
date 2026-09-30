@@ -13,6 +13,7 @@ from typing import Optional
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QPalette, QTextCursor
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QDialog,
     QDialogButtonBox,
     QFrame,
@@ -370,27 +371,35 @@ class ChatMessagesArea(QWidget):
 
 
 class ChapterPickerDialog(QDialog):
-    """Lets the author pick one existing chapter to attach to the next chat message."""
+    """Lets the author pick one or more existing chapters for the next chat message."""
 
     def __init__(self, project: Project, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Insert Chapter")
         self.setModal(True)
-        self.resize(420, 420)
+        self.resize(500, 500)
         self._project = project
 
         layout = QVBoxLayout(self)
-        label = QLabel("Select the chapter to attach to the next chat message:")
+        label = QLabel(
+            "Select one or more chapters to attach to the next chat message."
+        )
         label.setWordWrap(True)
         layout.addWidget(label)
 
         self.list_widget = QListWidget()
+        self.list_widget.setSelectionMode(QAbstractItemView.ExtendedSelection)
         for chapter in sorted(project.chapters, key=lambda c: c.number):
             title = chapter.title.strip() or "Untitled"
             item = QListWidgetItem(f"Chapter {chapter.number} — {title}")
             item.setData(Qt.UserRole, chapter.number)
             self.list_widget.addItem(item)
         layout.addWidget(self.list_widget, 1)
+
+        select_all_btn = QPushButton("Select All Chapters")
+        select_all_btn.setObjectName("subtle")
+        select_all_btn.clicked.connect(self.list_widget.selectAll)
+        layout.addWidget(select_all_btn)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
@@ -400,15 +409,15 @@ class ChapterPickerDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-    def selected_chapter_number(self) -> int | None:
-        item = self.list_widget.currentItem()
-        if item is None:
-            return None
-        value = item.data(Qt.UserRole)
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return None
+    def selected_chapters(self) -> list[int]:
+        numbers: list[int] = []
+        for item in self.list_widget.selectedItems():
+            value = item.data(Qt.UserRole)
+            try:
+                numbers.append(int(value))
+            except (TypeError, ValueError):
+                continue
+        return numbers
 
 
 class ChatPanel(QWidget):
@@ -440,7 +449,7 @@ class ChatPanel(QWidget):
         self._include_story_context: bool = True
 
 
-        self._pending_chapter_attachment: Optional[tuple[int, str, str]] = None
+        self._pending_chapter_attachment: Optional[list[tuple[int, str, str]]] = None
         self._build_ui()
 
     def set_settings(self, settings) -> None:
@@ -475,11 +484,11 @@ class ChatPanel(QWidget):
         self.context_toggle_btn.setCheckable(True)
         self.context_toggle_btn.setChecked(True)
         self.context_toggle_btn.setToolTip(
-            "Toggle story context injection.\n\n"
-            "ON  — sends Synopsis, Outline, Characters (with relationships),\n"
-            "       World Notes, Memory, and Chat Summary with every message.\n"
-            "OFF — sends only your message (and task instructions).\n\n"
-            "Turn OFF for quick questions that don't need the full story loaded."
+            "Toggle between story-aware chat and free chat.\n\n"
+            "ON  — sends the project's story context and recent chat history.\n"
+            "OFF — sends only your current message with the free-chat system prompt.\n"
+            "       The model does not receive the project's story or previous chat history.\n\n"
+            "Turn OFF for a general-purpose conversation unrelated to the project."
         )
         self.context_toggle_btn.setStyleSheet(self._context_toggle_style(True))
         self.context_toggle_btn.clicked.connect(self._on_context_toggle)
@@ -488,7 +497,7 @@ class ChatPanel(QWidget):
         self.insert_chapter_btn = QPushButton("📎 Insert Chapter")
         self.insert_chapter_btn.setObjectName("subtle")
         self.insert_chapter_btn.setToolTip(
-            "Attach one existing chapter to the next chat message."
+            "Attach one or more existing chapters to the next chat message."
         )
         self.insert_chapter_btn.clicked.connect(self._select_chapter_to_attach)
         header_layout.addWidget(self.insert_chapter_btn)
@@ -709,18 +718,50 @@ class ChatPanel(QWidget):
         if dialog.exec() != QDialog.Accepted:
             return
 
-        number = dialog.selected_chapter_number()
-        if number is None:
+        selected_numbers = dialog.selected_chapters()
+        if not selected_numbers:
             return
 
-        chapter = next((c for c in self._project.chapters if c.number == number), None)
-        if chapter is None or not chapter.content.strip():
-            self.messages_widget.add_error_notice(f"Chapter {number} has no content to insert.")
+        chapters_by_number = {chapter.number: chapter for chapter in self._project.chapters}
+        attachments: list[tuple[int, str, str]] = []
+        empty_numbers: list[int] = []
+
+        for number in sorted(selected_numbers):
+            chapter = chapters_by_number.get(number)
+            if chapter is None or not chapter.content.strip():
+                empty_numbers.append(number)
+                continue
+            attachments.append(
+                (
+                    number,
+                    chapter.title.strip() or "Untitled",
+                    chapter.content,
+                )
+            )
+
+        if not attachments:
+            self.messages_widget.add_error_notice(
+                "The selected chapters have no content to insert."
+            )
             return
 
-        self._pending_chapter_attachment = (number, chapter.title.strip() or "Untitled", chapter.content)
-        self._chapter_context_pending_label.setText(f"📎 Chapter {number} attached")
+        self._pending_chapter_attachment = attachments
+        if len(attachments) == 1:
+            self._chapter_context_pending_label.setText(
+                f"📎 Chapter {attachments[0][0]} attached"
+            )
+        else:
+            self._chapter_context_pending_label.setText(
+                f"📎 {len(attachments)} chapters attached"
+            )
         self._chapter_context_pending_label.setVisible(True)
+
+        if empty_numbers:
+            logger.warning(
+                "Skipped empty chapters from chat attachment: %s",
+                ", ".join(str(n) for n in empty_numbers),
+            )
+
 
     def _send_message(self) -> None:
         if not self._project:
@@ -747,18 +788,25 @@ class ChatPanel(QWidget):
 
         extra_input = text
         if self._pending_chapter_attachment is not None:
-            number, title, content = self._pending_chapter_attachment
+            attachment_blocks = []
+            for number, title, content in self._pending_chapter_attachment:
+                attachment_blocks.append(
+                    "===CHAPTER_ATTACHMENT===\n"
+                    f"{number}\n{title}\n"
+                    "===ATTACHMENT_CONTENT===\n"
+                    f"{content}\n"
+                    "===ATTACHMENT_END===\n"
+                )
             extra_input = (
                 f"{CHAT_CHAPTER_ATTACHMENT_MARKER}\n"
-                f"{number}\n{title}\n"
-                "===ATTACHMENT_CONTENT===\n"
-                f"{content}\n"
-                "===ATTACHMENT_END===\n"
-                f"{text}"
+                + "".join(attachment_blocks)
+                + "===AUTHOR_REQUEST===\n"
+                + text
             )
             self._pending_chapter_attachment = None
             self._chapter_context_pending_label.setVisible(False)
             self._chapter_context_pending_label.setText("")
+
 
         self._active_project = self._project
         self._set_busy(True)

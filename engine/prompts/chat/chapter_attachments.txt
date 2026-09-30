@@ -1,0 +1,6 @@
+The author explicitly attached the following chapter(s) for this message. Read them as reference material and answer the author's request using their content. Use all attached chapters when relevant to the request. Do not assume any other chapter is attached.
+
+{{attached_chapters}}
+
+AUTHOR'S MESSAGE:
+{{user_request}}
