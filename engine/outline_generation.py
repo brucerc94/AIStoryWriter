@@ -16,7 +16,7 @@ import logging
 import re
 
 from engine.models import TaskType
-from engine.context import build_relevant_chapter_context
+from engine.context import build_relevant_chapter_context, format_characters_block
 from engine import prompts, storage
 
 logger = logging.getLogger("workflow")
