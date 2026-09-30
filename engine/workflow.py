@@ -1490,31 +1490,74 @@ class WorkflowWorker(QObject):
 
 
     def _parse_extend_plan(self, plan_text: str, next_chapter: int, requested_count: int) -> list[str]:
+        """Parse the internal extension plan without being overly strict about formatting.
 
-        descriptions: list[str] = []
-        seen_chapters: set[int] = set()
-        for line in plan_text.splitlines():
-            line = line.strip()
+        The planner prompt asks for:
+            Chapter N → description
 
-            m = re.match(r"(?i)chapter\s+(\d+)\s*(?:→|->|–>|—>)\s*(.*)", line)
-            if not m:
-                continue
-            ch_num = int(m.group(1))
-            desc = m.group(2).strip()
-            if ch_num in seen_chapters:
-                continue
-            seen_chapters.add(ch_num)
-            descriptions.append((ch_num, desc))
-
-        descriptions.sort(key=lambda x: x[0])
+        Small formatting deviations are common with local models (for example
+        using ':' instead of '→', adding bullets, markdown headings, or using
+        a numbered list). Those are presentation differences, not a reason to
+        discard the whole extension request, so we normalize them here while
+        still requiring the exact requested chapter range with no gaps.
+        """
+        descriptions_by_chapter: dict[int, str] = {}
         final_chapter = next_chapter + requested_count - 1
-        valid = [
-            desc for (ch_num, desc) in descriptions
-            if next_chapter <= ch_num <= final_chapter
-        ]
-        if len(valid) != requested_count:
+
+        # Remove common wrappers that models sometimes add around a short plan.
+        cleaned_lines: list[str] = []
+        for raw_line in (plan_text or "").splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            line = re.sub(r"^\\s*\`{1,3}", "", line)
+            line = re.sub(r"\`{1,3}\\s*$", "", line)
+            line = re.sub(r"^[-*•]\\s+", "", line)
+            line = re.sub(r"^\\s*#+\\s*", "", line)
+            cleaned_lines.append(line.strip())
+
+        patterns = (
+            # Preferred format from the prompt.
+            re.compile(r"(?i)^chapter\\s+(\\d+)\\s*(?:→|->|–>|—>|:|-|—)\\s*(.+?)\\s*$"),
+            # Numbered-list variants: "13. ..." / "13) ...".
+            re.compile(r"^\\s*(\\d+)[.)]\\s+(.+?)\\s*$"),
+        )
+
+        for line in cleaned_lines:
+            parsed: tuple[int, str] | None = None
+            for pattern in patterns:
+                m = pattern.match(line)
+                if m:
+                    parsed = (int(m.group(1)), m.group(2).strip())
+                    break
+            if parsed is None:
+                continue
+
+            ch_num, desc = parsed
+            if not (next_chapter <= ch_num <= final_chapter):
+                continue
+            if not desc or ch_num in descriptions_by_chapter:
+                continue
+
+            # If a model emits a markdown heading as the description, keep the
+            # useful text but discard only redundant heading punctuation.
+            desc = re.sub(r"^#+\\s*", "", desc).strip()
+            if not desc:
+                continue
+            descriptions_by_chapter[ch_num] = desc
+
+        expected_numbers = list(range(next_chapter, final_chapter + 1))
+        if list(sorted(descriptions_by_chapter)) != expected_numbers:
+            logger.warning(
+                "[extend_outline] Could not parse exact chapter plan range. "
+                "Expected=%s Parsed=%s Raw=%r",
+                expected_numbers,
+                sorted(descriptions_by_chapter),
+                (plan_text or "")[:3000],
+            )
             return []
-        return valid
+
+        return [descriptions_by_chapter[n] for n in expected_numbers]
 
     def _build_extend_outline_reference(
         self,
