@@ -1184,6 +1184,75 @@ class WorkflowWorker(QObject):
     def _run_chat_with_chapter_attachment(self) -> None:
 
         body = self.extra_input[len(CHAT_CHAPTER_ATTACHMENT_MARKER):].lstrip("\n")
+
+        # New format supports multiple chapter attachments.
+        if body.startswith("===CHAPTER_ATTACHMENT===\n"):
+            try:
+                attachment_text, user_request = body.split(
+                    "===AUTHOR_REQUEST===\n", 1
+                )
+                raw_blocks = attachment_text.split("===CHAPTER_ATTACHMENT===\n")
+                attachments = []
+
+                for raw_block in raw_blocks:
+                    block = raw_block.strip()
+                    if not block:
+                        continue
+
+                    header, rest = block.split("===ATTACHMENT_CONTENT===\n", 1)
+                    content, _tail = rest.split("\n===ATTACHMENT_END===\n", 1)
+                    header_lines = header.strip().split("\n", 1)
+                    chapter_num = header_lines[0].strip()
+                    chapter_title = (
+                        header_lines[1].strip() if len(header_lines) > 1 else ""
+                    )
+                    attachments.append(
+                        (chapter_num, chapter_title, content)
+                    )
+            except ValueError:
+                attachments = []
+
+            if attachments:
+                rendered_attachments = []
+                for chapter_num, chapter_title, content in attachments:
+                    rendered_attachments.append(
+                        f"===== INSERTED CHAPTER {chapter_num}: {chapter_title} =====\n"
+                        f"{content}\n"
+                        f"===== END INSERTED CHAPTER {chapter_num} ====="
+                    )
+
+                prompt = prompts.render(
+                    "chat/chapter_attachments",
+                    attached_chapters="\n\n".join(rendered_attachments),
+                    user_request=user_request.strip(),
+                )
+
+                self.step_started.emit(
+                    f"Reading {len(attachments)} inserted chapter(s)..."
+                )
+                result = self._run_inference(
+                    TaskType.CHAT, prompt, add_to_chat=False
+                )
+                if not result:
+                    return
+
+                chapter_labels = ", ".join(
+                    f"Chapter {chapter_num}"
+                    for chapter_num, _title, _content in attachments
+                )
+                self.project.chat_messages.append(ChatMessage(
+                    role=MessageRole.USER,
+                    content=f"[{chapter_labels} attached] {user_request.strip()}",
+                ))
+                self.project.chat_messages.append(
+                    ChatMessage(role=MessageRole.ASSISTANT, content=result)
+                )
+                self._maybe_summarize()
+                storage.save_project(self.project)
+                self.step_finished.emit("Chat", result)
+                return
+
+        # Backward-compatible single-chapter format.
         try:
             header, rest = body.split("===ATTACHMENT_CONTENT===\n", 1)
             content, user_request = rest.split("\n===ATTACHMENT_END===\n", 1)
@@ -1213,7 +1282,6 @@ class WorkflowWorker(QObject):
         if not result:
             return
 
-  
         self.project.chat_messages.append(ChatMessage(
             role=MessageRole.USER,
             content=f"[Chapter {chapter_num} attached] {user_request.strip()}",
