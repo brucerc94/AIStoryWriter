@@ -410,51 +410,247 @@ def _last_outline_entry(outline: str) -> str:
     return text[matches[-1].start():].strip() if matches else text[-_CONTINUATION_CHECKPOINT_CHARS:].strip()
 
 
+def _last_outline_entries(outline: str, count: int = 2) -> str:
+    """Return the last *count* complete chapter entries from an existing outline."""
+    text = (outline or "").strip()
+    if not text or count <= 0:
+        return ""
+
+    matches = list(
+        re.finditer(
+            r"(?im)^\s*##\s*(?:Chapter|Cap[ií]tulo)\s+\d+\b[^\n]*$",
+            text,
+        )
+    )
+    if not matches:
+        return text[-_CONTINUATION_CHECKPOINT_CHARS:].strip()
+
+    start = matches[max(0, len(matches) - count)].start()
+    return text[start:].strip()
+
+
+def _parse_extend_plan(
+    plan_text: str,
+    next_chapter: int,
+    requested_count: int,
+) -> list[str]:
+    """Parse the exact Chapter N -> description plan required by Extend Outline.
+
+    Local models occasionally use ':', '—', or markdown/bullets instead of
+    the requested arrow. Those formatting differences are normalized here,
+    while chapter numbering remains strict and consecutive.
+    """
+    final_chapter = next_chapter + requested_count - 1
+    by_number: dict[int, str] = {}
+
+    for raw_line in (plan_text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        line = re.sub(r"^\s*[-*•]\s+", "", line)
+        line = re.sub(r"^\s*#{1,6}\s*", "", line)
+
+        match = re.match(
+            r"(?i)^chapter\s+(\d+)\s*(?:→|->|–>|—>|:|-|—)\s*(.+?)\s*$",
+            line,
+        )
+        if not match:
+            match = re.match(r"^\s*(\d+)[.)]\s+(.+?)\s*$", line)
+        if not match:
+            continue
+
+        number = int(match.group(1))
+        description = match.group(2).strip()
+        if not (next_chapter <= number <= final_chapter):
+            continue
+        if description and number not in by_number:
+            by_number[number] = description
+
+    expected = list(range(next_chapter, final_chapter + 1))
+    parsed = sorted(by_number)
+    if parsed != expected:
+        logger.warning(
+            "[extend_outline] Could not parse exact plan range. Expected=%s Parsed=%s Raw=%r",
+            expected,
+            parsed,
+            (plan_text or "")[:3000],
+        )
+        return []
+
+    return [by_number[number] for number in expected]
+
 def _run_extend_outline(worker) -> None:
     parsed = _parse_extend_payload(worker)
     if parsed is None:
-        worker.error_occurred.emit("Extend Outline requires a valid chapter count and story material.")
+        worker.error_occurred.emit(
+            "Extend Outline requires a valid chapter count and story material."
+        )
         return
+
     requested_count, user_request = parsed
     current_outline = (worker.project.outline or "").strip()
     if not current_outline:
-        worker.error_occurred.emit("There is no outline to extend. Generate an outline first.")
+        worker.error_occurred.emit(
+            "There is no outline to extend. Generate an outline first."
+        )
         return
-    chapter_numbers = [int(match.group(1)) for match in re.finditer(r"(?im)^\s*##\s*(?:Chapter|Cap[ií]tulo)\s+(\d+)\b", current_outline)]
+
+    chapter_numbers = [
+        int(match.group(1))
+        for match in re.finditer(
+            r"(?im)^\s*##\s*(?:Chapter|Cap[ií]tulo)\s+(\d+)\b",
+            current_outline,
+        )
+    ]
     next_chapter = max(chapter_numbers, default=0) + 1
-    split_source = _story_source(worker, requested_count, user_request)
-    worker.step_started.emit(f"Dividing extension request into {requested_count} chapter source blocks...")
-    source_blocks = _split_story(worker, requested_count, split_source)
-    if len(source_blocks) != requested_count:
-        worker.error_occurred.emit("Could not reliably divide the extension request into the requested number of chapters. Nothing was appended — try again.")
-        return
-    generated_entries: list[str] = []
-    previous_entry = _last_outline_entry(current_outline)
-    for index, source_block in enumerate(source_blocks):
+    final_chapter = next_chapter + requested_count - 1
+
+    characters = (
+        format_characters_block(worker.project.characters) or "(none)"
+    )
+    world = (worker.project.world or "").strip() or "(none)"
+    memory = (worker.project.memory or "").strip() or "(none)"
+    intent_frag = worker.project.author_intent.to_prompt_fragment() or "(none)"
+    style_frag = worker.project.writing_style.to_prompt_fragment() or "(none)"
+    language = worker._response_language()
+    language_note = f" Write in {language}." if language else ""
+
+    # The extension request may be only one sentence. Do NOT reject it just
+    # because it is under the semantic-splitter's generic 200-character
+    # threshold. Extend Outline is an instruction to distribute that request
+    # across new chapters, so the planner receives the request plus a small
+    # read-only tail of the existing outline for continuity.
+    existing_ref = _last_outline_entries(current_outline, count=2)
+
+    worker.step_started.emit(
+        f"Planning {requested_count} new chapter(s) starting at Chapter {next_chapter}..."
+    )
+    logger.info(
+        "[extend_outline] Phase 1: planning %d chapters (%d–%d).",
+        requested_count,
+        next_chapter,
+        final_chapter,
+    )
+
+    plan_system = prompts.render(
+        "outline/extend_plan_system",
+        language_note=language_note,
+        requested_count=requested_count,
+        next_chapter=next_chapter,
+        last_new_chapter=final_chapter,
+    )
+    plan_user = prompts.render(
+        "outline/extend_plan_user",
+        title=worker.project.title,
+        user_request=user_request,
+        requested_count=requested_count,
+        next_chapter=next_chapter,
+        last_new_chapter=final_chapter,
+        characters=characters,
+        world=world,
+        memory=memory,
+        author_intent=intent_frag,
+        writing_style=style_frag,
+        current_outline=existing_ref,
+    )
+
+    chapter_plans: list[str] = []
+    for attempt in range(1, 3):
         if worker._cancelled:
             return
-        chapter_num = next_chapter + index
-        worker.step_started.emit(f"Writing outline for Chapter {chapter_num}/{next_chapter + requested_count - 1}...")
-        entry = _write_chapter_outline(worker, chapter_num, source_block, previous_entry)
-        if not entry:
-            worker.error_occurred.emit(f"Could not complete the outline for Chapter {chapter_num}. Nothing was appended — try again.")
+
+        plan_raw = worker._run_lean_inference(
+            TaskType.GENERATE_OUTLINE,
+            plan_system,
+            plan_user,
+            max_tokens=min(512, worker._content_max_tokens()),
+        )
+        chapter_plans = _parse_extend_plan(
+            plan_raw.strip(),
+            next_chapter,
+            requested_count,
+        )
+        if chapter_plans:
+            logger.info(
+                "[extend_outline] Phase 1 complete: %d chapter plans parsed.",
+                len(chapter_plans),
+            )
+            break
+
+        logger.warning(
+            "[extend_outline] Phase 1 attempt %d/2 did not yield a valid %d-chapter plan.",
+            attempt,
+            requested_count,
+        )
+
+    if len(chapter_plans) != requested_count:
+        worker.error_occurred.emit(
+            f"Extend Outline: could not create the {requested_count}-chapter planning "
+            "distribution. Nothing was appended — try again."
+        )
+        return
+
+    # Generate each new chapter entry from its planned events. The existing
+    # outline is only a continuity reference; it is never rewritten.
+    generated_entries: list[str] = []
+    previous_entry = _last_outline_entry(current_outline)
+
+    for index, chapter_plan in enumerate(chapter_plans):
+        if worker._cancelled:
             return
+
+        chapter_num = next_chapter + index
+        worker.step_started.emit(
+            f"Writing outline for Chapter {chapter_num}/{final_chapter}..."
+        )
+
+        entry = _write_chapter_outline(
+            worker,
+            chapter_num,
+            chapter_plan,
+            previous_entry,
+        )
+        if not entry:
+            worker.error_occurred.emit(
+                f"Could not complete the outline for Chapter {chapter_num}. "
+                "Nothing was appended — try again."
+            )
+            return
+
         generated_entries.append(entry)
         previous_entry = entry
-    new_outline = "\n\n".join(generated_entries).strip()
-    if len(generated_entries) != requested_count:
-        worker.error_occurred.emit(f"Expected {requested_count} new chapters but generated {len(generated_entries)}.")
-        return
-    worker.project.outline = (current_outline.rstrip() + "\n\n" + new_outline).strip()
 
-    logger.info("[extend_outline] Updating Characters and World from the user's original extension request.")
+    if len(generated_entries) != requested_count:
+        worker.error_occurred.emit(
+            f"Expected {requested_count} new chapters but generated "
+            f"{len(generated_entries)}."
+        )
+        return
+
+    new_outline = "\n\n".join(generated_entries).strip()
+    worker.project.outline = (
+        current_outline.rstrip() + "\n\n" + new_outline
+    ).strip()
+
+    logger.info(
+        "[extend_outline] Updating Characters and World from the user's original extension request."
+    )
     worker._extract_and_merge_characters(user_request)
-    worker._update_world_incremental(user_request, source_type="outline_extend_input")
+    worker._update_world_incremental(
+        user_request,
+        source_type="outline_extend_input",
+    )
 
     storage.save_project(worker.project)
-    worker.step_finished.emit(f"Outline Extended (Chapters {next_chapter}-{next_chapter + requested_count - 1})", new_outline)
-    logger.info("[extend_outline] Extend Outline complete: %d chapter(s); canon updated from user input.", requested_count)
-
+    worker.step_finished.emit(
+        f"Outline Extended (Chapters {next_chapter}-{final_chapter})",
+        new_outline,
+    )
+    logger.info(
+        "[extend_outline] Extend Outline complete: %d chapter(s); canon updated from user input.",
+        requested_count,
+    )
 
 def install(module) -> None:
     if getattr(module, "_outline_generation_installed", False):
