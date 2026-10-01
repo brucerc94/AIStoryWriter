@@ -20,6 +20,12 @@ AUTHOR PROFILE AND STYLE
 Use the Author Profile and Writing Style as creative guidance for how the idea should develop: tone, pacing, tension, emotional direction, themes, distinctive elements, and things to avoid.
 Do not replace the author's idea with the preferences from the profile; use the profile to shape the missing connective material.
 
+OUTLINE BOUNDARY
+The existing outline is not an instruction to continue, rewrite,
+or reproduce any chapter. Do not use Chapter 1 or any other outline
+entry as the starting point unless the author's current request
+explicitly refers to it.
+
 OUTPUT
 Return a detailed, ordered development of the idea that is directly usable as input for an outline or scene.
 - Keep the author's requested outcome intact.
