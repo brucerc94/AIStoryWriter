@@ -560,7 +560,11 @@ class WorkflowWorker(QObject):
                 self.error_occurred.emit(error)
                 return ""
 
-        effective_max_tokens = min(max_tokens, max(0, context_limit - prompt_tokens))
+        effective_max_tokens = self._effective_output_tokens(
+            task,
+            prompt_tokens,
+            max_tokens,
+        )
         if prompt_tokens + effective_max_tokens > context_limit:
             error = (
                 f"[{task.value}] prompt_tokens({prompt_tokens}) + "
@@ -981,6 +985,24 @@ class WorkflowWorker(QObject):
         max_tokens: int = 2048,
     ) -> str:
         return self._run_inference_v2(task, user_message, add_to_chat=add_to_chat, max_tokens=max_tokens)
+
+    def _effective_output_tokens(
+        self,
+        task: TaskType,
+        prompt_tokens: int,
+        requested_max_tokens: int,
+    ) -> int:
+        """Calculate the reply budget from the active model context.
+        
+        Write Chapter is long-form generation, so it uses all tokens left after
+        the prompt instead of being capped by the shared Max Tokens setting.
+        Other tasks keep their explicit requested limit.
+        """
+        context_limit = self._model_context_limit()
+        available = max(0, context_limit - prompt_tokens - 256)
+        if task == TaskType.WRITE_CHAPTER:
+            return available
+        return min(requested_max_tokens, available)
 
     def _run_lean_inference(
         self,
@@ -2176,7 +2198,10 @@ class WorkflowWorker(QObject):
             ctx_tokens = self._model_context_limit()
         except Exception:
             ctx_tokens = 4096
-        reply_tokens = self._content_max_tokens()
+        # Reserve roughly half the model window for the continuation
+        # reply. The inference call below may use any additional space that
+        # remains after the actual prompt is built.
+        reply_tokens = max(1024, min(ctx_tokens - 1024, ctx_tokens // 2))
         prompt_token_budget = max(256, ctx_tokens - reply_tokens - FIXED_OVERHEAD_TOKENS)
         total_chars = prompt_token_budget * CHARS_PER_TOKEN
 
