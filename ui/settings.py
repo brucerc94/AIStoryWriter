@@ -1261,10 +1261,7 @@ class ModelsPanel(QWidget):
         )
         if path:
             self.mtp_model_input.setText(path)
-            self._update_runtime_status(
-                self.runtime_model_combo.currentData() or "",
-                path,
-            )
+            self._apply_runtime_profile()
 
     def _browse_llama_cli(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -1275,36 +1272,7 @@ class ModelsPanel(QWidget):
         )
         if path:
             self.llama_cli_input.setText(path)
-            self._update_runtime_status(
-                self.runtime_model_combo.currentData() or "",
-                self.mtp_model_input.text().strip(),
-            )
-
-    def _save_runtime_profile(self) -> None:
-        model_path = self.runtime_model_combo.currentData() or ""
-        if not model_path:
-            QMessageBox.warning(
-                self, "Runtime Profile", "Select the target GGUF model first."
-            )
-            return
-
-        mtp_path = self.mtp_model_input.text().strip()
-        cli_path = self.llama_cli_input.text().strip()
-
-        if mtp_path and not Path(mtp_path).is_file():
-            QMessageBox.warning(
-                self, "Runtime Profile", "The selected MTP Draft GGUF does not exist."
-            )
-            return
-
-        if mtp_path and not find_llama_cli(cli_path):
-            QMessageBox.warning(
-                self,
-                "Runtime Profile",
-                "MTP is enabled, but llama-cli.exe was not found. "
-                "Select it here or put it in PATH.",
-            )
-            return
+            self._apply_runtime_profile()
 
     def _on_model_changed(self, task: TaskType, path: str) -> None:
         if not self._project:
