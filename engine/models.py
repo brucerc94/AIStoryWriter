@@ -488,10 +488,6 @@ class AppSettings:
     image_default_cfg_scale: float = 7.0
     image_loras: list = None
 
-    # Runtime options belong to the target model, not to individual task assignments.
-    model_runtime_profiles: dict[str, dict[str, Any]] = field(default_factory=dict)
-    llama_cpp_cli_path: str = ""
-
     def __post_init__(self):
         if self.image_loras is None:
             self.image_loras = []
@@ -525,8 +521,6 @@ class AppSettings:
             "image_default_steps": self.image_default_steps,
             "image_default_cfg_scale": self.image_default_cfg_scale,
             "image_loras": self.image_loras if self.image_loras is not None else [],
-            "model_runtime_profiles": self.model_runtime_profiles,
-            "llama_cpp_cli_path": self.llama_cpp_cli_path,
         }
 
     @classmethod
