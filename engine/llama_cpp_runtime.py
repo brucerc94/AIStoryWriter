@@ -214,6 +214,7 @@ class LlamaCppCliRuntime:
 
             chunks: list[str] = []
             stderr_chunks: list[str] = []
+            cancelled = False
 
             def drain_stderr() -> None:
                 if process.stderr is None:
@@ -230,6 +231,7 @@ class LlamaCppCliRuntime:
 
                 while True:
                     if cancel_check is not None and cancel_check():
+                        cancelled = True
                         self.stop()
                         break
 
@@ -253,6 +255,8 @@ class LlamaCppCliRuntime:
                 stderr_text = strip_ansi("".join(stderr_chunks)).strip()
 
                 result = "".join(chunks).strip()
+                if cancelled:
+                    return result
                 if return_code not in (0, None):
                     detail = stderr_text[-4000:] if stderr_text else "llama-cli exited with an error."
                     raise RuntimeError(
