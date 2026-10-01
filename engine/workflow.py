@@ -1335,6 +1335,8 @@ class WorkflowWorker(QObject):
         result = self._run_inference(TaskType.WRITE_SYNOPSIS, prompt, add_to_chat=True, max_tokens=1024)
         if result:
             self.project.synopsis = result
+            self.project.outline_source_length = 0
+            self.project.outline_source_hash = ""
             self._extract_and_merge_characters(result)
 
             storage.save_project(self.project)
