@@ -408,6 +408,9 @@ class LLMEngine:
         self._mtp_model_path = ""
         self._llama_cli_path = ""
         self._mtp_flash_attn = False
+        self._mtp_gpu_layers = 0
+        self._mtp_threads = 4
+        self._mtp_threads_batch = 0
 
     def _model_supports_thinking(self) -> bool:
         """
