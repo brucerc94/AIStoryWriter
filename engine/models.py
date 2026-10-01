@@ -488,6 +488,14 @@ class AppSettings:
     image_default_cfg_scale: float = 7.0
     image_loras: list = None
 
+    # Per-model runtime options (e.g. optional MTP speculative drafter).
+    # Keyed by normalized model path so the setting is stored once per model,
+    # not duplicated in every task assignment.
+    model_runtime_profiles: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Optional llama.cpp server executable used when a model has MTP enabled.
+    # Empty means auto-discover it; MTP itself remains optional per model.
+    llama_server_path: str = ""
+
     def __post_init__(self):
         if self.image_loras is None:
             self.image_loras = []
@@ -521,6 +529,8 @@ class AppSettings:
             "image_default_steps": self.image_default_steps,
             "image_default_cfg_scale": self.image_default_cfg_scale,
             "image_loras": self.image_loras if self.image_loras is not None else [],
+            "model_runtime_profiles": self.model_runtime_profiles or {},
+            "llama_server_path": self.llama_server_path,
         }
 
     @classmethod
