@@ -1,7 +1,7 @@
 import unittest
 
 from engine.context import build_context_for_model, build_system_prompt
-from engine.models import AuthorIntent, Character, ChatMode, MessageRole, Project, TaskType
+from engine.models import AuthorIntent, Character, ChatMode, MessageRole, Project, TaskType, WritingStyle
 
 
 class DefineIdeaContextTests(unittest.TestCase):
@@ -38,6 +38,11 @@ Raul travels toward the town.",
             emotional_journey="Build unease before the arrival.",
             themes="Trust and uncertainty.",
         )
+        project.writing_style = WritingStyle(
+            narrator_pov="Third person limited",
+            pacing="Tense and controlled",
+            dialogue_style="Natural, terse dialogue with subtext.",
+        )
 
         system_prompt = build_system_prompt(
             project,
@@ -62,6 +67,9 @@ Raul travels toward the town.",
         self.assertNotIn("Elena", system)
         self.assertIn("forest pass", system)
         self.assertIn("Build unease before the arrival.", system)
+        self.assertIn("Third person limited", system)
+        self.assertIn("Natural, terse dialogue with subtext.", system)
+        self.assertIn("brief dialogue", system.lower())
         self.assertIn("llegue herido al pueblo", user)
         self.assertEqual(len(messages), 2)
 
