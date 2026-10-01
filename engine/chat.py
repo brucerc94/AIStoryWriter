@@ -152,6 +152,9 @@ class LLMEngine:
         self._mtp_model_path: str = ""
         self._llama_cli_path: str = ""
         self._mtp_flash_attn: bool = False
+        self._mtp_gpu_layers: int = 0
+        self._mtp_threads: int = 4
+        self._mtp_threads_batch: int = 0
 
     @property
     def is_available(self) -> bool:
@@ -284,6 +287,9 @@ class LLMEngine:
                 self._mtp_model_path = mtp_path
                 self._llama_cli_path = cli_path
                 self._mtp_flash_attn = flash_attn
+                self._mtp_gpu_layers = n_gpu_layers
+                self._mtp_threads = n_threads
+                self._mtp_threads_batch = n_threads_batch
                 self._model = object()
                 self._current_path = model_path
                 self._current_n_ctx = n_ctx
@@ -304,6 +310,9 @@ class LLMEngine:
             self._mtp_model_path = ""
             self._llama_cli_path = ""
             self._mtp_flash_attn = False
+            self._mtp_gpu_layers = 0
+            self._mtp_threads = 4
+            self._mtp_threads_batch = 0
 
             if not _llama_available:
                 raise RuntimeError(
@@ -518,9 +527,9 @@ class LLMEngine:
                     top_p=top_p,
                     top_k=top_k,
                     context_size=self._current_n_ctx,
-                    gpu_layers=0,
-                    threads=4,
-                    threads_batch=0,
+                    gpu_layers=self._mtp_gpu_layers,
+                    threads=self._mtp_threads,
+                    threads_batch=self._mtp_threads_batch,
                     flash_attn=self._mtp_flash_attn,
                     stream=stream,
                     stream_callback=stream_callback,
