@@ -69,6 +69,9 @@ class DefineIdeaContextTests(unittest.TestCase):
         self.assertIn("Third person limited", system)
         self.assertIn("Natural, terse dialogue with subtext.", system)
         self.assertIn("brief dialogue", system.lower())
+        self.assertNotIn("Chapter 1: The Journey", system)
+        self.assertNotIn("Raul travels toward the town.", system)
+        self.assertNotIn("## Outline", system)
         self.assertIn("llegue herido al pueblo", user)
         self.assertEqual(len(messages), 2)
 
