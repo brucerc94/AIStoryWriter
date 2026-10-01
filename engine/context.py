@@ -251,6 +251,9 @@ def _section_payloads(
     elif task == TaskType.REVIEW_CHAPTER:
         parts = [p for p in (intent.to_prompt_fragment(), style.to_prompt_fragment()) if p]
         creative_direction = "\n".join(parts)
+    elif task == TaskType.CHAT and chat_mode == ChatMode.DEFINE_IDEA:
+        parts = [p for p in (intent.to_prompt_fragment(), style.to_prompt_fragment()) if p]
+        creative_direction = "\n".join(parts)
 
     outline = ""
     if task != TaskType.GENERATE_OUTLINE and project.outline.strip():
@@ -312,6 +315,16 @@ def _compact_sections(
             "Chat Summary": 0,
             "Creative Direction": max(80, min(300, max_context_tokens // 14)),
         }
+    elif task == TaskType.CHAT and chat_mode == ChatMode.DEFINE_IDEA:
+        budgets = {
+            "Synopsis": max(180, min(360, max_context_tokens // 10)),
+            "Characters": max(300, min(700, max_context_tokens // 6)),
+            "Outline": max(350, min(850, max_context_tokens // 5)),
+            "World": max(180, min(450, max_context_tokens // 10)),
+            "Memory": max(180, min(450, max_context_tokens // 10)),
+            "Chat Summary": max(120, min(300, max_context_tokens // 16)),
+            "Creative Direction": max(240, min(600, max_context_tokens // 7)),
+        }
     else:
         budgets = {
             "Synopsis": max(120, max_context_tokens // 20),
@@ -323,7 +336,9 @@ def _compact_sections(
             "Creative Direction": max(60, max_context_tokens // 20),
         }
 
-    if len(project.characters) > 12:
+    if len(project.characters) > 12 and not (
+        task == TaskType.CHAT and chat_mode == ChatMode.DEFINE_IDEA
+    ):
         sections["Characters"] = format_characters_block(project.characters[:12])
 
     for name, text in list(sections.items()):
