@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import re
@@ -1363,75 +1362,6 @@ class WorkflowWorker(QObject):
 
         requested_n = self._extract_requested_chapter_count(self.extra_input)
 
-        # A previously completed outline generation marks the exact Synopsis/Draft
-        # prefix it consumed. Later Generate Outline runs only use genuinely new
-        # material and append new chapters through the existing Extend Outline flow.
-        current_synopsis = self.project.synopsis or ""
-        processed_length = self.project.outline_source_length
-        processed_hash = self.project.outline_source_hash
-        current_outline = self.project.outline.strip()
-
-        if current_outline and processed_length > 0:
-            processed_prefix = current_synopsis[:processed_length]
-            prefix_is_valid = (
-                len(processed_prefix) == processed_length
-                and bool(processed_hash)
-                and hashlib.sha256(processed_prefix.encode("utf-8")).hexdigest() == processed_hash
-            )
-            if not prefix_is_valid:
-                self.error_occurred.emit(
-                    "The Synopsis text used for the current outline was changed. "
-                    "Unlock the Synopsis and regenerate the outline from scratch."
-                )
-                return
-
-            new_synopsis = current_synopsis[processed_length:]
-            if not new_synopsis.strip():
-                self.error_occurred.emit(
-                    "No new Synopsis/Draft material has been added since the last outline generation."
-                )
-                return
-
-            existing_numbers = self._outline_chapter_numbers()
-            existing_count = max(existing_numbers, default=0)
-            if requested_n is None:
-                additional_count = 1
-            else:
-                additional_count = requested_n - existing_count
-                if additional_count < 1:
-                    self.error_occurred.emit(
-                        f"The existing outline already reaches Chapter {existing_count}. "
-                        f"Set a higher total chapter count than {existing_count}, "
-                        "or use Extend Outline to add chapters explicitly."
-                    )
-                    return
-
-            original_extra_input = self.extra_input
-            before_outline = current_outline
-            self.extra_input = (
-                f"{OUTLINE_EXTEND_MARKER}\n"
-                f"{additional_count}\n"
-                "Use only the new Synopsis/Draft material below to extend the existing outline. "
-                "Do not rewrite or modify any existing chapter. "
-                f"Start with Chapter {existing_count + 1} and generate exactly "
-                f"{additional_count} new chapter(s).\n\n"
-                f"NEW SYNOPSIS/DRAFT MATERIAL:\n{new_synopsis.strip()}"
-            )
-            try:
-                self._run_extend_outline()
-            finally:
-                self.extra_input = original_extra_input
-
-            if self.project.outline.strip() != before_outline:
-                self.project.outline_source_length = len(current_synopsis)
-                self.project.outline_source_hash = hashlib.sha256(
-                    current_synopsis.encode("utf-8")
-                ).hexdigest()
-                storage.save_project(self.project)
-            return
-
-
-
         _outline_template_key = "task_instructions/generate_outline"
         _requested_count_str = str(requested_n) if requested_n is not None else "(not specified)"
         _original_cached = prompts._cache.get(_outline_template_key)
@@ -1535,19 +1465,6 @@ class WorkflowWorker(QObject):
                         and self.project.chat_messages[-1].role == MessageRole.ASSISTANT
                     ):
                         self.project.chat_messages[-1].content += note
-
-                actual_numbers = self._outline_chapter_numbers()
-                if (
-                    outline_text
-                    and (
-                        not requested_n
-                        or (actual_numbers and max(actual_numbers) >= requested_n)
-                    )
-                ):
-                    self.project.outline_source_length = len(self.project.synopsis or "")
-                    self.project.outline_source_hash = hashlib.sha256(
-                        (self.project.synopsis or "").encode("utf-8")
-                    ).hexdigest()
 
                 storage.save_project(self.project)
                 self.step_finished.emit("Outline", outline_text)
