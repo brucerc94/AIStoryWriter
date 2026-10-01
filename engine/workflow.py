@@ -484,6 +484,7 @@ class WorkflowWorker(QObject):
             task=task,
             reply_reserved=reply_reserved,
             include_story_context=include_story_context,
+            chat_mode=self.chat_mode,
         )
 
     def _run_inference_v2(
