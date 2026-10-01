@@ -1175,7 +1175,13 @@ class WorkflowWorker(QObject):
             self._run_chat_with_chapter_attachment()
             return
 
-        target_chapter_num = self._detect_chapter_continuation_request(self.extra_input)
+        # Define Idea is a pure narrative-development operation. It must never
+        # be redirected into chapter continuation, because continuation mutates
+        # chapter content, characters, and world.
+        target_chapter_num = None
+        if self.chat_mode != ChatMode.DEFINE_IDEA:
+            target_chapter_num = self._detect_chapter_continuation_request(self.extra_input)
+
         if target_chapter_num is not None:
             self._run_chat_continue_chapter(target_chapter_num)
             return
