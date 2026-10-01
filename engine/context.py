@@ -292,6 +292,7 @@ def _compact_sections(
     max_context_tokens: int,
     task: TaskType,
     project: Project,
+    chat_mode: ChatMode = ChatMode.NORMAL,
 ) -> dict[str, str]:
     # These are caps for story context only. The full task/system prompt is
     # kept intact and is not subjected to these budgets.
@@ -372,6 +373,7 @@ def _build_story_context_text(
             max_context_tokens=max_context_tokens,
             task=task,
             project=project,
+            chat_mode=chat_mode,
         )
         if task == TaskType.GENERATE_OUTLINE:
             if sections["Characters"]:
