@@ -14,7 +14,7 @@ import re
 from typing import Optional
 
 from engine import prompts
-from engine.models import ChatMessage, MessageRole, Project, TaskType
+from engine.models import ChatMessage, ChatMode, MessageRole, Project, TaskType
 
 logger = logging.getLogger("context")
 
@@ -210,12 +210,24 @@ def _section_payloads(
     task: TaskType,
     system_prompt: str,
     user_message: str = "",
+    chat_mode: ChatMode = ChatMode.NORMAL,
 ) -> dict[str, str]:
     synopsis = f"Story Synopsis:\n{project.synopsis.strip()}" if project.synopsis.strip() else ""
     characters = format_characters_block(project.characters)
     world = project.world.strip()
     memory = project.memory.strip()
     chat_summary = project.chat_summary.strip()
+
+    if task == TaskType.CHAT and chat_mode == ChatMode.DEFINE_IDEA:
+        # Idea development is driven by the author's current idea. Reuse the
+        # existing relevance selectors instead of flooding the prompt with the
+        # entire cast/world document.
+        characters = select_relevant_characters(
+            project.characters, user_message, max_characters=12, max_chars=5000
+        )
+        world = select_relevant_world(
+            project.world, user_message, max_sections=4, max_chars=6000
+        )
 
     creative_direction = ""
     intent = project.author_intent
@@ -333,12 +345,15 @@ def _build_story_context_text(
     user_message: str,
     max_context_tokens: int,
     include_story_context: bool,
+    chat_mode: ChatMode = ChatMode.NORMAL,
 ) -> str:
     core_system, custom_instructions = _split_custom_instructions(system_prompt)
     parts = [core_system]
     if include_story_context:
         sections = _compact_sections(
-            _section_payloads(project, task, system_prompt, user_message),
+            _section_payloads(
+                project, task, system_prompt, user_message, chat_mode=chat_mode
+            ),
             max_context_tokens=max_context_tokens,
             task=task,
             project=project,
@@ -395,6 +410,7 @@ def build_context_for_model(
     task: TaskType = TaskType.CHAT,
     reply_reserved: Optional[int] = None,
     include_story_context: bool = True,
+    chat_mode: ChatMode = ChatMode.NORMAL,
 ) -> list[dict]:
     """Build [system, recent chat, user] while preserving the complete task prompt."""
     system_content = _build_story_context_text(
@@ -404,6 +420,7 @@ def build_context_for_model(
         user_message,
         max_context_tokens,
         include_story_context,
+        chat_mode=chat_mode,
     )
 
     # Chat can explicitly run without any project/history context.
@@ -672,6 +689,7 @@ def build_system_prompt(
     language: str = "",
     allow_nsfw: bool = False,
     include_story_context: bool = True,
+    chat_mode: ChatMode = ChatMode.NORMAL,
 ) -> str:
     """Build the complete task system prompt. It must not be silently truncated."""
     if task == TaskType.CHAT and not include_story_context:
@@ -706,7 +724,10 @@ def build_system_prompt(
             "summarize scenes that the story calls for. Write them fully and directly. "
             "No content filtering is applied to this project."
         )
-    instruction = _estimate_task_instruction(task)
+    if task == TaskType.CHAT and chat_mode == ChatMode.DEFINE_IDEA:
+        instruction = prompts.load_raw("chat/define_idea_system")
+    else:
+        instruction = _estimate_task_instruction(task)
     prompt = base.strip()
     if instruction:
         prompt += f"\n\n{instruction}"
