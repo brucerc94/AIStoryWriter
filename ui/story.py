@@ -835,7 +835,7 @@ class OutlineTab(QWidget):
 
     def _on_generate_clicked(self) -> None:
         existing = outline_chapter_numbers(self.editor.get_text())
-        default_n = max(existing) if existing else 12
+        default_n = (max(existing) + 1) if existing else 12
 
 
         lang = storage.load_settings().response_language
