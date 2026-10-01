@@ -9,8 +9,7 @@ class DefineIdeaContextTests(unittest.TestCase):
         project = Project(
             title="Test Story",
             synopsis="Raul travels to a remote town after leaving home.",
-            outline="## Chapter 1: The Journey
-Raul travels toward the town.",
+            outline="## Chapter 1: The Journey\nRaul travels toward the town.",
             world=(
                 "# World\n\n"
                 "## Geography\n"
