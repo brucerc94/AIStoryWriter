@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import html
 import math
 import re
@@ -189,6 +190,12 @@ class SynopsisTab(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self._project: Optional[Project] = None
+        self._loading = False
+        self._protected_synopsis_prefix = ""
+        self._last_valid_synopsis = ""
+        self._protection_notice_shown = False
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
@@ -200,6 +207,28 @@ class SynopsisTab(QWidget):
                 lambda: self.task_requested.emit(TaskType.WRITE_SYNOPSIS, "")
             )
         layout.addWidget(header)
+
+        source_lock_row = QHBoxLayout()
+        source_lock_row.setContentsMargins(0, 0, 0, 0)
+        source_lock_row.setSpacing(8)
+
+        self._source_lock_label = QLabel()
+        self._source_lock_label.setWordWrap(True)
+        self._source_lock_label.setStyleSheet(
+            f"color: {COLOR_TEXT_MUTED}; font-size: 11px;"
+        )
+        source_lock_row.addWidget(self._source_lock_label, 1)
+
+        self._unlock_source_btn = QPushButton("Unlock Synopsis to Regenerate")
+        self._unlock_source_btn.setObjectName("subtle")
+        self._unlock_source_btn.setToolTip(
+            "Allow editing text already used for the current outline. "
+            "Regenerate the outline afterward."
+        )
+        self._unlock_source_btn.clicked.connect(self._unlock_outline_source)
+        source_lock_row.addWidget(self._unlock_source_btn, 0)
+
+        layout.addLayout(source_lock_row)
 
         self.editor = MarkdownEditor(
             placeholder=(
@@ -218,10 +247,102 @@ class SynopsisTab(QWidget):
             lambda: self.task_requested.emit(TaskType.WRITE_SYNOPSIS, "")
         )
         self.editor.content_saved.connect(self.content_changed.emit)
+        self.editor.editor.textChanged.connect(self._on_synopsis_editor_changed)
         layout.addWidget(self.editor, 1)
 
+        self._source_lock_label.hide()
+        self._unlock_source_btn.hide()
+
+    def _on_synopsis_editor_changed(self) -> None:
+        if self._loading:
+            return
+
+        current = self.editor.get_text()
+        protected = self._protected_synopsis_prefix
+        if not protected:
+            self._last_valid_synopsis = current
+            return
+
+        if current.startswith(protected):
+            self._last_valid_synopsis = current
+            return
+
+        self._loading = True
+        self.editor.set_text(self._last_valid_synopsis)
+        cursor = self.editor.editor.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        self.editor.editor.setTextCursor(cursor)
+        self._loading = False
+
+        if not self._protection_notice_shown:
+            self._protection_notice_shown = True
+            QMessageBox.information(
+                self,
+                "Synopsis section locked",
+                "This text has already been used to generate the current Outline. "
+                "Only new text appended after the protected section can be edited. "
+                "Use 'Unlock Synopsis to Regenerate' to change the protected text.",
+            )
+
+    def _unlock_outline_source(self) -> None:
+        if not self._project or not self._protected_synopsis_prefix:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Unlock Synopsis",
+            "This will allow editing the Synopsis text already used for the current "
+            "Outline. The current Outline will stay unchanged until you regenerate it. "
+            "Continue?",
+            QMessageBox.Yes | QMessageBox.Cancel,
+            QMessageBox.Cancel,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        self._project.outline_source_length = 0
+        self._project.outline_source_hash = ""
+        self._protected_synopsis_prefix = ""
+        self._last_valid_synopsis = self.editor.get_text()
+        self._protection_notice_shown = False
+        self._source_lock_label.hide()
+        self._unlock_source_btn.hide()
+        self.content_changed.emit(self.editor.get_text())
+
     def load(self, project: Project) -> None:
+        self._project = project
+        self._loading = True
         self.editor.set_text(project.synopsis)
+        self._loading = False
+
+        source_length = max(0, int(project.outline_source_length or 0))
+        protected_prefix = project.synopsis[:source_length]
+        source_is_valid = (
+            source_length > 0
+            and len(protected_prefix) == source_length
+            and bool(project.outline_source_hash)
+            and hashlib.sha256(protected_prefix.encode("utf-8")).hexdigest()
+            == project.outline_source_hash
+        )
+
+        self._protected_synopsis_prefix = protected_prefix if source_is_valid else ""
+        self._last_valid_synopsis = project.synopsis
+        self._protection_notice_shown = False
+
+        if source_is_valid:
+            self._source_lock_label.setText(
+                "🔒 The Synopsis text already used to generate the current Outline is locked. "
+                "Add new material after it; use the button to edit the protected text."
+            )
+            self._source_lock_label.show()
+            self._unlock_source_btn.show()
+        else:
+            self._source_lock_label.hide()
+            self._unlock_source_btn.hide()
+
+        cursor = self.editor.editor.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        self.editor.editor.setTextCursor(cursor)
 
     def save_to(self, project: Project) -> None:
         project.synopsis = self.editor.get_text()
@@ -237,6 +358,7 @@ class SynopsisTab(QWidget):
             else:
                 self._gen_header.action_btn.setToolTip("")
         self.editor.save_btn.setEnabled(not busy)
+        self._unlock_source_btn.setEnabled(not busy)
 
 
 
