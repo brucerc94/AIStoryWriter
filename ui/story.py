@@ -318,7 +318,8 @@ class SynopsisTab(QWidget):
         source_length = max(0, int(project.outline_source_length or 0))
         protected_prefix = project.synopsis[:source_length]
         source_is_valid = (
-            source_length > 0
+            bool(project.outline.strip())
+            and source_length > 0
             and len(protected_prefix) == source_length
             and bool(project.outline_source_hash)
             and hashlib.sha256(protected_prefix.encode("utf-8")).hexdigest()
