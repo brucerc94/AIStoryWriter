@@ -658,6 +658,11 @@ class ChatPanel(QWidget):
         self.context_toggle_btn.setStyleSheet(
             self._context_toggle_style(self._include_story_context)
         )
+
+        if not self._include_story_context and self.define_idea_btn.isChecked():
+            self.define_idea_btn.setChecked(False)
+            self._on_define_idea_toggle()
+
         logger.info(
             "Chat context injection: %s",
             "enabled" if self._include_story_context else "disabled",
