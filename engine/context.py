@@ -256,11 +256,7 @@ def _section_payloads(
         creative_direction = "\n".join(parts)
 
     outline = ""
-    if (
-        task != TaskType.GENERATE_OUTLINE
-        and task != TaskType.CHAT
-        and project.outline.strip()
-    ):
+    if task != TaskType.GENERATE_OUTLINE and project.outline.strip():
         if task in (TaskType.WRITE_CHAPTER, TaskType.REWRITE_CHAPTER, TaskType.CHANGE_CHAPTER):
             chapter_num = project.current_chapter or max((c.number for c in project.chapters), default=1)
             specific = extract_outline_section(project.outline, chapter_num)
@@ -274,10 +270,6 @@ def _section_payloads(
                 outline = specific or project.outline.strip()
         else:
             outline = project.outline.strip()
-
-    # Define Idea intentionally does not receive the project outline. The
-    # outline is a chapter-planning artifact and can bias idea development
-    # toward an unrelated chapter or its first available character/beat.
 
     # Generate Outline already receives the requested story material in the
     # user message. Avoid duplicating it in system context when present.
