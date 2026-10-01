@@ -50,7 +50,7 @@ def _recover_malformed_chapter_json(raw: str, requested_count: int) -> dict | No
     """
     text = (raw or "").strip()
     pattern = re.compile(
-        r'(?m)(?:^|[\r\n])\s*\{\s*"number"\s*:\s*(\d+)\s*,\s*"source"\s*:\s*"',
+        r'\{\s*"number"\s*:\s*(\d+)\s*,\s*"source"\s*:\s*"',
         re.DOTALL,
     )
     matches = list(pattern.finditer(text))
@@ -117,7 +117,7 @@ def _parse_json_object(raw: str) -> tuple[dict | None, str]:
 
 def _infer_requested_count_from_raw(raw: str) -> int:
     text = raw or ""
-    matches = re.findall(r'(?m)(?:^|[\r\n])\s*\{\s*"number"\s*:\s*(\d+)\s*,\s*"source"', text)
+    matches = re.findall(r'\{\s*"number"\s*:\s*(\d+)\s*,\s*"source"', text)
     return len(matches)
 
 
