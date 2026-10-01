@@ -53,7 +53,9 @@ from typing import Callable, Iterator, Optional
 
 from sympy import true
 
-from engine import gguf_meta, llama_features
+from engine import gguf_meta, llama_features, storage
+from engine.llama_cpp_runtime import LlamaCppCliRuntime
+from engine.model_runtime import find_llama_cli, get_model_runtime_profile
 
 _llama_available = False
 try:
@@ -145,10 +147,21 @@ class LLMEngine:
         self._current_n_ctx: int = 0
         self._lock = threading.Lock()
         self._last_model_info: Optional[gguf_meta.GGUFModelInfo] = None
+        self._runtime_mode: str = "llama-cpp-python"
+        self._mtp_runtime = LlamaCppCliRuntime()
+        self._mtp_model_path: str = ""
+        self._llama_cli_path: str = ""
+        self._mtp_flash_attn: bool = False
 
     @property
     def is_available(self) -> bool:
-        return _llama_available
+        if _llama_available:
+            return True
+        try:
+            settings = storage.load_settings()
+            return bool(find_llama_cli(getattr(settings, "llama_cpp_cli_path", "")))
+        except Exception:
+            return False
 
     @property
     def model_loaded(self) -> bool:
@@ -197,12 +210,6 @@ class LLMEngine:
         this model is detected as MoE (see module docstring) — ignored
         entirely for dense models.
         """
-        if not _llama_available:
-            raise RuntimeError(
-                "llama-cpp-python is not installed. "
-                "Run: pip install llama-cpp-python"
-            )
-
         with self._lock:
             if self._current_path == model_path and self._model is not None:
                 return
@@ -253,6 +260,56 @@ class LLMEngine:
 
             model_info = gguf_meta.read_model_info(model_path)
             self._last_model_info = model_info
+
+            settings = storage.load_settings()
+            runtime_profile = get_model_runtime_profile(settings, model_path)
+
+            if runtime_profile.uses_mtp:
+                mtp_path = runtime_profile.mtp_model_path
+                if not Path(mtp_path).is_file():
+                    raise RuntimeError(
+                        f"MTP Draft GGUF not found: {mtp_path}"
+                    )
+
+                cli_path = find_llama_cli(
+                    getattr(settings, "llama_cpp_cli_path", "")
+                )
+                if not cli_path:
+                    raise RuntimeError(
+                        "MTP is configured for this model, but llama-cli.exe "
+                        "was not found. Configure llama_cpp_cli_path in Models."
+                    )
+
+                self._runtime_mode = "llama-cli-mtp"
+                self._mtp_model_path = mtp_path
+                self._llama_cli_path = cli_path
+                self._mtp_flash_attn = flash_attn
+                self._model = object()
+                self._current_path = model_path
+                self._current_n_ctx = n_ctx
+
+                logger.info(
+                    "[llm_engine] Native llama.cpp MTP enabled: target=%s | draft=%s | cli=%s",
+                    Path(model_path).name,
+                    Path(mtp_path).name,
+                    Path(cli_path).name,
+                )
+
+                if progress_callback:
+                    progress_callback("Native llama.cpp MTP ready.")
+
+                return
+
+            self._runtime_mode = "llama-cpp-python"
+            self._mtp_model_path = ""
+            self._llama_cli_path = ""
+            self._mtp_flash_attn = False
+
+            if not _llama_available:
+                raise RuntimeError(
+                    "llama-cpp-python is not installed. "
+                    "Run: pip install llama-cpp-python"
+                )
 
             extra_kwargs: dict = {}
 
@@ -332,11 +389,16 @@ class LLMEngine:
                 progress_callback(f"Model ready.")
 
     def _unload(self) -> None:
+        self._mtp_runtime.stop()
         if self._model is not None:
             del self._model
             self._model = None
-            self._current_path = ""
-            self._current_n_ctx = 0
+        self._current_path = ""
+        self._current_n_ctx = 0
+        self._runtime_mode = "llama-cpp-python"
+        self._mtp_model_path = ""
+        self._llama_cli_path = ""
+        self._mtp_flash_attn = False
 
     def _model_supports_thinking(self) -> bool:
         """
@@ -439,12 +501,32 @@ class LLMEngine:
         "no limit" for this parameter), so a user setting Top K to 0 in the
         UI really does turn it off rather than silently falling back to 40.
         """
-        if not _llama_available:
+        if not _llama_available and self._runtime_mode != "llama-cli-mtp":
             raise RuntimeError("llama-cpp-python is not installed.")
         if self._model is None:
             raise RuntimeError("No model loaded. Call load_model() first.")
 
         with self._lock:
+            if self._runtime_mode == "llama-cli-mtp":
+                return self._mtp_runtime.generate(
+                    cli_path=self._llama_cli_path,
+                    model_path=self._current_path,
+                    mtp_model_path=self._mtp_model_path,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    context_size=self._current_n_ctx,
+                    gpu_layers=0,
+                    threads=4,
+                    threads_batch=0,
+                    flash_attn=self._mtp_flash_attn,
+                    stream=stream,
+                    stream_callback=stream_callback,
+                    cancel_check=cancel_check,
+                )
+
             if stream and stream_callback:
                 return self._stream_generate(
                     messages, max_tokens, temperature, top_p, top_k, stop, stream_callback, cancel_check
