@@ -53,7 +53,9 @@ from typing import Callable, Iterator, Optional
 
 from sympy import true
 
-from engine import gguf_meta, llama_features
+from engine import gguf_meta, llama_features, storage
+from engine.llama_server_runtime import LlamaServerRuntime
+from engine.model_runtime import find_llama_server, get_model_runtime_profile
 
 _llama_available = False
 try:
@@ -145,14 +147,29 @@ class LLMEngine:
         self._current_n_ctx: int = 0
         self._lock = threading.Lock()
         self._last_model_info: Optional[gguf_meta.GGUFModelInfo] = None
+        self._server_runtime = LlamaServerRuntime()
+        self._runtime_mode: str = "python"
+        self._current_mtp_path: str = ""
 
     @property
     def is_available(self) -> bool:
-        return _llama_available
+        if _llama_available:
+            return True
+        # MTP-capable models can run through llama-server without the
+        # llama-cpp-python Python binding. load_model() reports the precise
+        # missing-runtime error if llama-server itself is unavailable.
+        try:
+            settings = storage.load_settings()
+            return bool(
+                self._current_path
+                and get_model_runtime_profile(settings, self._current_path).uses_mtp
+            )
+        except Exception:
+            return False
 
     @property
     def model_loaded(self) -> bool:
-        return self._model is not None
+        return self._model is not None or self._server_runtime.running
 
     @property
     def current_model_path(self) -> str:
@@ -204,15 +221,97 @@ class LLMEngine:
             )
 
         with self._lock:
-            if self._current_path == model_path and self._model is not None:
+            settings = storage.load_settings()
+            runtime_profile = get_model_runtime_profile(settings, model_path)
+            mtp_path = runtime_profile.mtp_model_path
+
+            if (
+                self._current_path == model_path
+                and self._current_mtp_path == mtp_path
+                and self.model_loaded
+            ):
                 return
 
             if progress_callback:
-                progress_callback(f"Unloading previous model...")
+                progress_callback("Unloading previous model...")
             self._unload()
 
             if progress_callback:
                 progress_callback(f"Loading {model_path}...")
+
+            if mtp_path:
+                server_path = find_llama_server(
+                    getattr(settings, "llama_server_path", "")
+                )
+                if not server_path:
+                    raise RuntimeError(
+                        "MTP is configured for this model, but llama-server.exe "
+                        "was not found. Set the llama-server path in Models → "
+                        "Model Runtime Profiles (or use LLAMA_SERVER_PATH)."
+                    )
+                if not os.path.isfile(mtp_path):
+                    raise RuntimeError(
+                        f"MTP draft model file not found: {mtp_path}"
+                    )
+
+                gpu_info = _detect_gpu_info() if n_gpu_layers != 0 else None
+                force_mmq = False
+                flash_attn = False
+                if n_gpu_layers != 0:
+                    if gpu_info:
+                        force_mmq = _needs_mmq_fallback(gpu_info["name"])
+                        flash_attn = not force_mmq
+                        logger.info(
+                            f"[llm_server] GPU: {gpu_info['name']} | "
+                            f"VRAM: {gpu_info['mem_free']}/{gpu_info['mem_total']} MiB libre | "
+                            f"CC: {gpu_info['compute_cap']} | "
+                            f"force_mmq={force_mmq} | flash_attn={flash_attn}"
+                        )
+                    else:
+                        force_mmq = True
+                        flash_attn = False
+
+                extra_env = {}
+                if force_mmq:
+                    extra_env["GGML_CUDA_FORCE_MMQ"] = "1"
+
+                self._server_runtime.start(
+                    server_path=server_path,
+                    model_path=model_path,
+                    draft_model_path=mtp_path,
+                    context_size=n_ctx,
+                    gpu_layers=n_gpu_layers,
+                    threads=n_threads,
+                    threads_batch=n_threads_batch,
+                    batch_size=moe_n_batch,
+                    ubatch_size=moe_n_ubatch,
+                    flash_attn=flash_attn,
+                    extra_env=extra_env,
+                    progress_callback=progress_callback,
+                )
+
+                self._model = None
+                self._current_path = model_path
+                self._current_n_ctx = n_ctx
+                self._current_mtp_path = mtp_path
+                self._runtime_mode = "llama-server-mtp"
+                self._last_model_info = gguf_meta.read_model_info(model_path)
+
+                logger.info(
+                    "[llm_engine] MTP runtime active: model=%s | mtp=%s | server=%s",
+                    model_path,
+                    mtp_path,
+                    server_path,
+                )
+                if progress_callback:
+                    progress_callback("Model ready (MTP speculative decoding).")
+                return
+
+            if not _llama_available:
+                raise RuntimeError(
+                    "llama-cpp-python is not installed. "
+                    "Run: pip install llama-cpp-python"
+                )
 
             force_mmq = False
             flash_attn = True
@@ -238,8 +337,6 @@ class LLMEngine:
                         f"force_mmq={force_mmq} | flash_attn={flash_attn}"
                     )
                 else:
-
-
                     force_mmq = True
                     flash_attn = False
                     os.environ["GGML_CUDA_FORCE_MMQ"] = "1"
@@ -249,7 +346,6 @@ class LLMEngine:
                     )
 
             logger.info(f"[main_llm] Modelo: {Path(model_path).stem}")
-
 
             model_info = gguf_meta.read_model_info(model_path)
             self._last_model_info = model_info
@@ -263,9 +359,6 @@ class LLMEngine:
                     f"(activos/token={model_info.expert_used_count or '?'}) "
                     f"| capas={model_info.block_count or '?'}"
                 )
-
-
-
 
                 moe_param = llama_features.moe_cpu_offload_param()
                 if moe_param:
@@ -282,7 +375,6 @@ class LLMEngine:
                         "omite ese parametro especifico (no existe, no se usa)."
                     )
 
-
                 if llama_features.supports("n_batch"):
                     extra_kwargs["n_batch"] = moe_n_batch
                 if llama_features.supports("n_ubatch"):
@@ -296,23 +388,14 @@ class LLMEngine:
                         "expertos por token en modelos MoE)."
                     )
 
-
-
-
             elif model_info:
                 logger.info(
                     f"[llm_engine] Modelo Dense detectado: arch={model_info.architecture} "
                     f"| capas={model_info.block_count or '?'} — sin cambios de comportamiento."
                 )
 
-
-
-
             if llama_features.supports("flash_attn"):
                 extra_kwargs.setdefault("flash_attn", flash_attn)
-
-
-
 
             if n_threads_batch > 0 and llama_features.supports("n_threads_batch"):
                 extra_kwargs["n_threads_batch"] = n_threads_batch
@@ -327,16 +410,22 @@ class LLMEngine:
             )
             self._current_path = model_path
             self._current_n_ctx = n_ctx
+            self._current_mtp_path = ""
+            self._runtime_mode = "python"
 
             if progress_callback:
-                progress_callback(f"Model ready.")
+                progress_callback("Model ready.")
 
     def _unload(self) -> None:
         if self._model is not None:
             del self._model
             self._model = None
-            self._current_path = ""
-            self._current_n_ctx = 0
+        self._server_runtime.stop()
+        self._current_path = ""
+        self._current_n_ctx = 0
+        self._current_mtp_path = ""
+        self._runtime_mode = "python"
+        self._last_model_info = None
 
     def _model_supports_thinking(self) -> bool:
         """
@@ -439,6 +528,21 @@ class LLMEngine:
         "no limit" for this parameter), so a user setting Top K to 0 in the
         UI really does turn it off rather than silently falling back to 40.
         """
+        if self._runtime_mode == "llama-server-mtp":
+            if not self._server_runtime.running:
+                raise RuntimeError("llama-server MTP runtime is not running.")
+            return self._server_runtime.generate(
+                messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                stop=stop,
+                stream=stream,
+                stream_callback=stream_callback,
+                cancel_check=cancel_check,
+            )
+
         if not _llama_available:
             raise RuntimeError("llama-cpp-python is not installed.")
         if self._model is None:
