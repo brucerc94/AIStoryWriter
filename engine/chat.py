@@ -214,16 +214,17 @@ class LLMEngine:
         this model is detected as MoE (see module docstring) — ignored
         entirely for dense models.
         """
-        if not _llama_available:
+        settings = storage.load_settings()
+        runtime_profile = get_model_runtime_profile(settings, model_path)
+        mtp_path = runtime_profile.mtp_model_path
+
+        if not _llama_available and not mtp_path:
             raise RuntimeError(
                 "llama-cpp-python is not installed. "
                 "Run: pip install llama-cpp-python"
             )
 
         with self._lock:
-            settings = storage.load_settings()
-            runtime_profile = get_model_runtime_profile(settings, model_path)
-            mtp_path = runtime_profile.mtp_model_path
 
             if (
                 self._current_path == model_path
