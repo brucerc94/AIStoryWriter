@@ -216,9 +216,11 @@ It can include creative intent and writing-style preferences such as:
 - point of view
 - pacing
 - prose density
-- dialogue frequency
+- dialogue style
 - violence and romance level
 - genre and other chapter-writing preferences
+
+Define Idea receives the configured Author Profile and Writing Style as part of its creative direction, so these settings influence how missing narrative material is developed without overriding the author's explicit request.
 
 ---
 
@@ -259,6 +261,7 @@ The rewrite uses scoped chapter context and does not automatically import UI Cha
 It:
 
 - writes remaining chapters sequentially using the normal `Write Chapter` workflow;
+- therefore inherits the same long-form output budgeting used by `Write Chapter`;
 - keeps Chat cleanup between chapters;
 - reloads the project between chapters;
 - stops if a chapter is incomplete;
@@ -269,6 +272,24 @@ It:
 ## Context and workflow boundaries
 
 Dedicated chapter workflows deliberately use scoped context.
+
+### Context Size vs. output length
+
+**Context Size** is the model's total token window. It is shared by the prompt and the generated reply:
+
+```text
+Context Size = prompt tokens + generated tokens
+```
+
+For long-form `Write Chapter` generation, the effective output budget is calculated from the active model context:
+
+```text
+Available output ≈ Context Size - actual prompt tokens - 256 token safety margin
+```
+
+This calculation is applied to each fresh chapter-generation or continuation pass. `Generate Full Book` uses `Write Chapter` internally, so every chapter inherits the same behavior.
+
+The **Max Tokens per Pass** setting remains available for workflows that use an explicit requested output cap. `Write Chapter` is intentionally not artificially capped by that shared setting; it uses the remaining model context instead.
 
 ```text
 Full Character DB ───┐
@@ -306,6 +327,24 @@ The top-level Chat tab is a general-purpose writing assistant.
 
 With project context enabled, Chat can work with broader project information and its own conversation history. A chapter can also be attached for focused discussion.
 
+### Define Idea
+
+**Define Idea** is a focused narrative-development mode for turning rough author notes into a coherent story idea without immediately writing the finished scene.
+
+The author can provide fragments or a desired outcome with missing connective logic. Define Idea is instructed to:
+
+- preserve every concrete event, outcome, constraint, and relationship explicitly requested by the author;
+- fill missing causes, transitions, obstacles, reactions, discoveries, and consequences;
+- resolve reasonable unspecified details instead of repeatedly asking the author to decide them;
+- use relevant established Characters and relevant World information;
+- use the Author Profile and Writing Style to shape tone, pacing, tension, emotional direction, themes, and dialogue;
+- use brief dialogue when it helps establish interaction, conflict, information, emotion, or a turning point;
+- produce connected developmental prose rather than a numbered list or a fully written novel scene.
+
+Define Idea uses project context for this behavior. Context therefore supplies the relevant story information and creative direction before the current author request.
+
+Define Idea is a **non-mutating planning operation**. It does not continue a chapter and does not automatically modify chapter content, Characters, or World from its response.
+
 Chat history is not automatically carried into Write Chapter or Change Chapter.
 
 ---
@@ -322,7 +361,7 @@ Chat history is not automatically carried into Write Chapter or Change Chapter.
 | 📖 **Chapters** | Generate, continue, review, change, edit, save, and delete chapters. Generate the remaining book sequentially. |
 | 🧠 **Memory** | Maintain separate reusable story-state information. |
 | 🎨 **Author** | Define creative intent and writing-style preferences. |
-| 💬 **Chat** | General writing assistance with optional project context and chapter attachment. |
+| 💬 **Chat** | General writing assistance, optional project context, chapter attachment, and Define Idea mode for developing rough narrative ideas. |
 | 🖼️ **Images** | Generate book covers, scenes, locations, objects/items, and character portraits locally. |
 | 📊 **Stats** | Inspect word counts, chapter counts, reading-time information, review state, and progress. |
 | 🔎 **Search** | Search project content with normal, case-sensitive, or regex-based matching. |
@@ -340,7 +379,7 @@ Use **Projects** to create a project or continue an existing one.
 
 ### 2. Configure models
 
-Open **Settings** to configure the models directory and local generation settings. Use **Models** to assign GGUF models to the required tasks.
+Open **Settings** to configure the models directory and local generation settings. **Context Size** controls the total model window (prompt + reply). **Max Tokens per Pass** is an explicit reply cap for workflows that use it; long-form **Write Chapter / Generate Full Book** generation uses the available context budget instead of being artificially limited by this value. Use **Models** to assign GGUF models to the required tasks.
 
 ### 3. Write the story
 
@@ -358,7 +397,13 @@ Use **Extend Outline** when you want to add new story material and additional ch
 
 Inspect **Characters** and **World** after the draft or an outline extension has updated them. Manual editing remains available.
 
-### 7. Write chapters
+### 7. Chat and Define Idea
+
+Open **Chat** for general story discussion. Enable **Define Idea** when you want the model to turn a rough request into a developed narrative idea while using relevant story context and the configured Author Profile / Writing Style.
+
+Define Idea keeps the response in development form and does not modify Characters, World, or chapter content.
+
+### 8. Write chapters
 
 Open **Story → Chapters** and use:
 
@@ -373,7 +418,7 @@ Save
 Delete
 ```
 
-### 8. Export
+### 9. Export
 
 Use **Export Book** to create the final manuscript in a supported format.
 
@@ -453,9 +498,29 @@ Author Profile
       ↓
 Write Chapter
       ↓
+Use remaining Context Size for output
+      ↓
 Evaluator
       ├── complete → save
       └── incomplete → fresh continuation
+```
+
+### Define Idea
+
+```text
+Author's rough idea
+        ↓
+Define Idea instruction
+        +
+Relevant Characters + World
+        +
+Author Profile + Writing Style
+        +
+Current Chat context
+        ↓
+Connected developed idea
+        ↓
+No chapter / world / character mutation
 ```
 
 ---
