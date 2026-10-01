@@ -402,7 +402,13 @@ def run_generate_outline(worker) -> None:
             )
             return
 
-        existing_numbers = _outline_chapter_numbers_from_text(current_outline)
+        existing_numbers = [
+            int(match.group(1))
+            for match in re.finditer(
+                r"(?im)^\s*##\s*(?:Chapter|Cap[ií]tulo)\s+(\d+)\b",
+                current_outline,
+            )
+        ]
         existing_count = max(existing_numbers, default=0)
         additional_count = requested_count - existing_count
         if additional_count < 1:
