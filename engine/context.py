@@ -256,7 +256,11 @@ def _section_payloads(
         creative_direction = "\n".join(parts)
 
     outline = ""
-    if task != TaskType.GENERATE_OUTLINE and project.outline.strip():
+    if (
+        task != TaskType.GENERATE_OUTLINE
+        and not (task == TaskType.CHAT and chat_mode == ChatMode.DEFINE_IDEA)
+        and project.outline.strip()
+    ):
         if task in (TaskType.WRITE_CHAPTER, TaskType.REWRITE_CHAPTER, TaskType.CHANGE_CHAPTER):
             chapter_num = project.current_chapter or max((c.number for c in project.chapters), default=1)
             specific = extract_outline_section(project.outline, chapter_num)
@@ -320,7 +324,7 @@ def _compact_sections(
         budgets = {
             "Synopsis": max(180, min(360, max_context_tokens // 10)),
             "Characters": max(300, min(700, max_context_tokens // 6)),
-            "Outline": max(350, min(850, max_context_tokens // 5)),
+            "Outline": 0,
             "World": max(180, min(450, max_context_tokens // 10)),
             "Memory": max(180, min(450, max_context_tokens // 10)),
             "Chat Summary": max(120, min(300, max_context_tokens // 16)),
