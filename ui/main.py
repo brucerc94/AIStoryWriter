@@ -293,7 +293,6 @@ class MainWindow(QMainWindow):
         self.chat_panel.status_changed.connect(self._on_status_changed)
 
         self.models_panel.assignments_changed.connect(self._on_project_edited)
-        self.models_panel.settings_changed.connect(self._on_settings_changed)
 
         self.settings_panel.settings_changed.connect(self._on_settings_changed)
 
