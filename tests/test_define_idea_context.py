@@ -57,7 +57,7 @@ Raul travels toward the town.",
         system = messages[0]["content"]
         user = messages[-1]["content"]
 
-        self.assertIn("Define", system)
+        self.assertIn("narrative development editor", system.lower())
         self.assertIn("Juan", system)
         self.assertNotIn("Elena", system)
         self.assertIn("forest pass", system)
