@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from engine import storage
-from engine.models import ChatMessage, MessageRole, Project, TaskType
+from engine.models import ChatMessage, ChatMode, MessageRole, Project, TaskType
 from engine.workflow import CHAT_CHAPTER_ATTACHMENT_MARKER, WorkflowThread
 from ui.styles import (
     COLOR_ACCENT,
@@ -494,6 +494,20 @@ class ChatPanel(QWidget):
         self.context_toggle_btn.clicked.connect(self._on_context_toggle)
         header_layout.addWidget(self.context_toggle_btn)
 
+        self.define_idea_btn = QPushButton("✨ Define Idea: OFF")
+        self.define_idea_btn.setObjectName("subtle")
+        self.define_idea_btn.setCheckable(True)
+        self.define_idea_btn.setChecked(False)
+        self.define_idea_btn.setToolTip(
+            "When enabled, Send becomes Define Idea mode. "
+            "The AI takes your rough idea and fills the missing narrative logic "
+            "using the relevant characters, world context, Author Profile, and writing style. "
+            "It develops the idea without writing the final scene."
+        )
+        self.define_idea_btn.setStyleSheet(self._context_toggle_style(False))
+        self.define_idea_btn.clicked.connect(self._on_define_idea_toggle)
+        header_layout.addWidget(self.define_idea_btn)
+
         self.insert_chapter_btn = QPushButton("📎 Insert Chapter")
         self.insert_chapter_btn.setObjectName("subtle")
         self.insert_chapter_btn.setToolTip(
@@ -648,6 +662,31 @@ class ChatPanel(QWidget):
             "Chat context injection: %s",
             "enabled" if self._include_story_context else "disabled",
         )
+
+    def _on_define_idea_toggle(self) -> None:
+        """Toggle focused narrative idea-development mode for the next sends."""
+        enabled = self.define_idea_btn.isChecked()
+
+        # Idea development depends on project context. Turning it on also
+        # ensures the existing Context mode is enabled rather than silently
+        # producing a free-chat answer.
+        if enabled and not self._include_story_context:
+            self.context_toggle_btn.setChecked(True)
+            self._on_context_toggle()
+
+        self.define_idea_btn.setText(
+            "✨ Define Idea: ON" if enabled else "✨ Define Idea: OFF"
+        )
+        self.define_idea_btn.setStyleSheet(self._context_toggle_style(enabled))
+
+        if enabled:
+            self.input_edit.setPlaceholderText(
+                "Describe the rough idea… Define the outcome you want; the AI will fill the missing logic using your story context."
+            )
+        else:
+            self.input_edit.setPlaceholderText(
+                "Ask about your story, request a rewrite, brainstorm ideas… (Enter to send, Shift+Enter for newline)"
+            )
 
     def _show_empty_state(self) -> None:
         if not self._project:
@@ -810,14 +849,23 @@ class ChatPanel(QWidget):
 
         self._active_project = self._project
         self._set_busy(True)
+
+        chat_mode = (
+            ChatMode.DEFINE_IDEA
+            if self.define_idea_btn.isChecked()
+            else ChatMode.NORMAL
+        )
+        task = TaskType.CHAT
+
         self._thread = WorkflowThread(
             project=self._active_project,
-            task=TaskType.CHAT,
+            task=task,
             extra_input=extra_input,
             settings=self._settings,
             include_story_context=self._include_story_context,
+            chat_mode=chat_mode,
         )
-        self._current_task = TaskType.CHAT
+        self._current_task = task
         self._thread.token_received.connect(self._on_token)
         self._thread.step_finished.connect(self._on_step_finished)
         self._thread.error_occurred.connect(self._on_error)
