@@ -28,6 +28,7 @@ from engine.models import (
     Character,
     CharacterRelationship,
     ChatMessage,
+    ChatMode,
     MessageRole,
     Project,
     TaskType,
@@ -342,6 +343,7 @@ class WorkflowWorker(QObject):
         extra_input: str = "",
         settings=None,
         include_story_context: bool = True,
+        chat_mode: ChatMode = ChatMode.NORMAL,
     ) -> None:
         super().__init__()
         self.project = project
@@ -349,6 +351,7 @@ class WorkflowWorker(QObject):
         self.extra_input = extra_input
         self.settings = settings
         self.include_story_context = include_story_context
+        self.chat_mode = chat_mode
         self._cancelled = False
         self._stop_after_current_chapter = False
         self._approval_result: Optional[bool] = None
@@ -504,6 +507,7 @@ class WorkflowWorker(QObject):
             language=self._response_language(),
             allow_nsfw=self._allow_nsfw(),
             include_story_context=self.include_story_context,
+            chat_mode=self.chat_mode,
         )
         context_limit = self._model_context_limit()
         # Use the user's configured content_max_tokens as the reply budget so the
@@ -2927,10 +2931,17 @@ class WorkflowThread(QThread):
         settings=None,
         parent=None,
         include_story_context: bool = True,
+        chat_mode: ChatMode = ChatMode.NORMAL,
     ) -> None:
         super().__init__(parent)
-        self.worker = WorkflowWorker(project, task, extra_input, settings,
-                                     include_story_context=include_story_context)
+        self.worker = WorkflowWorker(
+            project,
+            task,
+            extra_input,
+            settings,
+            include_story_context=include_story_context,
+            chat_mode=chat_mode,
+        )
         self.worker.moveToThread(self)
 
 
