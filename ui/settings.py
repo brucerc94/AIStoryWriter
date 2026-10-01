@@ -1041,6 +1041,9 @@ class ModelsPanel(QWidget):
         self.assign_all_combo = QComboBox()
         self.assign_all_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.assign_all_combo.addItem("— select model —", "")
+        self.assign_all_combo.currentIndexChanged.connect(
+            self._load_runtime_profile_for_selected_model
+        )
         assign_all_row.addWidget(self.assign_all_combo, 1)
         assign_all_btn = QPushButton("Assign to All")
         assign_all_btn.clicked.connect(self._assign_to_all)
@@ -1089,29 +1092,15 @@ class ModelsPanel(QWidget):
         params_row.addStretch()
         ab_layout.addLayout(params_row)
 
-        outer.addWidget(action_box)
-
-        runtime_box = QGroupBox("Model Runtime Profiles")
-        runtime_layout = QVBoxLayout(runtime_box)
-        runtime_layout.setContentsMargins(14, 18, 14, 14)
-        runtime_layout.setSpacing(8)
-
-        model_row = QHBoxLayout()
-        model_row.addWidget(QLabel("Model"))
-        self.runtime_model_combo = QComboBox()
-        self.runtime_model_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.runtime_model_combo.addItem("— select model —", "")
-        self.runtime_model_combo.currentIndexChanged.connect(
-            self._load_runtime_profile_for_selected_model
-        )
-        model_row.addWidget(self.runtime_model_combo, 1)
-        runtime_layout.addLayout(model_row)
+        runtime_title = QLabel("Model Runtime")
+        runtime_title.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-weight: 600;")
+        ab_layout.addWidget(runtime_title)
 
         mtp_row = QHBoxLayout()
         mtp_row.addWidget(QLabel("MTP Draft"))
         self.mtp_model_input = QLineEdit()
         self.mtp_model_input.setPlaceholderText(
-            "Empty = normal llama.cpp runtime"
+            "Empty = normal llama.cpp runtime for the selected model"
         )
         self.mtp_model_input.setClearButtonEnabled(True)
         mtp_row.addWidget(self.mtp_model_input, 1)
@@ -1123,35 +1112,35 @@ class ModelsPanel(QWidget):
         mtp_clear_btn = QPushButton("Clear")
         mtp_clear_btn.clicked.connect(self.mtp_model_input.clear)
         mtp_row.addWidget(mtp_clear_btn)
-        runtime_layout.addLayout(mtp_row)
+        ab_layout.addLayout(mtp_row)
 
         cli_row = QHBoxLayout()
         cli_row.addWidget(QLabel("llama-cli"))
         self.llama_cli_input = QLineEdit()
         self.llama_cli_input.setPlaceholderText(
-            "Optional: leave empty to use PATH or LLAMA_CPP_CLI_PATH"
+            "Optional: PATH or LLAMA_CPP_CLI_PATH"
         )
         cli_row.addWidget(self.llama_cli_input, 1)
 
         cli_browse_btn = QPushButton("Browse…")
         cli_browse_btn.clicked.connect(self._browse_llama_cli)
         cli_row.addWidget(cli_browse_btn)
-        runtime_layout.addLayout(cli_row)
+        ab_layout.addLayout(cli_row)
 
         self.runtime_status = QLabel(
-            "MTP empty → the existing llama-cpp-python runtime is used."
+            "Selecciona el modelo de arriba. Su MTP se guarda una sola vez para ese modelo."
         )
         self.runtime_status.setWordWrap(True)
         self.runtime_status.setStyleSheet(
             f"color: {COLOR_TEXT_MUTED}; font-size: 12px;"
         )
-        runtime_layout.addWidget(self.runtime_status)
+        ab_layout.addWidget(self.runtime_status)
 
         save_runtime_btn = QPushButton("Save Runtime Profile")
         save_runtime_btn.clicked.connect(self._save_runtime_profile)
-        runtime_layout.addWidget(save_runtime_btn)
+        ab_layout.addWidget(save_runtime_btn)
 
-        outer.addWidget(runtime_box)
+        outer.addWidget(action_box)
         outer.addStretch()
 
     def load_project(self, project: Project) -> None:
@@ -1183,12 +1172,12 @@ class ModelsPanel(QWidget):
         for picker in self._pickers.values():
             picker.update_models(models)
 
-        self.runtime_model_combo.blockSignals(True)
-        self.runtime_model_combo.clear()
-        self.runtime_model_combo.addItem("— select model —", "")
+        self.assign_all_combo.blockSignals(True)
+        self.assign_all_combo.clear()
+        self.assign_all_combo.addItem("— select model —", "")
         for m in models:
-            self.runtime_model_combo.addItem(Path(m).name, m)
-        self.runtime_model_combo.blockSignals(False)
+            self.assign_all_combo.addItem(Path(m).name, m)
+        self.assign_all_combo.blockSignals(False)
         self._load_runtime_profile_for_selected_model()
 
         self.assign_all_combo.clear()
@@ -1207,7 +1196,7 @@ class ModelsPanel(QWidget):
         self.llama_cli_input.setText(getattr(settings, "llama_cpp_cli_path", ""))
 
     def _load_runtime_profile_for_selected_model(self, _index: int = -1) -> None:
-        path = self.runtime_model_combo.currentData() or ""
+        path = self.assign_all_combo.currentData() or ""
         profile = get_model_runtime_profile(self._settings, path)
         self.mtp_model_input.setText(profile.mtp_model_path)
         self._update_runtime_status(path, profile.mtp_model_path)
