@@ -11,6 +11,7 @@ has been generated, using the user's original extension request as source.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -370,6 +371,70 @@ def run_generate_outline(worker) -> None:
     if not synopsis:
         worker.error_occurred.emit("Generate Outline requires story material.")
         return
+
+    # A completed Generate Outline stores the exact Synopsis/Draft source it
+    # consumed. Later runs append only new material through the existing
+    # Extend Outline pipeline, preserving all existing chapters.
+    current_synopsis = worker.project.synopsis or ""
+    processed_length = worker.project.outline_source_length
+    processed_hash = worker.project.outline_source_hash
+    current_outline = (worker.project.outline or "").strip()
+
+    if current_outline and processed_length > 0:
+        processed_prefix = current_synopsis[:processed_length]
+        prefix_is_valid = (
+            len(processed_prefix) == processed_length
+            and bool(processed_hash)
+            and hashlib.sha256(processed_prefix.encode("utf-8")).hexdigest()
+            == processed_hash
+        )
+        if not prefix_is_valid:
+            worker.error_occurred.emit(
+                "The Synopsis text used for the current outline was changed. "
+                "Unlock the Synopsis and regenerate the outline from scratch."
+            )
+            return
+
+        new_synopsis = current_synopsis[processed_length:]
+        if not new_synopsis.strip():
+            worker.error_occurred.emit(
+                "No new Synopsis/Draft material has been added since the last outline generation."
+            )
+            return
+
+        existing_numbers = _outline_chapter_numbers_from_text(current_outline)
+        existing_count = max(existing_numbers, default=0)
+        additional_count = requested_count - existing_count
+        if additional_count < 1:
+            worker.error_occurred.emit(
+                f"The existing outline already reaches Chapter {existing_count}. "
+                f"Set the total chapter count higher than {existing_count} "
+                "to append new chapters, or use Extend Outline explicitly."
+            )
+            return
+
+        original_extra_input = worker.extra_input
+        worker.extra_input = (
+            f"{OUTLINE_EXTEND_MARKER}\n"
+            f"{additional_count}\n"
+            "Use only the new Synopsis/Draft material below. Do not rewrite or "
+            "modify any existing chapter. Generate the new chapters sequentially "
+            f"starting at Chapter {existing_count + 1}.\n\n"
+            f"NEW SYNOPSIS/DRAFT MATERIAL:\n{new_synopsis.strip()}"
+        )
+        try:
+            _run_extend_outline(worker)
+        finally:
+            worker.extra_input = original_extra_input
+
+        if worker.project.outline.strip() != current_outline:
+            worker.project.outline_source_length = len(current_synopsis)
+            worker.project.outline_source_hash = hashlib.sha256(
+                current_synopsis.encode("utf-8")
+            ).hexdigest()
+            storage.save_project(worker.project)
+        return
+
     source_blocks = _split_story(worker, requested_count, _story_source(worker, requested_count, synopsis))
     if len(source_blocks) != requested_count:
         worker.error_occurred.emit("Could not reliably divide the story draft into the requested number of chapters. Nothing was saved — try again.")
@@ -387,6 +452,10 @@ def run_generate_outline(worker) -> None:
         generated_entries.append(entry)
         previous_entry = entry
     worker.project.outline = "\n\n".join(generated_entries).strip()
+    worker.project.outline_source_length = len(worker.project.synopsis or "")
+    worker.project.outline_source_hash = hashlib.sha256(
+        (worker.project.synopsis or "").encode("utf-8")
+    ).hexdigest()
     storage.save_project(worker.project)
     worker.step_finished.emit("Outline", worker.project.outline)
     logger.info("[generate_outline] Generate Outline complete: %d chapter(s). No Character/World creation or update performed.", requested_count)
