@@ -795,7 +795,10 @@ class OutlineTab(QWidget):
         self._gen_btn = QPushButton("✨ Generate Outline")
         gen_btn = self._gen_btn
         gen_btn.setObjectName("accent")
-        gen_btn.setToolTip("Opens the outline wizard, then generates the full outline.")
+        gen_btn.setToolTip(
+            "First run generates the outline from the Synopsis. Later runs use only new "
+            "Synopsis/Draft material and append new chapters without changing existing ones."
+        )
         gen_btn.clicked.connect(self._on_generate_clicked)
         header_row.addWidget(gen_btn)
 
@@ -942,7 +945,10 @@ class OutlineTab(QWidget):
             self._gen_btn.setToolTip(tip)
             self._extend_btn.setToolTip(tip)
         else:
-            self._gen_btn.setToolTip("Opens the outline wizard, then generates the full outline.")
+            self._gen_btn.setToolTip(
+                "First run generates the outline from the Synopsis. Later runs use only new "
+                "Synopsis/Draft material and append new chapters without changing existing ones."
+            )
             self._extend_btn.setToolTip(
                 "Add new chapters onto the end of the existing outline without changing it."
             )
