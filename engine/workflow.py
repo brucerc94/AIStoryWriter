@@ -392,6 +392,13 @@ class WorkflowWorker(QObject):
             return False
 
         engine = get_engine()
+        if not engine.is_available:
+            logger.error("llama-cpp-python is not installed.")
+            self.error_occurred.emit(
+                "llama-cpp-python is not installed.\n"
+                "Run: pip install llama-cpp-python"
+            )
+            return False
 
         ctx = 4096
         gpu = 0
