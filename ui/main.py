@@ -104,6 +104,7 @@ class MainWindow(QMainWindow):
 
 
         self.settings_panel.load(self._settings)
+        self.models_panel.set_settings(self._settings)
         self.models_panel.update_available_models(self._settings.models_directory)
         self.chat_panel.set_settings(self._settings)
         self.images_panel.set_settings(self._settings)
@@ -292,6 +293,7 @@ class MainWindow(QMainWindow):
         self.chat_panel.status_changed.connect(self._on_status_changed)
 
         self.models_panel.assignments_changed.connect(self._on_project_edited)
+        self.models_panel.settings_changed.connect(self._on_settings_changed)
 
         self.settings_panel.settings_changed.connect(self._on_settings_changed)
 
@@ -537,6 +539,7 @@ class MainWindow(QMainWindow):
         self._settings = settings
         self.chat_panel.set_settings(settings)
         self.images_panel.set_settings(settings)
+        self.models_panel.set_settings(settings)
         self.models_panel.update_available_models(settings.models_directory)
         self.status.showMessage("Settings saved", 3000)
 
