@@ -974,7 +974,6 @@ class ModelsPanel(QWidget):
     """
 
     assignments_changed = Signal()
-    settings_changed = Signal(AppSettings)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -1044,6 +1043,8 @@ class ModelsPanel(QWidget):
         self.assign_all_combo.currentIndexChanged.connect(
             self._load_runtime_profile_for_selected_model
         )
+        self.mtp_model_input.editingFinished.connect(self._apply_runtime_profile)
+        self.llama_cli_input.editingFinished.connect(self._apply_runtime_profile)
         assign_all_row.addWidget(self.assign_all_combo, 1)
         assign_all_btn = QPushButton("Assign to All")
         assign_all_btn.clicked.connect(self._assign_to_all)
@@ -1110,7 +1111,7 @@ class ModelsPanel(QWidget):
         mtp_row.addWidget(mtp_browse_btn)
 
         mtp_clear_btn = QPushButton("Clear")
-        mtp_clear_btn.clicked.connect(self.mtp_model_input.clear)
+        mtp_clear_btn.clicked.connect(self._clear_mtp_model)
         mtp_row.addWidget(mtp_clear_btn)
         ab_layout.addLayout(mtp_row)
 
@@ -1128,17 +1129,14 @@ class ModelsPanel(QWidget):
         ab_layout.addLayout(cli_row)
 
         self.runtime_status = QLabel(
-            "Selecciona el modelo de arriba. Su MTP se guarda una sola vez para ese modelo."
+            "Selecciona el modelo de arriba. Su MTP se guarda una sola vez para ese modelo. "
+            "Los cambios se guardan con «Save App Settings» en Settings."
         )
         self.runtime_status.setWordWrap(True)
         self.runtime_status.setStyleSheet(
             f"color: {COLOR_TEXT_MUTED}; font-size: 12px;"
         )
         ab_layout.addWidget(self.runtime_status)
-
-        save_runtime_btn = QPushButton("Save Runtime Profile")
-        save_runtime_btn.clicked.connect(self._save_runtime_profile)
-        ab_layout.addWidget(save_runtime_btn)
 
         outer.addWidget(action_box)
         outer.addStretch()
@@ -1193,12 +1191,17 @@ class ModelsPanel(QWidget):
     def set_settings(self, settings: AppSettings) -> None:
         """Keep one shared app-settings object for model runtime profiles."""
         self._settings = settings
+        self.llama_cli_input.blockSignals(True)
         self.llama_cli_input.setText(getattr(settings, "llama_cpp_cli_path", ""))
+        self.llama_cli_input.blockSignals(False)
+        self._load_runtime_profile_for_selected_model()
 
     def _load_runtime_profile_for_selected_model(self, _index: int = -1) -> None:
         path = self.assign_all_combo.currentData() or ""
         profile = get_model_runtime_profile(self._settings, path)
+        self.mtp_model_input.blockSignals(True)
         self.mtp_model_input.setText(profile.mtp_model_path)
+        self.mtp_model_input.blockSignals(False)
         self._update_runtime_status(path, profile.mtp_model_path)
 
     def _update_runtime_status(self, model_path: str, mtp_path: str) -> None:
@@ -1225,6 +1228,33 @@ class ModelsPanel(QWidget):
         self.runtime_status.setText(
             f"✓ Native llama.cpp MTP ready: {Path(cli_path).name}"
         )
+
+    def _clear_mtp_model(self) -> None:
+        self.mtp_model_input.clear()
+        self._apply_runtime_profile()
+
+    def _apply_runtime_profile(self) -> None:
+        """Apply runtime fields to shared settings; persistence stays in Settings."""
+        model_path = self.assign_all_combo.currentData() or ""
+        if not model_path:
+            return
+
+        mtp_path = self.mtp_model_input.text().strip()
+        cli_path = self.llama_cli_input.text().strip()
+
+        if mtp_path and not Path(mtp_path).is_file():
+            self.runtime_status.setText("✗ MTP Draft file not found.")
+            return
+
+        if mtp_path and not find_llama_cli(cli_path):
+            self.runtime_status.setText(
+                "✗ MTP is configured, but llama-cli.exe was not found."
+            )
+            return
+
+        set_model_mtp_path(self._settings, model_path, mtp_path)
+        self._settings.llama_cpp_cli_path = cli_path
+        self._update_runtime_status(model_path, mtp_path)
 
     def _browse_mtp_model(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -1279,12 +1309,6 @@ class ModelsPanel(QWidget):
                 "Select it here or put it in PATH.",
             )
             return
-
-        set_model_mtp_path(self._settings, model_path, mtp_path)
-        self._settings.llama_cpp_cli_path = cli_path
-        storage.save_settings(self._settings)
-        self._update_runtime_status(model_path, mtp_path)
-        self.settings_changed.emit(self._settings)
 
     def _on_model_changed(self, task: TaskType, path: str) -> None:
         if not self._project:
