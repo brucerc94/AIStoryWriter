@@ -190,6 +190,23 @@ class TestExtractChapterBlocks(unittest.TestCase):
         blocks = _extract_chapter_blocks(raw, 1)
         self.assertEqual(blocks, ["First"])
 
+    def test_one_line_malformed_json_with_unescaped_quotes_is_recovered(self):
+        """Recovery must also work when chapter objects are emitted on one line."""
+        raw = (
+            '{"chapters":['
+            '{"number":1,"source":"A character says "stop" and leaves"},'
+            '{"number":2,"source":"The group follows the road."}'
+            ']}'
+        )
+        blocks = _extract_chapter_blocks(raw, 2)
+        self.assertEqual(
+            blocks,
+            [
+                'A character says "stop" and leaves',
+                "The group follows the road.",
+            ],
+        )
+
     def test_empty_input_returns_empty(self):
         blocks = _extract_chapter_blocks("", 2)
         self.assertEqual(blocks, [])
