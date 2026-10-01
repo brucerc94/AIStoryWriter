@@ -1043,8 +1043,6 @@ class ModelsPanel(QWidget):
         self.assign_all_combo.currentIndexChanged.connect(
             self._load_runtime_profile_for_selected_model
         )
-        self.mtp_model_input.editingFinished.connect(self._apply_runtime_profile)
-        self.llama_cli_input.editingFinished.connect(self._apply_runtime_profile)
         assign_all_row.addWidget(self.assign_all_combo, 1)
         assign_all_btn = QPushButton("Assign to All")
         assign_all_btn.clicked.connect(self._assign_to_all)
@@ -1122,6 +1120,9 @@ class ModelsPanel(QWidget):
             "Optional: PATH or LLAMA_CPP_CLI_PATH"
         )
         cli_row.addWidget(self.llama_cli_input, 1)
+        self.mtp_model_input.editingFinished.connect(self._apply_runtime_profile)
+        self.llama_cli_input.editingFinished.connect(self._apply_runtime_profile)
+
 
         cli_browse_btn = QPushButton("Browse…")
         cli_browse_btn.clicked.connect(self._browse_llama_cli)
@@ -1177,11 +1178,6 @@ class ModelsPanel(QWidget):
             self.assign_all_combo.addItem(Path(m).name, m)
         self.assign_all_combo.blockSignals(False)
         self._load_runtime_profile_for_selected_model()
-
-        self.assign_all_combo.clear()
-        self.assign_all_combo.addItem("— select model —", "")
-        for m in models:
-            self.assign_all_combo.addItem(Path(m).name, m)
 
     def _refresh_models(self) -> None:
         settings = storage.load_settings()
