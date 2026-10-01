@@ -397,15 +397,13 @@ class AppSettingsWidget(QWidget):
         self.max_tokens_spin.setValue(4000)
         self.max_tokens_spin.setSuffix(" tokens")
         self.max_tokens_spin.setToolTip(
-            "Reply length requested per generation pass for Outline, Write "
-            "Chapter, Write Book, and Rewrite Chapter — one shared value, "
-            "so they never drift apart. If the model stops before finishing "
-            "(runs out of tokens or the outline/chapter isn't complete "
-            "yet), the app automatically continues in another pass rather "
-            "than saving a partial result.\n\n"
-            "This is separate from Context Size: Context Size is the "
-            "model's total window (prompt + reply); this is what the app "
-            "asks for in a single pass within that window."
+            "Maximum reply length for generation tasks that use an explicit "
+            "per-pass limit. Write Chapter and Write Book automatically use "
+            "the available Context Size after the prompt instead of being "
+            "artificially capped by this value. If the model stops before "
+            "finishing a chapter, the app can continue in another pass.\n\n"
+            "This is separate from Context Size: Context Size is the model's "
+            "total window (prompt + reply)."
         )
         gen_form.addRow("Max Tokens per Pass", self.max_tokens_spin)
 
