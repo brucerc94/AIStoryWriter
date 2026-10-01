@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 
 from engine import storage
 from engine.image_engine import get_image_model_profile
+from engine.model_runtime import find_llama_server, get_model_runtime_profile, set_model_mtp_path
 from engine.models import AppSettings, ImageBackend, Project, TaskType
 from ui.styles import (
     COLOR_ACCENT,
@@ -965,13 +966,18 @@ class AppSettingsWidget(QWidget):
 class ModelsPanel(QWidget):
     """
     The Models tab — assigns a GGUF model to each task for the current project.
+
+    Model runtime profiles are global application settings, stored once per
+    model path. This keeps optional MTP configuration out of every task row.
     """
 
     assignments_changed = Signal()
+    settings_changed = Signal(AppSettings)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._project: Optional[Project] = None
+        self._settings: AppSettings = storage.load_settings()
         self._available_models: list[str] = []
         self._pickers: dict[TaskType, ModelPicker] = {}
         self._build_ui()
@@ -1019,6 +1025,79 @@ class ModelsPanel(QWidget):
             box_layout.addWidget(picker)
 
         outer.addWidget(box)
+
+
+        runtime_box = QGroupBox("Model Runtime Profiles")
+        runtime_layout = QVBoxLayout(runtime_box)
+        runtime_layout.setContentsMargins(14, 18, 14, 14)
+        runtime_layout.setSpacing(10)
+
+        runtime_note = QLabel(
+            "Optional execution settings stored once per model. "
+            "Leave MTP empty for normal llama-cpp-python generation. "
+            "When an MTP file is configured, this model uses llama.cpp "
+            "llama-server with draft-mtp speculative decoding."
+        )
+        runtime_note.setWordWrap(True)
+        runtime_note.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 11px;")
+        runtime_layout.addWidget(runtime_note)
+
+        profile_model_row = QHBoxLayout()
+        profile_model_row.addWidget(QLabel("Model"))
+        self.runtime_model_combo = QComboBox()
+        self.runtime_model_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.runtime_model_combo.addItem("— select model —", "")
+        self.runtime_model_combo.currentIndexChanged.connect(
+            self._load_runtime_profile_for_selected_model
+        )
+        profile_model_row.addWidget(self.runtime_model_combo, 1)
+        runtime_layout.addLayout(profile_model_row)
+
+        mtp_row = QHBoxLayout()
+        mtp_row.addWidget(QLabel("MTP Draft"))
+        self.mtp_model_input = QLineEdit()
+        self.mtp_model_input.setPlaceholderText(
+            "Optional: mtp-gemma-4-12B-it.gguf — empty = normal generation"
+        )
+        mtp_row.addWidget(self.mtp_model_input, 1)
+        browse_mtp_btn = QPushButton("Browse…")
+        browse_mtp_btn.setFixedWidth(70)
+        browse_mtp_btn.clicked.connect(self._browse_mtp_model)
+        mtp_row.addWidget(browse_mtp_btn)
+        clear_mtp_btn = QPushButton("Clear")
+        clear_mtp_btn.setFixedWidth(60)
+        clear_mtp_btn.clicked.connect(self.mtp_model_input.clear)
+        mtp_row.addWidget(clear_mtp_btn)
+        runtime_layout.addLayout(mtp_row)
+
+        server_row = QHBoxLayout()
+        server_row.addWidget(QLabel("llama-server"))
+        self.llama_server_input = QLineEdit()
+        self.llama_server_input.setPlaceholderText(
+            "Optional path to llama-server.exe — empty = auto-detect"
+        )
+        server_row.addWidget(self.llama_server_input, 1)
+        browse_server_btn = QPushButton("Browse…")
+        browse_server_btn.setFixedWidth(70)
+        browse_server_btn.clicked.connect(self._browse_llama_server)
+        server_row.addWidget(browse_server_btn)
+        runtime_layout.addLayout(server_row)
+
+        self.runtime_status_label = QLabel("")
+        self.runtime_status_label.setWordWrap(True)
+        self.runtime_status_label.setStyleSheet(
+            f"color: {COLOR_TEXT_MUTED}; font-size: 11px;"
+        )
+        runtime_layout.addWidget(self.runtime_status_label)
+        self.mtp_model_input.textChanged.connect(self._update_runtime_status)
+        self.llama_server_input.textChanged.connect(self._update_runtime_status)
+
+        save_runtime_btn = QPushButton("Save Runtime Profile")
+        save_runtime_btn.setObjectName("accent")
+        save_runtime_btn.clicked.connect(self._save_runtime_profile)
+        runtime_layout.addWidget(save_runtime_btn, 0, Qt.AlignLeft)
+
+        outer.addWidget(runtime_box)
 
 
         action_box = QGroupBox("Quick Actions")
@@ -1084,6 +1163,82 @@ class ModelsPanel(QWidget):
         outer.addWidget(action_box)
         outer.addStretch()
 
+    def set_settings(self, settings: AppSettings) -> None:
+        """Receive the shared application settings object from MainWindow."""
+        self._settings = settings
+        self.llama_server_input.setText(getattr(settings, "llama_server_path", "") or "")
+        self._load_runtime_profile_for_selected_model()
+
+    def _selected_runtime_model(self) -> str:
+        return self.runtime_model_combo.currentData() or ""
+
+    def _load_runtime_profile_for_selected_model(self, _index: int = -1) -> None:
+        model_path = self._selected_runtime_model()
+        if not model_path:
+            self.mtp_model_input.clear()
+            self.runtime_status_label.setText("Select a model to configure its runtime.")
+            return
+        profile = get_model_runtime_profile(self._settings, model_path)
+        self.mtp_model_input.setText(profile.mtp_model_path)
+        self._update_runtime_status()
+
+    def _update_runtime_status(self) -> None:
+        model_path = self._selected_runtime_model()
+        if not model_path:
+            return
+        mtp_path = self.mtp_model_input.text().strip()
+        server_path = find_llama_server(self.llama_server_input.text().strip())
+        if not mtp_path:
+            self.runtime_status_label.setText("✓ Normal generation — no MTP configured for this model.")
+            return
+        if not Path(mtp_path).is_file():
+            self.runtime_status_label.setText("⚠ MTP path is configured but the file does not exist.")
+            return
+        if not server_path:
+            self.runtime_status_label.setText(
+                "⚠ MTP configured, but llama-server.exe was not found. "
+                "Set its path above before using this profile."
+            )
+            return
+        self.runtime_status_label.setText(
+            f"✓ MTP ready — {Path(mtp_path).name} · runtime: {Path(server_path).name}"
+        )
+
+    def _browse_mtp_model(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select MTP Draft Model", "",
+            "GGUF Models (*.gguf);;All Files (*)",
+        )
+        if path:
+            self.mtp_model_input.setText(path)
+
+    def _browse_llama_server(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select llama-server executable", "",
+            "llama-server (llama-server.exe);;Executable (*.exe);;All Files (*)",
+        )
+        if path:
+            self.llama_server_input.setText(path)
+
+    def _save_runtime_profile(self) -> None:
+        model_path = self._selected_runtime_model()
+        if not model_path:
+            QMessageBox.information(self, "Model Runtime", "Select a model first.")
+            return
+        mtp_path = self.mtp_model_input.text().strip()
+        if mtp_path and not Path(mtp_path).is_file():
+            QMessageBox.warning(self, "Invalid MTP", "The selected MTP draft file does not exist.")
+            return
+        server_path = self.llama_server_input.text().strip()
+        if server_path and not Path(server_path).is_file():
+            QMessageBox.warning(self, "Invalid llama-server", "The selected llama-server executable does not exist.")
+            return
+        set_model_mtp_path(self._settings, model_path, mtp_path)
+        self._settings.llama_server_path = server_path
+        storage.save_settings(self._settings)
+        self.settings_changed.emit(self._settings)
+        self._update_runtime_status()
+
     def load_project(self, project: Project) -> None:
         self._project = project
         for task, picker in self._pickers.items():
@@ -1112,6 +1267,19 @@ class ModelsPanel(QWidget):
 
         for picker in self._pickers.values():
             picker.update_models(models)
+
+        current_runtime_model = self._selected_runtime_model()
+        self.runtime_model_combo.blockSignals(True)
+        self.runtime_model_combo.clear()
+        self.runtime_model_combo.addItem("— select model —", "")
+        for m in models:
+            self.runtime_model_combo.addItem(Path(m).name, m)
+        self.runtime_model_combo.blockSignals(False)
+        if current_runtime_model:
+            for i in range(self.runtime_model_combo.count()):
+                if self.runtime_model_combo.itemData(i) == current_runtime_model:
+                    self.runtime_model_combo.setCurrentIndex(i)
+                    break
 
 
         self.assign_all_combo.clear()
