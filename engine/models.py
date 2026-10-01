@@ -63,6 +63,11 @@ class TaskType(str, Enum):
     CHAT = "chat"
 
 
+class ChatMode(str, Enum):
+    NORMAL = "normal"
+    DEFINE_IDEA = "define_idea"
+
+
 class WorkflowStatus(str, Enum):
     IDLE = "idle"
     RUNNING = "running"
