@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import shiboken6
 import html
 import math
 import re
@@ -3084,23 +3085,31 @@ class StoryPanel(QWidget):
 
     def _set_editors_locked(self, locked: bool) -> None:
         """
-        While a task runs it reloads the project from disk when it finishes.
-        A manual edit made in the meantime would be overwritten by that reload,
-        so text editors are read-only for the duration. Each editor's own
-        read-only state is remembered, so editors that were read-only by
-        design stay that way afterwards.
+        Lock editors during AI tasks and restore their original state afterwards.
+        Qt widgets may be deleted while the task is running, so validate each
+        Shiboken wrapper before calling methods on its underlying C++ object.
         """
         if locked:
             if self._editor_lock_state is not None:
                 return
+
             self._editor_lock_state = []
             for editor in self.findChildren(QTextEdit):
-                self._editor_lock_state.append((editor, editor.isReadOnly()))
+                if not shiboken6.isValid(editor):
+                    continue
+                was_read_only = editor.isReadOnly()
+                self._editor_lock_state.append((editor, was_read_only))
                 editor.setReadOnly(True)
         else:
-            for editor, was_read_only in self._editor_lock_state or []:
-                editor.setReadOnly(was_read_only)
+            # Clear the saved references first so stale wrappers cannot be
+            # processed again if restoring another editor raises an exception.
+            saved_states = self._editor_lock_state or []
             self._editor_lock_state = None
+
+            for editor, was_read_only in saved_states:
+                if not shiboken6.isValid(editor):
+                    continue
+                editor.setReadOnly(was_read_only)
 
     def _save_project(self) -> None:
         if self._project:
