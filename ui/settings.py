@@ -2,8 +2,12 @@
 Settings Panel.
 
 Two sections:
-1. App Settings — models directory, GPU layers, threads, context size, theme
-2. Model Assignments — assign a GGUF model to each task type
+1. App Settings — local GGUF folder (llama.cpp), Ollama server, context size,
+   generation options, and llama.cpp-only performance options
+2. Model Assignments — pick a model for each task type. Two kinds of models
+   can be picked and each is labelled with its backend:
+     [llama.cpp] a .gguf file run locally by llama-cpp-python
+     [Ollama]    a model installed on an Ollama server
 """
 
 from __future__ import annotations
@@ -37,7 +41,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from engine import storage
+from engine import ollama_client, storage
 from engine.image_engine import get_image_model_profile
 from engine.models import AppSettings, ImageBackend, Project, TaskType
 from ui.styles import (
@@ -66,11 +70,21 @@ TASK_LABELS: dict[TaskType, str] = {
 }
 
 
+NOT_ASSIGNED_LABEL = "— not assigned —"
+
+
+def _model_label(ref: str, listed: bool = True) -> str:
+    """Label shown in every model combo: always says which backend runs it."""
+    label = ollama_client.display_name(ref)
+    return label if listed else f"{label}  — not found"
+
+
 class ModelPicker(QWidget):
-    """A row with a task label, a model path combo/file picker, and that
-    task's own generation temperature — different models often want very
-    different temperatures (fast/precise for summaries vs. large/creative
-    for chapters), so it lives right next to the model it applies to."""
+    """A row with a task label, a model combo (llama.cpp GGUF files and
+    Ollama models), and that task's own generation temperature — different
+    models often want very different temperatures (fast/precise for
+    summaries vs. large/creative for chapters), so it lives right next to
+    the model it applies to."""
 
     model_changed = Signal(TaskType, str)
     temperature_changed = Signal(TaskType, float)
@@ -91,9 +105,13 @@ class ModelPicker(QWidget):
 
         self.combo = QComboBox()
         self.combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.combo.addItem("— not assigned —", "")
+        self.combo.setToolTip(
+            "[llama.cpp] = GGUF file from your models folder, run locally.\n"
+            "[Ollama] = model installed on your Ollama server."
+        )
+        self.combo.addItem(NOT_ASSIGNED_LABEL, "")
         for m in models:
-            self.combo.addItem(Path(m).name, m)
+            self.combo.addItem(_model_label(m), m)
         self.combo.currentIndexChanged.connect(self._on_changed)
         layout.addWidget(self.combo, 1)
 
@@ -154,15 +172,27 @@ class ModelPicker(QWidget):
         layout.addWidget(self.top_k_spin)
 
     def set_value(self, path: str) -> None:
-
-        for i in range(self.combo.count()):
-            if self.combo.itemData(i) == path:
-                self.combo.setCurrentIndex(i)
+        """Show a stored assignment. Programmatic: does not emit model_changed."""
+        self.combo.blockSignals(True)
+        try:
+            if not path:
+                # Explicitly select "not assigned". Matching on itemData("")
+                # is unreliable (Qt may return None for empty data), which
+                # used to leave the previous project's model on screen.
+                self.combo.setCurrentIndex(0)
                 return
 
-        if path:
-            self.combo.addItem(Path(path).name, path)
+            for i in range(1, self.combo.count()):
+                if self.combo.itemData(i) == path:
+                    self.combo.setCurrentIndex(i)
+                    return
+
+            # Assigned, but not in the current lists (GGUF folder changed,
+            # file moved, Ollama offline). Show it honestly as missing.
+            self.combo.addItem(_model_label(path, listed=False), path)
             self.combo.setCurrentIndex(self.combo.count() - 1)
+        finally:
+            self.combo.blockSignals(False)
 
     def get_value(self) -> str:
         return self.combo.currentData() or ""
@@ -204,9 +234,9 @@ class ModelPicker(QWidget):
         current = self.get_value()
         self.combo.blockSignals(True)
         self.combo.clear()
-        self.combo.addItem("— not assigned —", "")
+        self.combo.addItem(NOT_ASSIGNED_LABEL, "")
         for m in models:
-            self.combo.addItem(Path(m).name, m)
+            self.combo.addItem(_model_label(m), m)
         self.combo.blockSignals(False)
         if current:
             self.set_value(current)
@@ -217,21 +247,14 @@ class ModelPicker(QWidget):
     def _browse(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Select GGUF Model",
+            "Select GGUF Model for llama.cpp",
             "",
             "GGUF Models (*.gguf);;All Files (*)",
         )
         if path:
-
-            found = False
-            for i in range(self.combo.count()):
-                if self.combo.itemData(i) == path:
-                    self.combo.setCurrentIndex(i)
-                    found = True
-                    break
-            if not found:
-                self.combo.addItem(Path(path).name, path)
-                self.combo.setCurrentIndex(self.combo.count() - 1)
+            self.set_value(path)
+            # Picking a file is a user action, so it must save like any other change.
+            self._on_changed()
 
 
 class AppSettingsWidget(QWidget):
@@ -272,7 +295,7 @@ class AppSettingsWidget(QWidget):
         browse_dir_btn.setFixedWidth(70)
         browse_dir_btn.clicked.connect(self._browse_models_dir)
         dir_row.addWidget(browse_dir_btn)
-        form.addRow("Models Directory", dir_row)
+        form.addRow("GGUF Folder (llama.cpp)", dir_row)
 
 
         self.ctx_spin = QSpinBox()
@@ -285,7 +308,8 @@ class AppSettingsWidget(QWidget):
             "The model's total window: prompt + reply combined. This is a "
             "hard ceiling set by the model itself — it does not control how "
             "much the app asks the model to write in one go (see \"Max "
-            "Tokens per Pass\" below)."
+            "Tokens per Pass\" below).\n\n"
+            "Applies to both llama.cpp and Ollama models."
         )
         form.addRow("Context Size", self.ctx_spin)
 
@@ -294,8 +318,11 @@ class AppSettingsWidget(QWidget):
         self.gpu_spin.setRange(0, 999)
         self.gpu_spin.setValue(0)
         self.gpu_spin.setMinimumWidth(160)
-        self.gpu_spin.setToolTip("Number of layers to offload to GPU. 0 = CPU only.")
-        form.addRow("GPU Layers", self.gpu_spin)
+        self.gpu_spin.setToolTip(
+            "Number of layers to offload to GPU. 0 = CPU only.\n\n"
+            "llama.cpp models only. Ollama decides GPU usage on its own."
+        )
+        form.addRow("GPU Layers (llama.cpp)", self.gpu_spin)
 
 
         self.threads_spin = QSpinBox()
@@ -303,9 +330,10 @@ class AppSettingsWidget(QWidget):
         self.threads_spin.setValue(4)
         self.threads_spin.setMinimumWidth(160)
         self.threads_spin.setToolTip(
-            "Threads used for single-token generation (llama.cpp's n_threads)."
+            "Threads used for single-token generation (llama.cpp's n_threads).\n\n"
+            "llama.cpp models only."
         )
-        form.addRow("CPU Threads", self.threads_spin)
+        form.addRow("CPU Threads (llama.cpp)", self.threads_spin)
 
 
         self.threads_batch_spin = QSpinBox()
@@ -322,9 +350,9 @@ class AppSettingsWidget(QWidget):
             "0 = auto: not passed explicitly, so llama-cpp-python falls "
             "back to its own default (mirrors CPU Threads).\n\n"
             "Only applied if the installed llama-cpp-python build actually "
-            "exposes this parameter."
+            "exposes this parameter. llama.cpp models only."
         )
-        form.addRow("CPU Threads (Batch)", self.threads_batch_spin)
+        form.addRow("CPU Threads (Batch, llama.cpp)", self.threads_batch_spin)
 
 
         self.autosave_check = QCheckBox("Auto-save after AI responses")
@@ -334,8 +362,8 @@ class AppSettingsWidget(QWidget):
 
         self.enable_thinking_check = QCheckBox("Enable Thinking")
         self.enable_thinking_check.setToolTip(
-            "When enabled, Qwen models that support it will receive "
-            "chat_template_kwargs={'enable_thinking': True}."
+            "When enabled, Qwen models that support it are asked to think "
+            "before answering. Applies to llama.cpp and Ollama Qwen models."
         )
         form.addRow("", self.enable_thinking_check)
 
@@ -363,6 +391,44 @@ class AppSettingsWidget(QWidget):
         form.addRow("", self.log_full_prompts_check)
 
         layout.addWidget(box)
+
+
+        ollama_box = QGroupBox("Ollama")
+        ollama_form = QFormLayout(ollama_box)
+        ollama_form.setSpacing(12)
+        ollama_form.setContentsMargins(14, 18, 14, 18)
+        ollama_form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        ollama_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+
+        ollama_note = QLabel(
+            "Models marked [Ollama] are sent to this Ollama server. Install a "
+            "model with `ollama pull <name>` first. Ollama manages its own "
+            "memory and GPU use, so the llama.cpp options below don't apply to it."
+        )
+        ollama_note.setWordWrap(True)
+        ollama_note.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 11px;")
+        ollama_form.addRow(ollama_note)
+
+        ollama_url_row = QHBoxLayout()
+        self.ollama_url_input = QLineEdit()
+        self.ollama_url_input.setPlaceholderText(ollama_client.DEFAULT_OLLAMA_URL)
+        self.ollama_url_input.setToolTip(
+            "Address of the Ollama server. The default is the local Ollama "
+            "service. Change it only if Ollama runs on another machine."
+        )
+        ollama_url_row.addWidget(self.ollama_url_input, 1)
+        check_ollama_btn = QPushButton("Check Connection")
+        check_ollama_btn.setFixedWidth(130)
+        check_ollama_btn.clicked.connect(self._check_ollama)
+        ollama_url_row.addWidget(check_ollama_btn)
+        ollama_form.addRow("Server URL", ollama_url_row)
+
+        self.ollama_status_label = QLabel("Not checked yet.")
+        self.ollama_status_label.setWordWrap(True)
+        self.ollama_status_label.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 12px;")
+        ollama_form.addRow("", self.ollama_status_label)
+
+        layout.addWidget(ollama_box)
 
 
         gen_box = QGroupBox("Generation")
@@ -423,7 +489,7 @@ class AppSettingsWidget(QWidget):
         layout.addWidget(gen_box)
 
 
-        moe_box = QGroupBox("MoE Performance")
+        moe_box = QGroupBox("MoE Performance (llama.cpp only)")
         moe_form = QFormLayout(moe_box)
         moe_form.setSpacing(12)
         moe_form.setContentsMargins(14, 18, 14, 18)
@@ -431,11 +497,11 @@ class AppSettingsWidget(QWidget):
         moe_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
 
         moe_note = QLabel(
-            "Only applied when a Mixture-of-Experts model is detected "
-            "(Qwen MoE, Mixtral, GPT-OSS-style checkpoints, …) — dense "
-            "models are completely unaffected. Also only used if the "
-            "installed llama-cpp-python build actually supports these "
-            "parameters."
+            "For llama.cpp models only; Ollama models ignore these. Only "
+            "applied when a Mixture-of-Experts GGUF is detected (Qwen MoE, "
+            "Mixtral, GPT-OSS-style checkpoints, …) — dense models are "
+            "completely unaffected. Also only used if the installed "
+            "llama-cpp-python build actually supports these parameters."
         )
         moe_note.setWordWrap(True)
         moe_note.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 11px;")
@@ -707,6 +773,9 @@ class AppSettingsWidget(QWidget):
         self.enable_thinking_check.setChecked(getattr(settings, "enable_thinking", False))
         self.allow_nsfw_check.setChecked(getattr(settings, "allow_nsfw", False))
         self.log_full_prompts_check.setChecked(getattr(settings, "log_full_prompts", False))
+        self.ollama_url_input.setText(
+            getattr(settings, "ollama_base_url", ollama_client.DEFAULT_OLLAMA_URL)
+        )
         self.language_input.setText(settings.response_language)
         self.max_tokens_spin.setValue(getattr(settings, "content_max_tokens", 4000))
         self.system_prompt_input.setPlainText(settings.custom_system_prompt)
@@ -744,6 +813,14 @@ class AppSettingsWidget(QWidget):
             return
 
         self.image_model_detected_label.setText(f"Detected model: {profile.label}")
+
+    def _check_ollama(self) -> None:
+        url = ollama_client.normalize_base_url(self.ollama_url_input.text())
+        self.ollama_status_label.setText("Checking…")
+        ok, message = ollama_client.check_server(url)
+        color = "#3d9970" if ok else "#c0392b"
+        self.ollama_status_label.setStyleSheet(f"color: {color}; font-size: 12px;")
+        self.ollama_status_label.setText(("✓ " if ok else "✗ ") + message)
 
     def _browse_models_dir(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "Select Models Directory")
@@ -930,6 +1007,9 @@ class AppSettingsWidget(QWidget):
         self._settings.enable_thinking = self.enable_thinking_check.isChecked()
         self._settings.allow_nsfw = self.allow_nsfw_check.isChecked()
         self._settings.log_full_prompts = self.log_full_prompts_check.isChecked()
+        self._settings.ollama_base_url = ollama_client.normalize_base_url(
+            self.ollama_url_input.text()
+        )
         self._settings.response_language = self.language_input.text().strip()
         self._settings.content_max_tokens = self.max_tokens_spin.value()
         self._settings.custom_system_prompt = self.system_prompt_input.toPlainText().strip()
@@ -984,8 +1064,9 @@ class ModelsPanel(QWidget):
         outer.addWidget(title)
 
         subtitle = QLabel(
-            "Each task can use a different GGUF model. "
-            "The Manager Agent loads the correct model automatically."
+            "Each task can use a different model. Models tagged [llama.cpp] "
+            "are GGUF files run locally; models tagged [Ollama] run on your "
+            "Ollama server. The Manager Agent loads the correct model automatically."
         )
         subtitle.setObjectName("subheading")
         subtitle.setWordWrap(True)
@@ -993,13 +1074,18 @@ class ModelsPanel(QWidget):
 
 
         refresh_row = QHBoxLayout()
-        self.dir_label = QLabel("No models directory set. Configure in Settings.")
+        self.dir_label = QLabel("GGUF folder (llama.cpp): not set. Configure in Settings.")
         self.dir_label.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px;")
         refresh_row.addWidget(self.dir_label, 1)
         refresh_btn = QPushButton("Refresh Models")
         refresh_btn.clicked.connect(self._refresh_models)
         refresh_row.addWidget(refresh_btn)
         outer.addLayout(refresh_row)
+
+        self.ollama_label = QLabel("Ollama: not checked yet.")
+        self.ollama_label.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px;")
+        self.ollama_label.setWordWrap(True)
+        outer.addWidget(self.ollama_label)
 
 
         box = QGroupBox("Task → Model Assignment")
@@ -1097,29 +1183,43 @@ class ModelsPanel(QWidget):
             self.assign_all_top_p_spin.setValue(first_picker.get_top_p())
             self.assign_all_top_k_spin.setValue(first_picker.get_top_k())
 
-    def update_available_models(self, models_dir: str) -> None:
-        models = storage.list_gguf_models(models_dir)
-        self._available_models = models
+    def update_available_models(self, models_dir: str, ollama_base_url: str = "") -> None:
+        gguf_models = storage.list_gguf_models(models_dir) if models_dir else []
+        self.dir_label.setText(
+            f"GGUF folder (llama.cpp): {models_dir} — "
+            f"{len(gguf_models)} model{'s' if len(gguf_models) != 1 else ''} found"
+            if models_dir
+            else "GGUF folder (llama.cpp): not set. Configure in Settings."
+        )
 
-        if models_dir:
-            self.dir_label.setText(
-                f"Directory: {models_dir} ({len(models)} model{'s' if len(models) != 1 else ''} found)"
+        ollama_url = ollama_client.normalize_base_url(ollama_base_url)
+        try:
+            ollama_names = ollama_client.list_models(ollama_url)
+            ollama_refs = [ollama_client.make_ollama_ref(n) for n in ollama_names]
+            self.ollama_label.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px;")
+            self.ollama_label.setText(
+                f"Ollama ({ollama_url}): {len(ollama_refs)} model"
+                f"{'s' if len(ollama_refs) != 1 else ''} available"
             )
-        else:
-            self.dir_label.setText("No models directory set. Configure in Settings.")
+        except ollama_client.OllamaError as e:
+            ollama_refs = []
+            self.ollama_label.setStyleSheet("color: #c0392b; font-size: 12px;")
+            self.ollama_label.setText(f"Ollama not reachable — {e}")
+
+        models = gguf_models + ollama_refs
+        self._available_models = models
 
         for picker in self._pickers.values():
             picker.update_models(models)
 
-
         self.assign_all_combo.clear()
         self.assign_all_combo.addItem("— select model —", "")
         for m in models:
-            self.assign_all_combo.addItem(Path(m).name, m)
+            self.assign_all_combo.addItem(_model_label(m), m)
 
     def _refresh_models(self) -> None:
         settings = storage.load_settings()
-        self.update_available_models(settings.models_directory)
+        self.update_available_models(settings.models_directory, settings.ollama_base_url)
 
     def _on_model_changed(self, task: TaskType, path: str) -> None:
         if not self._project:
@@ -1212,28 +1312,37 @@ class SettingsPanel(QWidget):
         inner_layout.addWidget(self.app_settings_widget)
 
 
-        notice_box = QGroupBox("Installation")
+        notice_box = QGroupBox("Local Runtimes")
         nb_layout = QVBoxLayout(notice_box)
         nb_layout.setContentsMargins(14, 18, 14, 14)
+        nb_layout.setSpacing(12)
 
         try:
             from llama_cpp import Llama
-            status = "✓ llama-cpp-python is installed and ready."
-            status_color = "#3d9970"
+            llama_status = "✓ llama.cpp (llama-cpp-python) is installed — GGUF models can run."
+            llama_color = "#3d9970"
         except ImportError:
-            status = (
-                "✗ llama-cpp-python is not installed.\n\n"
+            llama_status = (
+                "✗ llama.cpp (llama-cpp-python) is not installed — GGUF models cannot run.\n\n"
                 "Install it with:\n"
                 "  pip install llama-cpp-python\n\n"
                 "For GPU support:\n"
                 "  CMAKE_ARGS=\"-DLLAMA_CUBLAS=on\" pip install llama-cpp-python --upgrade"
             )
-            status_color = "#c0392b"
+            llama_color = "#c0392b"
 
-        status_lbl = QLabel(status)
-        status_lbl.setStyleSheet(f"color: {status_color}; font-size: 13px;")
-        status_lbl.setWordWrap(True)
-        nb_layout.addWidget(status_lbl)
+        llama_lbl = QLabel(llama_status)
+        llama_lbl.setStyleSheet(f"color: {llama_color}; font-size: 13px;")
+        llama_lbl.setWordWrap(True)
+        nb_layout.addWidget(llama_lbl)
+
+        ollama_hint = QLabel(
+            "Ollama (for [Ollama] models) is not a Python package. It runs as a "
+            "separate program; check it with the Ollama section above."
+        )
+        ollama_hint.setWordWrap(True)
+        ollama_hint.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 12px;")
+        nb_layout.addWidget(ollama_hint)
         inner_layout.addWidget(notice_box)
 
         inner_layout.addStretch()

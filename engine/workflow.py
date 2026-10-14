@@ -10,6 +10,7 @@ from typing import Optional
 
 from PySide6.QtCore import QObject, QThread, Signal
 
+from engine import ollama_client
 from engine.chat import get_engine
 from engine.context import (
     build_context_for_model,
@@ -395,12 +396,10 @@ class WorkflowWorker(QObject):
             return False
 
         engine = get_engine()
-        if not engine.is_available:
-            logger.error("llama-cpp-python is not installed.")
-            self.error_occurred.emit(
-                "llama-cpp-python is not installed.\n"
-                "Run: pip install llama-cpp-python"
-            )
+        unavailable = engine.availability_error(model_path)
+        if unavailable:
+            logger.error(unavailable)
+            self.error_occurred.emit(unavailable)
             return False
 
         ctx = 4096
@@ -409,6 +408,7 @@ class WorkflowWorker(QObject):
         threads_batch = 0
         moe_n_batch = 1024
         moe_n_ubatch = 1024
+        ollama_url = ollama_client.DEFAULT_OLLAMA_URL
         if self.settings:
             ctx = self.settings.default_context_size
             gpu = self.settings.default_gpu_layers
@@ -416,9 +416,10 @@ class WorkflowWorker(QObject):
             threads_batch = getattr(self.settings, "default_threads_batch", 0)
             moe_n_batch = getattr(self.settings, "moe_n_batch", 1024)
             moe_n_ubatch = getattr(self.settings, "moe_n_ubatch", 1024)
+            ollama_url = getattr(self.settings, "ollama_base_url", ollama_url)
 
         logger.info(
-            f"[{task.value}] requesting model load: {model_path} "
+            f"[{task.value}] requesting model load: {ollama_client.display_name(model_path)} "
             f"(n_ctx={ctx}, n_gpu_layers={gpu}, n_threads={threads}, "
             f"n_threads_batch={threads_batch or 'auto'})"
         )
@@ -433,6 +434,7 @@ class WorkflowWorker(QObject):
                     moe_n_batch=moe_n_batch,
                     moe_n_ubatch=moe_n_ubatch,
                     progress_callback=lambda msg: self.model_loading.emit(msg),
+                    ollama_base_url=ollama_url,
                 )
             return True
         except Exception as e:

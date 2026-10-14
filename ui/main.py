@@ -104,7 +104,9 @@ class MainWindow(QMainWindow):
 
 
         self.settings_panel.load(self._settings)
-        self.models_panel.update_available_models(self._settings.models_directory)
+        self.models_panel.update_available_models(
+            self._settings.models_directory, self._settings.ollama_base_url
+        )
         self.chat_panel.set_settings(self._settings)
         self.images_panel.set_settings(self._settings)
 
@@ -537,7 +539,9 @@ class MainWindow(QMainWindow):
         self._settings = settings
         self.chat_panel.set_settings(settings)
         self.images_panel.set_settings(settings)
-        self.models_panel.update_available_models(settings.models_directory)
+        self.models_panel.update_available_models(
+            settings.models_directory, settings.ollama_base_url
+        )
         self.status.showMessage("Settings saved", 3000)
 
 
