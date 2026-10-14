@@ -104,9 +104,7 @@ class MainWindow(QMainWindow):
 
 
         self.settings_panel.load(self._settings)
-        self.models_panel.update_available_models(
-            self._settings.models_directory, self._settings.ollama_base_url
-        )
+        self.models_panel.set_settings(self._settings)
         self.chat_panel.set_settings(self._settings)
         self.images_panel.set_settings(self._settings)
 
@@ -249,7 +247,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.images_panel, "Images")
 
         self.models_panel = ModelsPanel()
-        self.tabs.addTab(self.models_panel, "Models")
+        self.tabs.addTab(self.models_panel, "Text Models")
 
         self.settings_panel = SettingsPanel()
         self.tabs.addTab(self.settings_panel, "Settings")
@@ -295,7 +293,25 @@ class MainWindow(QMainWindow):
 
         self.models_panel.assignments_changed.connect(self._on_project_edited)
 
+        self.images_panel.open_settings_requested.connect(self._show_settings)
+        self.models_panel.open_settings_requested.connect(self._show_settings)
+        self.projects_panel.project_renamed.connect(self._on_project_renamed)
+
         self.settings_panel.settings_changed.connect(self._on_settings_changed)
+
+    def _show_settings(self) -> None:
+        self.tabs.setCurrentWidget(self.settings_panel)
+
+    def _on_project_renamed(self, project_id: str) -> None:
+        """Keep the open project's title in sync after a rename in the sidebar."""
+        if not self._current_project or self._current_project.id != project_id:
+            return
+        stored = storage.load_project(project_id)
+        if stored is None:
+            return
+        self._current_project.title = stored.title
+        self.project_title_bar.setText(stored.title)
+        self.status.showMessage(f"Renamed to '{stored.title}'", 3000)
 
 
 
@@ -384,9 +400,17 @@ class MainWindow(QMainWindow):
         self.project_title_bar.setText(self._current_project.title)
         self._update_next_step()
 
-    def _on_ai_task_finished(self) -> None:
-        """An AI workflow task finished and persisted its own changes."""
+    def _on_ai_task_finished(self, project_id: str = "") -> None:
+        """An AI workflow step finished and persisted its own changes.
+
+        The task may belong to a project other than the one on screen. Its
+        changes are already on disk, so only the list needs to be updated; the
+        open project is reloaded only when it is the one that changed.
+        """
         if not self._current_project:
+            return
+        if project_id and project_id != self._current_project.id:
+            self.projects_panel.refresh()
             return
 
 
@@ -539,9 +563,7 @@ class MainWindow(QMainWindow):
         self._settings = settings
         self.chat_panel.set_settings(settings)
         self.images_panel.set_settings(settings)
-        self.models_panel.update_available_models(
-            settings.models_directory, settings.ollama_base_url
-        )
+        self.models_panel.set_settings(settings)
         self.status.showMessage("Settings saved", 3000)
 
 
@@ -557,4 +579,4 @@ class MainWindow(QMainWindow):
 
     def _show_workspace(self) -> None:
         self.empty_state.hide()
-        self.tabs.show()
+        self.tabs.show()

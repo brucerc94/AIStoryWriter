@@ -1,11 +1,8 @@
 """
-LLM inference engine.
-get_engine() returns an LLMRouter that sends each request to the right
-backend based on the model reference:
-  • a .gguf path          -> local llama-cpp-python (LLMEngine, below)
-  • "ollama:<name>"        -> Ollama server (engine.ollama_client)
-One model loaded at a time to conserve RAM (switching backends frees the
-previous one first).
+LLM inference engine for local GGUF models (llama-cpp-python).
+Generation for every backend goes through engine.llm_router.get_engine(),
+which picks the backend from the model reference (see engine.model_refs).
+Only one model is loaded at a time to conserve RAM.
 
 Also auto-detects the NVIDIA GPU (via nvidia-smi) and, for cards without
 real Tensor Cores (e.g. the GTX 16-series, Compute Capability 7.5 but no
@@ -55,7 +52,7 @@ import threading
 from pathlib import Path
 from typing import Callable, Iterator, Optional
 
-from engine import gguf_meta, llama_features, ollama_client
+from engine import gguf_meta, llama_features
 
 _llama_available = False
 try:
@@ -542,146 +539,9 @@ class LLMEngine:
 
 
 
-class LLMRouter:
-    """
-    Single entry point for text generation. Routes each model reference to
-    its backend:
-
-      * "ollama:<name>"  -> Ollama server (engine.ollama_client)
-      * anything else    -> local GGUF file via llama-cpp-python (LLMEngine)
-
-    Only one backend holds a model at a time, so switching backends frees
-    the previous one first. The method names mirror LLMEngine, so callers
-    don't need to know which backend is active.
-    """
-
-    def __init__(self, local: LLMEngine, remote: "ollama_client.OllamaEngine") -> None:
-        self._local = local
-        self._remote = remote
-        self._active: Optional[object] = None
-        self._lock = threading.Lock()
-
-    def _backend_for(self, ref: str):
-        return self._remote if ollama_client.is_ollama_ref(ref) else self._local
-
-    def availability_error(self, ref: str) -> Optional[str]:
-        """
-        Message explaining why a model reference cannot be used on this
-        machine, or None if it can. Ollama problems are reported by
-        load_model() with the exact cause, so they are not checked here.
-        """
-        if ollama_client.is_ollama_ref(ref):
-            return None
-        if not _llama_available:
-            return (
-                "Local GGUF models need llama-cpp-python, which is not installed.\n"
-                "Run: pip install llama-cpp-python\n"
-                "(Or assign an [Ollama] model instead.)"
-            )
-        return None
-
-    @property
-    def is_available(self) -> bool:
-        # The router itself is always usable: Ollama needs no local library.
-        # Use availability_error(ref) to check a specific model.
-        return True
-
-    @property
-    def model_loaded(self) -> bool:
-        return self._active is not None and self._active.model_loaded
-
-    @property
-    def current_model_path(self) -> str:
-        return self._active.current_model_path if self._active else ""
-
-    @property
-    def current_context_size(self) -> int:
-        return self._active.current_context_size if self._active else 0
-
-    @property
-    def context_size(self) -> int:
-        return self.current_context_size
-
-    @property
-    def last_model_info(self):
-        return self._active.last_model_info if self._active else None
-
-    def load_model(
-        self,
-        model_ref: str,
-        n_ctx: int = 4096,
-        n_gpu_layers: int = 0,
-        n_threads: int = 4,
-        n_threads_batch: int = 0,
-        moe_n_batch: int = _MOE_N_BATCH,
-        moe_n_ubatch: int = _MOE_N_UBATCH,
-        progress_callback: Optional[Callable[[str], None]] = None,
-        ollama_base_url: str = ollama_client.DEFAULT_OLLAMA_URL,
-    ) -> None:
-        with self._lock:
-            target = self._backend_for(model_ref)
-            other = self._local if target is self._remote else self._remote
-            if other.model_loaded:
-                other.unload()
-
-            if target is self._remote:
-                target.load_model(
-                    model_ref,
-                    base_url=ollama_base_url,
-                    n_ctx=n_ctx,
-                    progress_callback=progress_callback,
-                )
-            else:
-                target.load_model(
-                    model_ref,
-                    n_ctx=n_ctx,
-                    n_gpu_layers=n_gpu_layers,
-                    n_threads=n_threads,
-                    n_threads_batch=n_threads_batch,
-                    moe_n_batch=moe_n_batch,
-                    moe_n_ubatch=moe_n_ubatch,
-                    progress_callback=progress_callback,
-                )
-            self._active = target
-
-    def unload(self) -> None:
-        with self._lock:
-            self._local.unload()
-            self._remote.unload()
-            self._active = None
-
-    def generate(
-        self,
-        messages: list[dict],
-        max_tokens: int = 2048,
-        temperature: float = 0.7,
-        top_p: float = 0.9,
-        top_k: int = 40,
-        stop: Optional[list[str]] = None,
-        stream: bool = False,
-        stream_callback: Optional[Callable[[str], None]] = None,
-        cancel_check: Optional[Callable[[], bool]] = None,
-    ) -> str:
-        active = self._active
-        if active is None or not active.model_loaded:
-            raise RuntimeError("No model loaded. Call load_model() first.")
-        return active.generate(
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            top_k=top_k,
-            stop=stop,
-            stream=stream,
-            stream_callback=stream_callback,
-            cancel_check=cancel_check,
-        )
-
-
 _engine = LLMEngine()
-_remote_engine = ollama_client.OllamaEngine()
-_router = LLMRouter(_engine, _remote_engine)
 
 
-def get_engine() -> LLMRouter:
-    return _router
+def get_local_engine() -> LLMEngine:
+    """The llama-cpp-python backend. Use engine.llm_router.get_engine() for generation."""
+    return _engine

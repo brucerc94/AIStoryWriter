@@ -43,9 +43,10 @@ from PySide6.QtWidgets import (
 )
 
 from engine import storage
-from engine.image_workflow import generate_character_image
+from engine.character_images import PortraitOutcome, mark_generating, record_outcome
 from engine.models import AuthorIntent, Chapter, Character, CharacterRelationship, Project, TaskType, WritingStyle
 from engine.workflow import OUTLINE_EXTEND_MARKER, OUTLINE_SUGGESTION_MARKER, WRITE_CHAPTER_TARGET_MARKER
+from ui.workers import CharacterPortraitWorker, is_running, start_worker
 from ui.styles import (
     COLOR_ACCENT,
     COLOR_ACCENT_DIM,
@@ -1100,32 +1101,14 @@ class CharacterCard(QFrame):
         return self._project_id_value
 
 
-class _CharacterImageWorker(QObject):
-    finished = Signal(object)
-
-    def __init__(self, project_id: str, character: Character, settings) -> None:
-        super().__init__()
-        self.project_id = project_id
-        self.character = character
-        self.settings = settings
-
-    def run(self) -> None:
-        try:
-            ok, image_ref, error = generate_character_image(self.project_id, self.character, self.settings)
-        except Exception as exc:  # pragma: no cover - defensive path
-            ok, image_ref, error = False, None, str(exc)
-        self.finished.emit((ok, image_ref, error))
-
-
 class CharactersTab(QWidget):
     project_changed = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._project: Optional[Project] = None
-        self._settings = storage.load_settings()
         self._image_thread: Optional[QThread] = None
-        self._image_worker: Optional[_CharacterImageWorker] = None
+        self._image_worker: Optional[CharacterPortraitWorker] = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(16, 16, 16, 16)
@@ -1241,42 +1224,30 @@ class CharactersTab(QWidget):
             self.project_changed.emit()
 
     def _handle_character_image(self, char_id: str, regenerate: bool) -> None:
-        if not self._project or (self._image_thread and self._image_thread.isRunning()):
+        if not self._project or is_running(self._image_thread):
             return
         char = next((c for c in self._project.characters if c.id == char_id), None)
         if not char:
             return
-        char.image_status = "Generating"
-        char.image_error = ""
-        storage.save_project(self._project)
+        mark_generating(self._project, char_id)
         self._refresh_cards()
 
-        self._image_worker = _CharacterImageWorker(self._project.id, char, self._settings)
-        self._image_thread = QThread(self)
-        self._image_worker.moveToThread(self._image_thread)
-        self._image_thread.started.connect(self._image_worker.run)
-        self._image_worker.finished.connect(self._on_character_image_finished)
-        self._image_worker.finished.connect(self._image_thread.quit)
-        self._image_thread.finished.connect(self._image_thread.deleteLater)
-        self._image_thread.start()
+        # Read settings now, not when the tab was created, so a change made in
+        # Settings (model, encoder, VAE, size...) applies to the next portrait.
+        self._image_worker = CharacterPortraitWorker(
+            self._project.id, char, storage.load_settings()
+        )
+        self._image_thread = start_worker(
+            self, self._image_worker, self._on_character_image_finished
+        )
 
-    def _on_character_image_finished(self, payload: tuple[bool, Optional[dict], str]) -> None:
-        if not self._project:
-            return
-        ok, image_ref, error = payload
-        char = next((c for c in self._project.characters if c.id == self._image_worker.character.id), None) if self._image_worker else None
-        if not char:
-            return
-        if ok and image_ref:
-            char.image_ref = image_ref
-            char.image_status = "Ready"
-            char.image_error = ""
-        else:
-            char.image_status = "Error"
-            char.image_error = error or "Image generation failed."
-        storage.save_project(self._project)
-        self._refresh_cards()
-        self.project_changed.emit()
+    def _on_character_image_finished(self, outcome: PortraitOutcome) -> None:
+        # The result belongs to the project the job started on, which may no
+        # longer be the one on screen. Save it there; refresh only if it is ours.
+        saved = record_outcome(outcome, loaded=self._project)
+        if saved is not None and self._project is not None and saved is self._project:
+            self._refresh_cards()
+            self.project_changed.emit()
         self._image_worker = None
         self._image_thread = None
 
@@ -3026,6 +2997,7 @@ class StoryPanel(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._project: Optional[Project] = None
+        self._editor_lock_state: Optional[list] = None
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -3108,6 +3080,27 @@ class StoryPanel(QWidget):
         self.outline_tab.set_busy(busy, project_name)
         self.world_tab.set_busy(busy, project_name)
         self.chapters_tab.set_busy(busy, project_name)
+        self._set_editors_locked(busy)
+
+    def _set_editors_locked(self, locked: bool) -> None:
+        """
+        While a task runs it reloads the project from disk when it finishes.
+        A manual edit made in the meantime would be overwritten by that reload,
+        so text editors are read-only for the duration. Each editor's own
+        read-only state is remembered, so editors that were read-only by
+        design stay that way afterwards.
+        """
+        if locked:
+            if self._editor_lock_state is not None:
+                return
+            self._editor_lock_state = []
+            for editor in self.findChildren(QTextEdit):
+                self._editor_lock_state.append((editor, editor.isReadOnly()))
+                editor.setReadOnly(True)
+        else:
+            for editor, was_read_only in self._editor_lock_state or []:
+                editor.setReadOnly(was_read_only)
+            self._editor_lock_state = None
 
     def _save_project(self) -> None:
         if self._project:

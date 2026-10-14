@@ -485,6 +485,8 @@ class AppSettings:
     moe_n_ubatch: int = 1024
     log_full_prompts: bool = False
     ollama_base_url: str = "http://localhost:11434"
+    # provider id -> {"api_key": str, "base_url": str, "models": [str]}
+    cloud_providers: dict = field(default_factory=dict)
     image_model_path: str = ""
     image_text_encoder_path: str = ""
     image_vae_path: str = ""
@@ -520,6 +522,7 @@ class AppSettings:
             "moe_n_ubatch": self.moe_n_ubatch,
             "log_full_prompts": self.log_full_prompts,
             "ollama_base_url": self.ollama_base_url,
+            "cloud_providers": self.cloud_providers if self.cloud_providers is not None else {},
             "image_model_path": self.image_model_path,
             "image_text_encoder_path": self.image_text_encoder_path,
             "image_vae_path": self.image_vae_path,

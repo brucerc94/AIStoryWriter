@@ -10,8 +10,8 @@ from typing import Optional
 
 from PySide6.QtCore import QObject, QThread, Signal
 
-from engine import ollama_client
-from engine.chat import get_engine
+from engine.llm_router import get_engine
+from engine.model_refs import display_name
 from engine.context import (
     build_context_for_model,
     build_review_context_for_model,
@@ -408,7 +408,6 @@ class WorkflowWorker(QObject):
         threads_batch = 0
         moe_n_batch = 1024
         moe_n_ubatch = 1024
-        ollama_url = ollama_client.DEFAULT_OLLAMA_URL
         if self.settings:
             ctx = self.settings.default_context_size
             gpu = self.settings.default_gpu_layers
@@ -416,10 +415,9 @@ class WorkflowWorker(QObject):
             threads_batch = getattr(self.settings, "default_threads_batch", 0)
             moe_n_batch = getattr(self.settings, "moe_n_batch", 1024)
             moe_n_ubatch = getattr(self.settings, "moe_n_ubatch", 1024)
-            ollama_url = getattr(self.settings, "ollama_base_url", ollama_url)
 
         logger.info(
-            f"[{task.value}] requesting model load: {ollama_client.display_name(model_path)} "
+            f"[{task.value}] requesting model load: {display_name(model_path)} "
             f"(n_ctx={ctx}, n_gpu_layers={gpu}, n_threads={threads}, "
             f"n_threads_batch={threads_batch or 'auto'})"
         )
@@ -427,6 +425,7 @@ class WorkflowWorker(QObject):
             with _StepTimer(f"model_load({task.value})"):
                 engine.load_model(
                     model_path,
+                    settings=self.settings,
                     n_ctx=ctx,
                     n_gpu_layers=gpu,
                     n_threads=threads,
@@ -434,7 +433,6 @@ class WorkflowWorker(QObject):
                     moe_n_batch=moe_n_batch,
                     moe_n_ubatch=moe_n_ubatch,
                     progress_callback=lambda msg: self.model_loading.emit(msg),
-                    ollama_base_url=ollama_url,
                 )
             return True
         except Exception as e:
@@ -606,28 +604,6 @@ class WorkflowWorker(QObject):
                 "The response will be capped to the effective limit."
             )
 
-
-        _ROLE_COLORS = {
-            "system":    "\033[36m",
-            "user":      "\033[32m",
-            "assistant": "\033[33m",
-        }
-        _RESET = "\033[0m"
-        _DIVIDER = "─" * 72
-
-        print(f"\n{'═' * 72}")
-        print(f"  PROMPT DUMP  [{task.value.upper()}]  "
-              f"{len(messages)} msg(s)  ~{prompt_tokens} tokens")
-        print(f"{'═' * 72}")
-        for idx, msg in enumerate(messages):
-            role = msg.get("role", "?")
-            content = msg.get("content", "")
-            color = _ROLE_COLORS.get(role, "")
-            print(f"{color}[{idx}] {role.upper()}{_RESET}")
-            print(_DIVIDER)
-            print(content)
-            print()
-        print(f"{'═' * 72}\n")
 
         accumulated = []
 
@@ -3262,4 +3238,4 @@ if __name__ == "__main__":
     _test_saves_exactly_n_new_entries()
     _test_existing_chapters_not_modified()
     _test_fifth_chapter_never_generated()
-    print("\nAll tests passed.")
+    print("\nAll tests passed.")

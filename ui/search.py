@@ -8,6 +8,7 @@ results from in-memory text.
 
 from __future__ import annotations
 
+import html
 import re
 from dataclasses import dataclass
 from typing import Optional
@@ -311,24 +312,22 @@ class SearchTab(QWidget):
 
     @staticmethod
     def _highlight(text: str, pattern: re.Pattern) -> str:
-        """Wrap each match in a bold+accent-colored span for display."""
-        def replace(m: re.Match) -> str:
-            escaped = (
-                m.group(0)
-                .replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
+        """
+        Build rich-text for a result line. Every segment of the original text is
+        HTML-escaped first, so content such as "<b>" or "&" is shown literally;
+        only the matched segments get the highlight markup.
+        """
+        parts: list[str] = []
+        last = 0
+        for match in pattern.finditer(text):
+            parts.append(html.escape(text[last:match.start()], quote=False))
+            parts.append(
+                f'<b style="color: {COLOR_ACCENT};">'
+                f'{html.escape(match.group(0), quote=False)}</b>'
             )
-            return f'<b style="color: {COLOR_ACCENT};">{escaped}</b>'
-
-        safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-
-
-        try:
-            return pattern.sub(replace, text)
-        except Exception:
-            return safe
+            last = match.end()
+        parts.append(html.escape(text[last:], quote=False))
+        return "".join(parts)
 
     def _clear_results(self) -> None:
         while self._results_layout.count() > 1:

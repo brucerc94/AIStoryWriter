@@ -427,7 +427,9 @@ class ChatPanel(QWidget):
     """
 
 
-    project_updated = Signal()
+    # Emitted with the id of the project that the finished step belongs to,
+    # which can differ from the project on screen if the user switched.
+    project_updated = Signal(str)
 
 
     busy_changed = Signal(bool, str)
@@ -704,6 +706,10 @@ class ChatPanel(QWidget):
             )
 
     def load_project(self, project: Project) -> None:
+        # A chapter attached for one project must never be sent with a message
+        # written in another project.
+        if self._project is not None and self._project.id != project.id:
+            self._pending_chapter_attachment = None
         self._project = project
         if self._thread and self._thread.isRunning():
 
@@ -929,15 +935,12 @@ class ChatPanel(QWidget):
     def _on_step_finished(self, step: str, result: str) -> None:
         self.messages_widget.finalize_streaming()
 
-
-
         if self._active_project:
-
-
             if self._project and self._project.id == self._active_project.id:
                 self.messages_widget.load_messages(self._active_project.chat_messages)
         self._scroll_to_bottom()
-        self.project_updated.emit()
+        if self._active_project:
+            self.project_updated.emit(self._active_project.id)
 
     def _on_error(self, error: str) -> None:
         self.messages_widget.finalize_streaming()
@@ -1008,7 +1011,7 @@ class ChatPanel(QWidget):
         storage.save_project(self._project)
 
         self.messages_widget.load_messages(self._project.chat_messages)
-        self.project_updated.emit()
+        self.project_updated.emit(self._project.id)
 
     def _set_busy(self, busy: bool) -> None:
         self.send_btn.setVisible(not busy)

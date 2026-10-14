@@ -12,7 +12,6 @@ Two sections:
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
@@ -41,9 +40,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from engine import ollama_client, storage
+from engine import model_catalog, model_refs, ollama_client, storage
 from engine.image_engine import get_image_model_profile
 from engine.models import AppSettings, ImageBackend, Project, TaskType
+from ui.cloud_settings import CloudProvidersBox
 from ui.styles import (
     COLOR_ACCENT,
     COLOR_BORDER,
@@ -72,19 +72,25 @@ TASK_LABELS: dict[TaskType, str] = {
 
 NOT_ASSIGNED_LABEL = "— not assigned —"
 
+# Shared widths: the table header and every task row use the same numbers,
+# so each heading sits right above its column.
+_ROW_SPACING = 8
+_TASK_LABEL_WIDTH = 170
+_SPIN_WIDTH = 74
+
 
 def _model_label(ref: str, listed: bool = True) -> str:
-    """Label shown in every model combo: always says which backend runs it."""
-    label = ollama_client.display_name(ref)
+    """Label shown in every model combo: always names the backend."""
+    label = model_refs.display_name(ref)
     return label if listed else f"{label}  — not found"
 
 
 class ModelPicker(QWidget):
-    """A row with a task label, a model combo (llama.cpp GGUF files and
-    Ollama models), and that task's own generation temperature — different
-    models often want very different temperatures (fast/precise for
-    summaries vs. large/creative for chapters), so it lives right next to
-    the model it applies to."""
+    """
+    One row of the task table: task name, model, and that task's sampling
+    values. They sit next to the model because the right values differ between
+    a small fast model and a large creative one.
+    """
 
     model_changed = Signal(TaskType, str)
     temperature_changed = Signal(TaskType, float)
@@ -94,20 +100,23 @@ class ModelPicker(QWidget):
     def __init__(self, task: TaskType, models: list[str], parent=None) -> None:
         super().__init__(parent)
         self.task = task
+        name = TASK_LABELS.get(task, task.value)
+
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(_ROW_SPACING)
 
-        lbl = QLabel(TASK_LABELS.get(task, task.value))
-        lbl.setFixedWidth(160)
-        lbl.setStyleSheet(f"color: {COLOR_TEXT}; font-size: 13px;")
-        layout.addWidget(lbl)
+        task_lbl = QLabel(name)
+        task_lbl.setFixedWidth(_TASK_LABEL_WIDTH)
+        task_lbl.setStyleSheet(f"color: {COLOR_TEXT}; font-size: 13px;")
+        layout.addWidget(task_lbl)
 
         self.combo = QComboBox()
         self.combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.combo.setToolTip(
-            "[llama.cpp] = GGUF file from your models folder, run locally.\n"
-            "[Ollama] = model installed on your Ollama server."
+            "[llama.cpp] GGUF file in your GGUF folder, run on this computer.\n"
+            "[Ollama] model on your Ollama server.\n"
+            "[Cloud] model from a cloud API you configured in Settings."
         )
         self.combo.addItem(NOT_ASSIGNED_LABEL, "")
         for m in models:
@@ -115,120 +124,51 @@ class ModelPicker(QWidget):
         self.combo.currentIndexChanged.connect(self._on_changed)
         layout.addWidget(self.combo, 1)
 
-        browse_btn = QPushButton("Browse…")
-        browse_btn.setFixedWidth(70)
-        browse_btn.clicked.connect(self._browse)
-        layout.addWidget(browse_btn)
-
-        temp_lbl = QLabel("Temp")
-        temp_lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 11px;")
-        layout.addWidget(temp_lbl)
-
         self.temp_spin = QDoubleSpinBox()
         self.temp_spin.setRange(0.0, 2.0)
         self.temp_spin.setSingleStep(0.05)
         self.temp_spin.setDecimals(2)
         self.temp_spin.setValue(0.7)
-        self.temp_spin.setFixedWidth(70)
+        self.temp_spin.setFixedWidth(_SPIN_WIDTH)
         self.temp_spin.setToolTip(
-            f"Generation temperature for {TASK_LABELS.get(task, task.value)}. "
-            "0.0 = deterministic/focused, 2.0 = max randomness."
+            f"Temperature for {name}. 0.0 = focused, 2.0 = most random. "
+            "Anthropic models accept values up to 1.0."
         )
-        self.temp_spin.valueChanged.connect(self._on_temperature_changed)
+        self.temp_spin.valueChanged.connect(
+            lambda v: self.temperature_changed.emit(self.task, v)
+        )
         layout.addWidget(self.temp_spin)
-
-        top_p_lbl = QLabel("Top P")
-        top_p_lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 11px;")
-        layout.addWidget(top_p_lbl)
 
         self.top_p_spin = QDoubleSpinBox()
         self.top_p_spin.setRange(0.0, 1.0)
         self.top_p_spin.setSingleStep(0.05)
         self.top_p_spin.setDecimals(2)
         self.top_p_spin.setValue(0.9)
-        self.top_p_spin.setFixedWidth(70)
+        self.top_p_spin.setFixedWidth(_SPIN_WIDTH)
         self.top_p_spin.setToolTip(
-            f"Nucleus sampling (Top P) for {TASK_LABELS.get(task, task.value)}. "
-            "Only tokens within this cumulative probability mass are considered. "
-            "1.0 = no filtering."
+            f"Top P for {name}: only the most likely tokens whose probabilities add up "
+            "to this value are considered. 1.0 = no filtering."
         )
-        self.top_p_spin.valueChanged.connect(self._on_top_p_changed)
+        self.top_p_spin.valueChanged.connect(
+            lambda v: self.top_p_changed.emit(self.task, v)
+        )
         layout.addWidget(self.top_p_spin)
-
-        top_k_lbl = QLabel("Top K")
-        top_k_lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 11px;")
-        layout.addWidget(top_k_lbl)
 
         self.top_k_spin = QSpinBox()
         self.top_k_spin.setRange(0, 1000)
         self.top_k_spin.setSingleStep(1)
         self.top_k_spin.setValue(40)
-        self.top_k_spin.setFixedWidth(70)
+        self.top_k_spin.setFixedWidth(_SPIN_WIDTH)
         self.top_k_spin.setToolTip(
-            f"Top K for {TASK_LABELS.get(task, task.value)}. Only the K most "
-            "likely next tokens are considered. 0 = disabled/no limit."
+            f"Top K for {name}: only the K most likely tokens are considered. "
+            "0 = no limit. Not supported by OpenAI models, which ignore it."
         )
-        self.top_k_spin.valueChanged.connect(self._on_top_k_changed)
+        self.top_k_spin.valueChanged.connect(
+            lambda v: self.top_k_changed.emit(self.task, v)
+        )
         layout.addWidget(self.top_k_spin)
 
-    def set_value(self, path: str) -> None:
-        """Show a stored assignment. Programmatic: does not emit model_changed."""
-        self.combo.blockSignals(True)
-        try:
-            if not path:
-                # Explicitly select "not assigned". Matching on itemData("")
-                # is unreliable (Qt may return None for empty data), which
-                # used to leave the previous project's model on screen.
-                self.combo.setCurrentIndex(0)
-                return
-
-            for i in range(1, self.combo.count()):
-                if self.combo.itemData(i) == path:
-                    self.combo.setCurrentIndex(i)
-                    return
-
-            # Assigned, but not in the current lists (GGUF folder changed,
-            # file moved, Ollama offline). Show it honestly as missing.
-            self.combo.addItem(_model_label(path, listed=False), path)
-            self.combo.setCurrentIndex(self.combo.count() - 1)
-        finally:
-            self.combo.blockSignals(False)
-
-    def get_value(self) -> str:
-        return self.combo.currentData() or ""
-
-    def set_temperature(self, temperature: float) -> None:
-        self.temp_spin.blockSignals(True)
-        self.temp_spin.setValue(temperature)
-        self.temp_spin.blockSignals(False)
-
-    def get_temperature(self) -> float:
-        return self.temp_spin.value()
-
-    def _on_temperature_changed(self, value: float) -> None:
-        self.temperature_changed.emit(self.task, value)
-
-    def set_top_p(self, top_p: float) -> None:
-        self.top_p_spin.blockSignals(True)
-        self.top_p_spin.setValue(top_p)
-        self.top_p_spin.blockSignals(False)
-
-    def get_top_p(self) -> float:
-        return self.top_p_spin.value()
-
-    def _on_top_p_changed(self, value: float) -> None:
-        self.top_p_changed.emit(self.task, value)
-
-    def set_top_k(self, top_k: int) -> None:
-        self.top_k_spin.blockSignals(True)
-        self.top_k_spin.setValue(top_k)
-        self.top_k_spin.blockSignals(False)
-
-    def get_top_k(self) -> int:
-        return self.top_k_spin.value()
-
-    def _on_top_k_changed(self, value: int) -> None:
-        self.top_k_changed.emit(self.task, value)
+    # -- model -----------------------------------------------------------
 
     def update_models(self, models: list[str]) -> None:
         current = self.get_value()
@@ -241,20 +181,58 @@ class ModelPicker(QWidget):
         if current:
             self.set_value(current)
 
+    def set_value(self, path: str) -> None:
+        """Show a stored assignment. Programmatic: does not emit model_changed."""
+        self.combo.blockSignals(True)
+        try:
+            if not path:
+                # Select "not assigned" by index. Matching on itemData("") is
+                # unreliable (Qt can return None for empty data), which used to
+                # leave the previous project's model on screen.
+                self.combo.setCurrentIndex(0)
+                return
+            for i in range(1, self.combo.count()):
+                if self.combo.itemData(i) == path:
+                    self.combo.setCurrentIndex(i)
+                    return
+            # Assigned, but not in the current lists (folder changed, server
+            # offline, key removed). Show it as missing rather than hiding it.
+            self.combo.addItem(_model_label(path, listed=False), path)
+            self.combo.setCurrentIndex(self.combo.count() - 1)
+        finally:
+            self.combo.blockSignals(False)
+
+    def get_value(self) -> str:
+        return self.combo.currentData() or ""
+
     def _on_changed(self) -> None:
         self.model_changed.emit(self.task, self.get_value())
 
-    def _browse(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select GGUF Model for llama.cpp",
-            "",
-            "GGUF Models (*.gguf);;All Files (*)",
-        )
-        if path:
-            self.set_value(path)
-            # Picking a file is a user action, so it must save like any other change.
-            self._on_changed()
+    # -- sampling --------------------------------------------------------
+
+    def set_temperature(self, temperature: float) -> None:
+        self.temp_spin.blockSignals(True)
+        self.temp_spin.setValue(temperature)
+        self.temp_spin.blockSignals(False)
+
+    def get_temperature(self) -> float:
+        return self.temp_spin.value()
+
+    def set_top_p(self, top_p: float) -> None:
+        self.top_p_spin.blockSignals(True)
+        self.top_p_spin.setValue(top_p)
+        self.top_p_spin.blockSignals(False)
+
+    def get_top_p(self) -> float:
+        return self.top_p_spin.value()
+
+    def set_top_k(self, top_k: int) -> None:
+        self.top_k_spin.blockSignals(True)
+        self.top_k_spin.setValue(top_k)
+        self.top_k_spin.blockSignals(False)
+
+    def get_top_k(self) -> int:
+        return self.top_k_spin.value()
 
 
 class AppSettingsWidget(QWidget):
@@ -273,11 +251,62 @@ class AppSettingsWidget(QWidget):
 
 
 
-        def _lbl(text: str) -> QLabel:
-            lbl = QLabel(text)
-            lbl.setMinimumWidth(160)
-            lbl.setWordWrap(False)
-            return lbl
+        local_box = QGroupBox("Local GGUF models (llama.cpp)")
+        local_form = QFormLayout(local_box)
+        local_form.setSpacing(12)
+        local_form.setContentsMargins(14, 18, 14, 18)
+        local_form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        local_form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+
+        local_note = QLabel(
+            "For .gguf files that run on this computer. Ollama and cloud models "
+            "ignore these options."
+        )
+        local_note.setWordWrap(True)
+        local_note.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 11px;")
+        local_form.addRow(local_note)
+
+        dir_row = QHBoxLayout()
+        self.models_dir_input = QLineEdit()
+        self.models_dir_input.setPlaceholderText("Folder that contains your .gguf files")
+        dir_row.addWidget(self.models_dir_input, 1)
+        browse_dir_btn = QPushButton("Browse…")
+        browse_dir_btn.setFixedWidth(70)
+        browse_dir_btn.clicked.connect(self._browse_models_dir)
+        dir_row.addWidget(browse_dir_btn)
+        local_form.addRow("GGUF Folder", dir_row)
+
+        self.gpu_spin = QSpinBox()
+        self.gpu_spin.setRange(0, 999)
+        self.gpu_spin.setValue(0)
+        self.gpu_spin.setMinimumWidth(160)
+        self.gpu_spin.setToolTip("Number of layers to offload to the GPU. 0 = CPU only.")
+        local_form.addRow("GPU Layers", self.gpu_spin)
+
+        self.threads_spin = QSpinBox()
+        self.threads_spin.setRange(1, 64)
+        self.threads_spin.setValue(4)
+        self.threads_spin.setMinimumWidth(160)
+        self.threads_spin.setToolTip(
+            "CPU threads used for generating text (llama.cpp's n_threads)."
+        )
+        local_form.addRow("CPU Threads", self.threads_spin)
+
+        self.threads_batch_spin = QSpinBox()
+        self.threads_batch_spin.setRange(0, 64)
+        self.threads_batch_spin.setValue(0)
+        self.threads_batch_spin.setMinimumWidth(200)
+        self.threads_batch_spin.setSpecialValueText("Auto (same as CPU Threads)")
+        self.threads_batch_spin.setToolTip(
+            "CPU threads used to read the prompt (llama.cpp's n_threads_batch). "
+            "Prompt reading is highly parallel, so a higher value than CPU Threads "
+            "often helps on machines with many cores.\n\n"
+            "Auto = same as CPU Threads. Only applied if the installed "
+            "llama-cpp-python build supports it."
+        )
+        local_form.addRow("CPU Threads (Prompt)", self.threads_batch_spin)
+
+        layout.addWidget(local_box)
 
         box = QGroupBox("Application")
         form = QFormLayout(box)
@@ -286,18 +315,6 @@ class AppSettingsWidget(QWidget):
         form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
 
-
-        dir_row = QHBoxLayout()
-        self.models_dir_input = QLineEdit()
-        self.models_dir_input.setPlaceholderText("Path to folder containing .gguf files")
-        dir_row.addWidget(self.models_dir_input, 1)
-        browse_dir_btn = QPushButton("Browse…")
-        browse_dir_btn.setFixedWidth(70)
-        browse_dir_btn.clicked.connect(self._browse_models_dir)
-        dir_row.addWidget(browse_dir_btn)
-        form.addRow("GGUF Folder (llama.cpp)", dir_row)
-
-
         self.ctx_spin = QSpinBox()
         self.ctx_spin.setRange(512, 131072)
         self.ctx_spin.setSingleStep(512)
@@ -305,68 +322,23 @@ class AppSettingsWidget(QWidget):
         self.ctx_spin.setSuffix(" tokens")
         self.ctx_spin.setMinimumWidth(160)
         self.ctx_spin.setToolTip(
-            "The model's total window: prompt + reply combined. This is a "
-            "hard ceiling set by the model itself — it does not control how "
-            "much the app asks the model to write in one go (see \"Max "
-            "Tokens per Pass\" below).\n\n"
-            "Applies to both llama.cpp and Ollama models."
+            "The model's total window: prompt + reply combined. This is a hard "
+            "ceiling set by the model itself. It does not control how much the app "
+            "asks the model to write in one go (see \"Max Tokens per Pass\" below).\n\n"
+            "Applies to every model: local, Ollama and cloud."
         )
         form.addRow("Context Size", self.ctx_spin)
-
-
-        self.gpu_spin = QSpinBox()
-        self.gpu_spin.setRange(0, 999)
-        self.gpu_spin.setValue(0)
-        self.gpu_spin.setMinimumWidth(160)
-        self.gpu_spin.setToolTip(
-            "Number of layers to offload to GPU. 0 = CPU only.\n\n"
-            "llama.cpp models only. Ollama decides GPU usage on its own."
-        )
-        form.addRow("GPU Layers (llama.cpp)", self.gpu_spin)
-
-
-        self.threads_spin = QSpinBox()
-        self.threads_spin.setRange(1, 64)
-        self.threads_spin.setValue(4)
-        self.threads_spin.setMinimumWidth(160)
-        self.threads_spin.setToolTip(
-            "Threads used for single-token generation (llama.cpp's n_threads).\n\n"
-            "llama.cpp models only."
-        )
-        form.addRow("CPU Threads (llama.cpp)", self.threads_spin)
-
-
-        self.threads_batch_spin = QSpinBox()
-        self.threads_batch_spin.setRange(0, 64)
-        self.threads_batch_spin.setValue(0)
-        self.threads_batch_spin.setMinimumWidth(200)
-        self.threads_batch_spin.setSpecialValueText("Auto (same as CPU Threads)")
-        self.threads_batch_spin.setToolTip(
-            "Threads used for prompt/batch processing (llama.cpp's "
-            "n_threads_batch) — separate from CPU Threads above, which only "
-            "covers single-token generation. Prompt processing is highly "
-            "parallel, so this often benefits from a higher value than CPU "
-            "Threads, especially on machines with many cores.\n\n"
-            "0 = auto: not passed explicitly, so llama-cpp-python falls "
-            "back to its own default (mirrors CPU Threads).\n\n"
-            "Only applied if the installed llama-cpp-python build actually "
-            "exposes this parameter. llama.cpp models only."
-        )
-        form.addRow("CPU Threads (Batch, llama.cpp)", self.threads_batch_spin)
-
 
         self.autosave_check = QCheckBox("Auto-save after AI responses")
         self.autosave_check.setChecked(True)
         form.addRow("", self.autosave_check)
 
-
         self.enable_thinking_check = QCheckBox("Enable Thinking")
         self.enable_thinking_check.setToolTip(
-            "When enabled, Qwen models that support it are asked to think "
-            "before answering. Applies to llama.cpp and Ollama Qwen models."
+            "When enabled, Qwen models that support it are asked to think before "
+            "answering. Applies to llama.cpp and Ollama Qwen models."
         )
         form.addRow("", self.enable_thinking_check)
-
 
         self.allow_nsfw_check = QCheckBox("Allow mature / unrestricted content (NSFW)")
         self.allow_nsfw_check.setToolTip(
@@ -379,7 +351,6 @@ class AppSettingsWidget(QWidget):
             "and you want it to follow your story without softening scenes."
         )
         form.addRow("", self.allow_nsfw_check)
-
 
         self.log_full_prompts_check = QCheckBox("Show full prompt sent to the model in the console/log")
         self.log_full_prompts_check.setToolTip(
@@ -429,6 +400,21 @@ class AppSettingsWidget(QWidget):
         ollama_form.addRow("", self.ollama_status_label)
 
         layout.addWidget(ollama_box)
+
+        cloud_box = QGroupBox("Cloud APIs")
+        cloud_layout = QVBoxLayout(cloud_box)
+        cloud_layout.setContentsMargins(14, 18, 14, 14)
+        cloud_note = QLabel(
+            "Use hosted models with your own API key. Each provider's models appear "
+            "in Text Models as [Cloud · provider]. Keys are stored encrypted with the "
+            "rest of your settings. Text sent to a cloud model leaves this computer."
+        )
+        cloud_note.setWordWrap(True)
+        cloud_note.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 11px;")
+        cloud_layout.addWidget(cloud_note)
+        self.cloud_box = CloudProvidersBox()
+        cloud_layout.addWidget(self.cloud_box)
+        layout.addWidget(cloud_box)
 
 
         gen_box = QGroupBox("Generation")
@@ -776,6 +762,7 @@ class AppSettingsWidget(QWidget):
         self.ollama_url_input.setText(
             getattr(settings, "ollama_base_url", ollama_client.DEFAULT_OLLAMA_URL)
         )
+        self.cloud_box.load(getattr(settings, "cloud_providers", {}) or {})
         self.language_input.setText(settings.response_language)
         self.max_tokens_spin.setValue(getattr(settings, "content_max_tokens", 4000))
         self.system_prompt_input.setPlainText(settings.custom_system_prompt)
@@ -1010,6 +997,7 @@ class AppSettingsWidget(QWidget):
         self._settings.ollama_base_url = ollama_client.normalize_base_url(
             self.ollama_url_input.text()
         )
+        self._settings.cloud_providers = self.cloud_box.collect()
         self._settings.response_language = self.language_input.text().strip()
         self._settings.content_max_tokens = self.max_tokens_spin.value()
         self._settings.custom_system_prompt = self.system_prompt_input.toPlainText().strip()
@@ -1042,131 +1030,205 @@ class AppSettingsWidget(QWidget):
 
 class ModelsPanel(QWidget):
     """
-    The Models tab — assigns a GGUF model to each task for the current project.
+    The Text Models tab, top to bottom:
+      1. Where models come from, and whether each source is ready.
+      2. Quick setup: one model and sampling values applied to every task.
+      3. The table of tasks, each with its model.
+
+    Image models are not here; they live in Settings → Image Generation.
     """
 
     assignments_changed = Signal()
+    open_settings_requested = Signal()
+
+    _SOURCE_TITLES = (
+        ("gguf", "GGUF files (llama.cpp)"),
+        ("ollama", "Ollama"),
+        ("cloud", "Cloud APIs"),
+    )
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._project: Optional[Project] = None
-        self._available_models: list[str] = []
+        self._settings: Optional[AppSettings] = None
+        self._available_refs: list[str] = []
         self._pickers: dict[TaskType, ModelPicker] = {}
+        self._source_status_labels: dict[str, QLabel] = {}
         self._build_ui()
+
+    # -- layout ----------------------------------------------------------
 
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
         outer.setContentsMargins(20, 20, 20, 20)
-        outer.setSpacing(16)
+        outer.setSpacing(14)
 
-        title = QLabel("Model Assignments")
+        title = QLabel("Text Models")
         title.setObjectName("heading")
         outer.addWidget(title)
 
         subtitle = QLabel(
-            "Each task can use a different model. Models tagged [llama.cpp] "
-            "are GGUF files run locally; models tagged [Ollama] run on your "
-            "Ollama server. The Manager Agent loads the correct model automatically."
+            "Choose the model that writes each part of your story. "
+            "This tab is for text only. Image models are set in Settings → Image Generation."
         )
         subtitle.setObjectName("subheading")
         subtitle.setWordWrap(True)
         outer.addWidget(subtitle)
 
+        outer.addWidget(self._build_sources_box())
+        outer.addWidget(self._build_quick_box())
+        outer.addWidget(self._build_tasks_box())
+        outer.addStretch()
 
-        refresh_row = QHBoxLayout()
-        self.dir_label = QLabel("GGUF folder (llama.cpp): not set. Configure in Settings.")
-        self.dir_label.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px;")
-        refresh_row.addWidget(self.dir_label, 1)
-        refresh_btn = QPushButton("Refresh Models")
-        refresh_btn.clicked.connect(self._refresh_models)
-        refresh_row.addWidget(refresh_btn)
-        outer.addLayout(refresh_row)
+    def _build_sources_box(self) -> QGroupBox:
+        box = QGroupBox("Where models come from")
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(14, 18, 14, 14)
+        layout.setSpacing(8)
 
-        self.ollama_label = QLabel("Ollama: not checked yet.")
-        self.ollama_label.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px;")
-        self.ollama_label.setWordWrap(True)
-        outer.addWidget(self.ollama_label)
+        for key, title in self._SOURCE_TITLES:
+            row = QHBoxLayout()
+            name_lbl = QLabel(title)
+            name_lbl.setFixedWidth(200)
+            name_lbl.setStyleSheet(f"color: {COLOR_TEXT}; font-size: 13px; font-weight: 600;")
+            row.addWidget(name_lbl)
 
+            status_lbl = QLabel("")
+            status_lbl.setWordWrap(True)
+            row.addWidget(status_lbl, 1)
+            layout.addLayout(row)
+            self._source_status_labels[key] = status_lbl
 
-        box = QGroupBox("Task → Model Assignment")
-        box_layout = QVBoxLayout(box)
-        box_layout.setSpacing(10)
-        box_layout.setContentsMargins(14, 18, 14, 14)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        settings_btn = QPushButton("Open Settings")
+        settings_btn.setObjectName("subtle")
+        settings_btn.setToolTip("Set the GGUF folder, Ollama address, and cloud API keys.")
+        settings_btn.clicked.connect(self.open_settings_requested)
+        buttons.addWidget(settings_btn)
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.setToolTip("Check the sources again and update the model lists.")
+        refresh_btn.clicked.connect(self.refresh_sources)
+        buttons.addWidget(refresh_btn)
+        layout.addLayout(buttons)
+        return box
+
+    def _build_quick_box(self) -> QGroupBox:
+        box = QGroupBox("Use one model for every task")
+        layout = QHBoxLayout(box)
+        layout.setContentsMargins(14, 18, 14, 14)
+        layout.setSpacing(_ROW_SPACING)
+
+        self.assign_all_combo = QComboBox()
+        self.assign_all_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        layout.addWidget(self.assign_all_combo, 1)
+
+        self.assign_all_temp_spin = self._quick_spin(QDoubleSpinBox, 0.0, 2.0, 0.7, "Temp")
+        self.assign_all_top_p_spin = self._quick_spin(QDoubleSpinBox, 0.0, 1.0, 0.9, "Top P")
+        self.assign_all_top_k_spin = self._quick_spin(QSpinBox, 0, 1000, 40, "Top K")
+        for label, spin in (("Temp", self.assign_all_temp_spin),
+                            ("Top P", self.assign_all_top_p_spin),
+                            ("Top K", self.assign_all_top_k_spin)):
+            caption = QLabel(label)
+            caption.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 11px;")
+            layout.addWidget(caption)
+            layout.addWidget(spin)
+
+        apply_btn = QPushButton("Apply to all tasks")
+        apply_btn.setObjectName("accent")
+        apply_btn.clicked.connect(self._assign_to_all)
+        layout.addWidget(apply_btn)
+        return box
+
+    def _quick_spin(self, cls, low, high, value, tooltip: str):
+        spin = cls()
+        spin.setRange(low, high)
+        if cls is QDoubleSpinBox:
+            spin.setSingleStep(0.05)
+            spin.setDecimals(2)
+        else:
+            spin.setSingleStep(1)
+        spin.setValue(value)
+        spin.setFixedWidth(_SPIN_WIDTH)
+        spin.setToolTip(f"{tooltip} value applied to every task when you click Apply.")
+        return spin
+
+    def _build_tasks_box(self) -> QGroupBox:
+        box = QGroupBox("Model for each task")
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(14, 18, 14, 14)
+        layout.setSpacing(10)
+
+        layout.addLayout(self._build_table_header())
 
         for task in TaskType:
-            picker = ModelPicker(task, self._available_models)
+            # Write Book writes with the Write Chapter model, so it gets no row of its own.
+            if task is TaskType.WRITE_BOOK:
+                continue
+            picker = ModelPicker(task, self._available_refs)
             picker.model_changed.connect(self._on_model_changed)
             picker.temperature_changed.connect(self._on_temperature_changed)
             picker.top_p_changed.connect(self._on_top_p_changed)
             picker.top_k_changed.connect(self._on_top_k_changed)
             self._pickers[task] = picker
-            box_layout.addWidget(picker)
+            layout.addWidget(picker)
 
-        outer.addWidget(box)
+        self.hint_label = QLabel("")
+        self.hint_label.setWordWrap(True)
+        self.hint_label.setStyleSheet(f"color: {COLOR_TEXT_DIM}; font-size: 12px;")
+        layout.addWidget(self.hint_label)
+        return box
 
+    def _build_table_header(self) -> QHBoxLayout:
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(_ROW_SPACING)
+        caption_style = f"color: {COLOR_TEXT_MUTED}; font-size: 11px; font-weight: 600;"
 
-        action_box = QGroupBox("Quick Actions")
-        ab_layout = QVBoxLayout(action_box)
-        ab_layout.setContentsMargins(14, 18, 14, 14)
-        ab_layout.setSpacing(8)
+        def caption(text: str, width: Optional[int] = None) -> QLabel:
+            lbl = QLabel(text)
+            lbl.setStyleSheet(caption_style)
+            if width:
+                lbl.setFixedWidth(width)
+            return lbl
 
-        assign_all_row = QHBoxLayout()
-        assign_all_lbl = QLabel("Assign one model to all tasks:")
-        assign_all_lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM};")
-        assign_all_row.addWidget(assign_all_lbl)
-        self.assign_all_combo = QComboBox()
-        self.assign_all_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.assign_all_combo.addItem("— select model —", "")
-        assign_all_row.addWidget(self.assign_all_combo, 1)
-        assign_all_btn = QPushButton("Assign to All")
-        assign_all_btn.clicked.connect(self._assign_to_all)
-        assign_all_row.addWidget(assign_all_btn)
-        ab_layout.addLayout(assign_all_row)
+        header.addWidget(caption("TASK", _TASK_LABEL_WIDTH))
+        header.addWidget(caption("MODEL"), 1)
+        header.addWidget(caption("TEMP", _SPIN_WIDTH))
+        header.addWidget(caption("TOP P", _SPIN_WIDTH))
+        header.addWidget(caption("TOP K", _SPIN_WIDTH))
+        return header
 
-        params_row = QHBoxLayout()
-        params_lbl = QLabel("Parameters for all:")
-        params_lbl.setStyleSheet(f"color: {COLOR_TEXT_DIM};")
-        params_row.addWidget(params_lbl)
+    # -- data in ---------------------------------------------------------
 
-        params_row.addWidget(QLabel("Temp"))
-        self.assign_all_temp_spin = QDoubleSpinBox()
-        self.assign_all_temp_spin.setRange(0.0, 2.0)
-        self.assign_all_temp_spin.setSingleStep(0.05)
-        self.assign_all_temp_spin.setDecimals(2)
-        self.assign_all_temp_spin.setValue(0.7)
-        self.assign_all_temp_spin.setFixedWidth(70)
-        self.assign_all_temp_spin.setToolTip(
-            "Temperature to apply to every task when clicking Assign to All."
-        )
-        params_row.addWidget(self.assign_all_temp_spin)
+    def set_settings(self, settings: AppSettings) -> None:
+        """Called whenever the app settings change (sources and folders may have moved)."""
+        self._settings = settings
+        self.refresh_sources()
 
-        params_row.addWidget(QLabel("Top P"))
-        self.assign_all_top_p_spin = QDoubleSpinBox()
-        self.assign_all_top_p_spin.setRange(0.0, 1.0)
-        self.assign_all_top_p_spin.setSingleStep(0.05)
-        self.assign_all_top_p_spin.setDecimals(2)
-        self.assign_all_top_p_spin.setValue(0.9)
-        self.assign_all_top_p_spin.setFixedWidth(70)
-        self.assign_all_top_p_spin.setToolTip(
-            "Top P to apply to every task when clicking Assign to All."
-        )
-        params_row.addWidget(self.assign_all_top_p_spin)
+    def refresh_sources(self) -> None:
+        statuses = model_catalog.build_catalog(self._settings)
+        for status in statuses:
+            label = self._source_status_labels[status.key]
+            if status.ok:
+                color, prefix = "#3d9970", "✓ "
+            else:
+                color, prefix = COLOR_TEXT_DIM, "• "
+            label.setStyleSheet(f"color: {color}; font-size: 12px;")
+            label.setText(prefix + status.message)
 
-        params_row.addWidget(QLabel("Top K"))
-        self.assign_all_top_k_spin = QSpinBox()
-        self.assign_all_top_k_spin.setRange(0, 1000)
-        self.assign_all_top_k_spin.setSingleStep(1)
-        self.assign_all_top_k_spin.setValue(40)
-        self.assign_all_top_k_spin.setFixedWidth(70)
-        self.assign_all_top_k_spin.setToolTip(
-            "Top K to apply to every task when clicking Assign to All. 0 = disabled/no limit."
-        )
-        params_row.addWidget(self.assign_all_top_k_spin)
-        params_row.addStretch()
-        ab_layout.addLayout(params_row)
+        self._available_refs = model_catalog.all_refs(statuses)
+        for picker in self._pickers.values():
+            picker.update_models(self._available_refs)
 
-        outer.addWidget(action_box)
-        outer.addStretch()
+        self.assign_all_combo.blockSignals(True)
+        self.assign_all_combo.clear()
+        self.assign_all_combo.addItem("— choose a model —", "")
+        for ref in self._available_refs:
+            self.assign_all_combo.addItem(_model_label(ref), ref)
+        self.assign_all_combo.blockSignals(False)
+
+        self._update_hint()
 
     def load_project(self, project: Project) -> None:
         self._project = project
@@ -1176,106 +1238,87 @@ class ModelsPanel(QWidget):
             picker.set_top_p(project.task_temperatures.get_top_p(task))
             picker.set_top_k(project.task_temperatures.get_top_k(task))
 
-        first_task = next(iter(self._pickers), None)
-        if first_task is not None:
-            first_picker = self._pickers[first_task]
-            self.assign_all_temp_spin.setValue(first_picker.get_temperature())
-            self.assign_all_top_p_spin.setValue(first_picker.get_top_p())
-            self.assign_all_top_k_spin.setValue(first_picker.get_top_k())
+        first = next(iter(self._pickers.values()), None)
+        if first is not None:
+            self.assign_all_temp_spin.setValue(first.get_temperature())
+            self.assign_all_top_p_spin.setValue(first.get_top_p())
+            self.assign_all_top_k_spin.setValue(first.get_top_k())
+        self._update_hint()
 
-    def update_available_models(self, models_dir: str, ollama_base_url: str = "") -> None:
-        gguf_models = storage.list_gguf_models(models_dir) if models_dir else []
-        self.dir_label.setText(
-            f"GGUF folder (llama.cpp): {models_dir} — "
-            f"{len(gguf_models)} model{'s' if len(gguf_models) != 1 else ''} found"
-            if models_dir
-            else "GGUF folder (llama.cpp): not set. Configure in Settings."
-        )
+    # -- edits -----------------------------------------------------------
 
-        ollama_url = ollama_client.normalize_base_url(ollama_base_url)
-        try:
-            ollama_names = ollama_client.list_models(ollama_url)
-            ollama_refs = [ollama_client.make_ollama_ref(n) for n in ollama_names]
-            self.ollama_label.setStyleSheet(f"color: {COLOR_TEXT_MUTED}; font-size: 12px;")
-            self.ollama_label.setText(
-                f"Ollama ({ollama_url}): {len(ollama_refs)} model"
-                f"{'s' if len(ollama_refs) != 1 else ''} available"
-            )
-        except ollama_client.OllamaError as e:
-            ollama_refs = []
-            self.ollama_label.setStyleSheet("color: #c0392b; font-size: 12px;")
-            self.ollama_label.setText(f"Ollama not reachable — {e}")
+    def _persist(self) -> None:
+        if self._project:
+            storage.save_project(self._project)
+        self._update_hint()
+        self.assignments_changed.emit()
 
-        models = gguf_models + ollama_refs
-        self._available_models = models
-
-        for picker in self._pickers.values():
-            picker.update_models(models)
-
-        self.assign_all_combo.clear()
-        self.assign_all_combo.addItem("— select model —", "")
-        for m in models:
-            self.assign_all_combo.addItem(_model_label(m), m)
-
-    def _refresh_models(self) -> None:
-        settings = storage.load_settings()
-        self.update_available_models(settings.models_directory, settings.ollama_base_url)
-
-    def _on_model_changed(self, task: TaskType, path: str) -> None:
+    def _on_model_changed(self, task: TaskType, ref: str) -> None:
         if not self._project:
             return
-        self._project.model_assignments.set(task, path)
-        storage.save_project(self._project)
-        self.assignments_changed.emit()
+        self._project.model_assignments.set(task, ref)
+        self._persist()
 
     def _on_temperature_changed(self, task: TaskType, value: float) -> None:
         if not self._project:
             return
         self._project.task_temperatures.set(task, value)
-        storage.save_project(self._project)
-        self.assignments_changed.emit()
+        self._persist()
 
     def _on_top_p_changed(self, task: TaskType, value: float) -> None:
         if not self._project:
             return
         self._project.task_temperatures.set_top_p(task, value)
-        storage.save_project(self._project)
-        self.assignments_changed.emit()
+        self._persist()
 
     def _on_top_k_changed(self, task: TaskType, value: int) -> None:
         if not self._project:
             return
         self._project.task_temperatures.set_top_k(task, value)
-        storage.save_project(self._project)
-        self.assignments_changed.emit()
+        self._persist()
 
     def _assign_to_all(self) -> None:
-        path = self.assign_all_combo.currentData() or ""
-        if not path:
+        ref = self.assign_all_combo.currentData() or ""
+        if not ref:
             return
-
         temperature = self.assign_all_temp_spin.value()
         top_p = self.assign_all_top_p_spin.value()
         top_k = self.assign_all_top_k_spin.value()
 
-        # One click applies the selected model and the three generation
-        # parameters to every task. Per-task values remain stored separately,
-        # but the common workflow is configured from one place.
         for task, picker in self._pickers.items():
-            picker.set_value(path)
+            picker.set_value(ref)
             picker.set_temperature(temperature)
             picker.set_top_p(top_p)
             picker.set_top_k(top_k)
-
             if self._project:
-                self._project.model_assignments.set(task, path)
+                self._project.model_assignments.set(task, ref)
                 self._project.task_temperatures.set(task, temperature)
                 self._project.task_temperatures.set_top_p(task, top_p)
                 self._project.task_temperatures.set_top_k(task, top_k)
+        self._persist()
 
-        if self._project:
-            storage.save_project(self._project)
-        self.assignments_changed.emit()
+    # -- feedback --------------------------------------------------------
+
+    def _update_hint(self) -> None:
+        if not self._available_refs:
+            self.hint_label.setText(
+                "No models available yet. Add a GGUF file to the GGUF folder, start Ollama, "
+                "or add a cloud API key with its model names in Settings."
+            )
+            return
+        if not self._project:
+            self.hint_label.setText("")
+            return
+        unassigned = [
+            t for t in self._pickers if not self._project.model_assignments.get(t)
+        ]
+        if unassigned:
+            self.hint_label.setText(
+                f"{len(unassigned)} task{'s have' if len(unassigned) != 1 else ' has'} no model. "
+                "Tasks without one use the Chat model when it is set."
+            )
+        else:
+            self.hint_label.setText("")
 
 
 class SettingsPanel(QWidget):
@@ -1351,4 +1394,4 @@ class SettingsPanel(QWidget):
         outer.addWidget(scroll)
 
     def load(self, settings: AppSettings) -> None:
-        self.app_settings_widget.load(settings)
+        self.app_settings_widget.load(settings)
