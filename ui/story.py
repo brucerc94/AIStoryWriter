@@ -600,9 +600,10 @@ class GenerateOutlineDialog(QDialog):
         writing_style: Optional[WritingStyle] = None,
         lang: str = "",
         parent=None,
+        new_chapters_mode: bool = False,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle(_ui("generate_btn", lang))
+        self.setWindowTitle("Add Chapters" if new_chapters_mode else _ui("generate_btn", lang))
         self.setMinimumWidth(560)
         self.setMinimumHeight(640)
         self.setModal(True)
@@ -633,13 +634,19 @@ class GenerateOutlineDialog(QDialog):
         struct_form.setContentsMargins(14, 18, 14, 14)
 
         self.chapters_spin = QSpinBox()
-        self.chapters_spin.setRange(1, 300)
+        self.chapters_spin.setRange(1, 50 if new_chapters_mode else 300)
         self.chapters_spin.setValue(max(1, default_chapters))
-        self.chapters_spin.setToolTip(
-            "The outline — and later \"Generate Full Book\" — will follow this number, "
-            "one chapter per heading."
-        )
-        struct_form.addRow(_ui("num_chapters", lang), self.chapters_spin)
+        if new_chapters_mode:
+            self.chapters_spin.setToolTip(
+                "Chapters to add after the current outline. Existing chapters are not changed."
+            )
+            struct_form.addRow("Number of NEW chapters to add", self.chapters_spin)
+        else:
+            self.chapters_spin.setToolTip(
+                "The outline — and later \"Generate Full Book\" — will follow this number, "
+                "one chapter per heading."
+            )
+            struct_form.addRow(_ui("num_chapters", lang), self.chapters_spin)
         body.addWidget(struct_box)
 
 
@@ -933,19 +940,22 @@ class OutlineTab(QWidget):
                     )
                     return
                 existing_max = max(outline_chapter_numbers(proj.outline), default=0)
-                suggested = _suggest_new_chapters(new_text)
-                count, ok = QInputDialog.getInt(
-                    self,
-                    "Add chapters",
-                    f"The Synopsis has new text that is not in the outline yet.\n"
-                    f"How many NEW chapters do you want to add?\n\n"
-                    f"Chapters 1–{existing_max} will not be changed.",
-                    suggested,
-                    1,
-                    50,
+                dialog = GenerateOutlineDialog(
+                    default_chapters=_suggest_new_chapters(new_text),
+                    author_intent=proj.author_intent,
+                    writing_style=proj.writing_style,
+                    lang=storage.load_settings().response_language,
+                    parent=self,
+                    new_chapters_mode=True,
                 )
-                if not ok:
+                if dialog.exec() != QDialog.Accepted:
                     return
+                # Same as the normal path: the author style chosen here is saved to
+                # the project so every chapter prompt receives it.
+                proj.author_intent = dialog.get_author_intent()
+                proj.writing_style = dialog.get_writing_style()
+                self.profile_updated.emit()
+                count = dialog.chapter_count()
                 total = existing_max + count
                 self.task_requested.emit(
                     TaskType.GENERATE_OUTLINE,
