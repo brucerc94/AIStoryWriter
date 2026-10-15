@@ -223,7 +223,7 @@ class SynopsisTab(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
 
-        self._gen_header = SectionHeader("Draft/Synopsis", "✨ Write Draft")
+        self._gen_header = SectionHeader("Draft", "✨ Write Draft")
         header = self._gen_header
         if header.action_btn:
             header.action_btn.clicked.connect(self.request_write_draft)
@@ -240,7 +240,7 @@ class SynopsisTab(QWidget):
         )
         source_lock_row.addWidget(self._source_lock_label, 1)
 
-        self._unlock_source_btn = QPushButton("Unlock Synopsis to Regenerate")
+        self._unlock_source_btn = QPushButton("Unlock Draft to Regenerate")
         self._unlock_source_btn.setObjectName("subtle")
         self._unlock_source_btn.setToolTip(
             "Allow editing text already used for the current outline. "
@@ -254,7 +254,7 @@ class SynopsisTab(QWidget):
         self.editor = MarkdownEditor(
             placeholder=(
                 "Write your story here, then press 'Write Draft' to develop it.\n\n"
-                "A good synopsis covers: premise, main characters, central conflict, and stakes."
+                "A good draft covers: premise, main characters, central conflict, and stakes."
             ),
             empty_icon="📝",
             empty_title="Every story starts with a draft",
@@ -371,10 +371,10 @@ class SynopsisTab(QWidget):
             self._protection_notice_shown = True
             QMessageBox.information(
                 self,
-                "Synopsis section locked",
+                "Draft section locked",
                 "This text has already been used to generate the current Outline. "
                 "Only new text appended after the protected section can be edited. "
-                "Use 'Unlock Synopsis to Regenerate' to change the protected text.",
+                "Use 'Unlock Draft to Regenerate' to change the protected text.",
             )
 
     def _unlock_outline_source(self) -> None:
@@ -383,8 +383,8 @@ class SynopsisTab(QWidget):
 
         reply = QMessageBox.question(
             self,
-            "Unlock Synopsis",
-            "This will allow editing the Synopsis text already used for the current "
+            "Unlock Draft",
+            "This will allow editing the Draft text already used for the current "
             "Outline. The current Outline will stay unchanged until you regenerate it. "
             "Continue?",
             QMessageBox.Yes | QMessageBox.Cancel,
@@ -425,7 +425,7 @@ class SynopsisTab(QWidget):
 
         if source_is_valid:
             self._source_lock_label.setText(
-                "🔒 The Synopsis text already used to generate the current Outline is locked. "
+                "🔒 The Draft text already used to generate the current Outline is locked. "
                 "Add new material after it; use the button to edit the protected text."
             )
             self._source_lock_label.show()
@@ -471,10 +471,10 @@ def _localize(key: str, lang: str, table: list[tuple[str, dict[str, str]]]) -> s
 
 
 _AUTO_LABELS: dict[str, str] = {
-    "en": "— auto (infer from synopsis) —",
+    "en": "— auto (infer from draft) —",
     "es": "— auto (inferir de la sinopsis) —",
-    "fr": "— auto (inférer du synopsis) —",
-    "de": "— auto (aus dem Synopsis ableiten) —",
+    "fr": "— auto (inférer du draft) —",
+    "de": "— auto (aus dem Draft ableiten) —",
     "pt": "— auto (inferir da sinopse) —",
     "it": "— auto (inferire dalla sinossi) —",
 }
@@ -489,7 +489,7 @@ _POV_TABLE: list[tuple[str, dict[str, str]]] = [
 ]
 
 _PACING_TABLE: list[tuple[str, dict[str, str]]] = [
-    ("", {k: v.replace("(infer from synopsis) ", "") for k, v in _AUTO_LABELS.items()}),
+    ("", {k: v.replace("(infer from draft) ", "") for k, v in _AUTO_LABELS.items()}),
     ("Fast", {"en": "Fast", "es": "Rápido", "fr": "Rapide", "de": "Schnell", "pt": "Rápido", "it": "Veloce"}),
     ("Moderate", {"en": "Moderate", "es": "Moderado", "fr": "Modéré", "de": "Moderat", "pt": "Moderado", "it": "Moderato"}),
     ("Slow", {"en": "Slow", "es": "Lento", "fr": "Lent", "de": "Langsam", "pt": "Lento", "it": "Lento"}),
@@ -497,21 +497,21 @@ _PACING_TABLE: list[tuple[str, dict[str, str]]] = [
 ]
 
 _DENSITY_TABLE: list[tuple[str, dict[str, str]]] = [
-    ("", {k: v.replace("(infer from synopsis) ", "") for k, v in _AUTO_LABELS.items()}),
+    ("", {k: v.replace("(infer from draft) ", "") for k, v in _AUTO_LABELS.items()}),
     ("Sparse (lean prose, minimal description)", {"en": "Sparse (lean prose)", "es": "Escasa (prosa concisa)", "fr": "Sobre (prose concise)", "de": "Sparsam (knappe Prosa)", "pt": "Esparsa (prosa concisa)", "it": "Scarsa (prosa concisa)"}),
     ("Balanced", {"en": "Balanced", "es": "Equilibrada", "fr": "Équilibrée", "de": "Ausgewogen", "pt": "Equilibrada", "it": "Equilibrata"}),
     ("Rich (detailed description, immersive)", {"en": "Rich (detailed, immersive)", "es": "Rica (detallada, inmersiva)", "fr": "Riche (détaillée, immersive)", "de": "Reich (detailliert, immersiv)", "pt": "Rica (detalhada, imersiva)", "it": "Ricca (dettagliata, immersiva)"}),
 ]
 
 _DIALOGUE_TABLE: list[tuple[str, dict[str, str]]] = [
-    ("", {k: v.replace("(infer from synopsis) ", "") for k, v in _AUTO_LABELS.items()}),
+    ("", {k: v.replace("(infer from draft) ", "") for k, v in _AUTO_LABELS.items()}),
     ("Frequent", {"en": "Frequent", "es": "Frecuente", "fr": "Fréquent", "de": "Häufig", "pt": "Frequente", "it": "Frequente"}),
     ("Moderate", {"en": "Moderate", "es": "Moderado", "fr": "Modéré", "de": "Moderat", "pt": "Moderado", "it": "Moderato"}),
     ("Minimal", {"en": "Minimal", "es": "Mínimo", "fr": "Minimal", "de": "Minimal", "pt": "Mínimo", "it": "Minimale"}),
 ]
 
 _VIOLENCE_TABLE: list[tuple[str, dict[str, str]]] = [
-    ("", {k: v.replace("(infer from synopsis) ", "") for k, v in _AUTO_LABELS.items()}),
+    ("", {k: v.replace("(infer from draft) ", "") for k, v in _AUTO_LABELS.items()}),
     ("None", {"en": "None", "es": "Ninguna", "fr": "Aucune", "de": "Keine", "pt": "Nenhuma", "it": "Nessuna"}),
     ("Implied (off-screen)", {"en": "Implied (off-screen)", "es": "Implícita (fuera de escena)", "fr": "Implicite (hors-écran)", "de": "Angedeutet (außerhalb)", "pt": "Implícita (fora de cena)", "it": "Implicita (fuori scena)"}),
     ("Moderate (present but not graphic)", {"en": "Moderate (not graphic)", "es": "Moderada (no explícita)", "fr": "Modérée (non graphique)", "de": "Moderat (nicht grafisch)", "pt": "Moderada (não gráfica)", "it": "Moderata (non grafica)"}),
@@ -519,7 +519,7 @@ _VIOLENCE_TABLE: list[tuple[str, dict[str, str]]] = [
 ]
 
 _ROMANCE_TABLE: list[tuple[str, dict[str, str]]] = [
-    ("", {k: v.replace("(infer from synopsis) ", "") for k, v in _AUTO_LABELS.items()}),
+    ("", {k: v.replace("(infer from draft) ", "") for k, v in _AUTO_LABELS.items()}),
     ("None", {"en": "None", "es": "Ninguno", "fr": "Aucun", "de": "Kein", "pt": "Nenhum", "it": "Nessuno"}),
     ("Background (minor thread)", {"en": "Background (minor thread)", "es": "Secundario (hilo menor)", "fr": "Secondaire (fil mineur)", "de": "Hintergrund (kleiner Strang)", "pt": "Secundário (fio menor)", "it": "Sfondo (filo minore)"}),
     ("Subplot", {"en": "Subplot", "es": "Subtrama", "fr": "Intrigue secondaire", "de": "Nebenhandlung", "pt": "Subtrama", "it": "Sottotrama"}),
@@ -527,7 +527,7 @@ _ROMANCE_TABLE: list[tuple[str, dict[str, str]]] = [
 ]
 
 _LENGTH_TABLE: list[tuple[str, dict[str, str]]] = [
-    ("", {k: v.replace("(infer from synopsis) ", "") for k, v in _AUTO_LABELS.items()}),
+    ("", {k: v.replace("(infer from draft) ", "") for k, v in _AUTO_LABELS.items()}),
     ("Short (~1k words)", {"en": "Short (~1 000 words)", "es": "Corto (~1 000 palabras)", "fr": "Court (~1 000 mots)", "de": "Kurz (~1 000 Wörter)", "pt": "Curto (~1 000 palavras)", "it": "Corto (~1 000 parole)"}),
     ("Medium (~2k words)", {"en": "Medium (~2 000 words)", "es": "Medio (~2 000 palabras)", "fr": "Moyen (~2 000 mots)", "de": "Mittel (~2 000 Wörter)", "pt": "Médio (~2 000 palavras)", "it": "Medio (~2 000 parole)"}),
     ("Long (~3k+ words)", {"en": "Long (~3 000+ words)", "es": "Largo (~3 000+ palabras)", "fr": "Long (~3 000+ mots)", "de": "Lang (~3 000+ Wörter)", "pt": "Longo (~3 000+ palavras)", "it": "Lungo (~3 000+ parole)"}),
@@ -537,7 +537,7 @@ _LENGTH_TABLE: list[tuple[str, dict[str, str]]] = [
 _UI_STRINGS: dict[str, dict[str, str]] = {
     "structure_group":    {"en": "Structure", "es": "Estructura", "fr": "Structure", "de": "Struktur", "pt": "Estrutura", "it": "Struttura"},
     "num_chapters":       {"en": "Number of chapters", "es": "Número de capítulos", "fr": "Nombre de chapitres", "de": "Kapitelanzahl", "pt": "Número de capítulos", "it": "Numero di capitoli"},
-    "intent_group":       {"en": "Author's Creative Intent  (optional — leave blank to infer from synopsis)", "es": "Intención creativa del autor  (opcional — dejar en blanco para inferir de la sinopsis)", "fr": "Intention créative de l'auteur  (optionnel)", "de": "Kreative Absicht des Autors  (optional)", "pt": "Intenção criativa do autor  (opcional)", "it": "Intenzione creativa dell'autore  (opzionale)"},
+    "intent_group":       {"en": "Author's Creative Intent  (optional — leave blank to infer from draft)", "es": "Intención creativa del autor  (opcional — dejar en blanco para inferir de la sinopsis)", "fr": "Intention créative de l'auteur  (optionnel)", "de": "Kreative Absicht des Autors  (optional)", "pt": "Intenção criativa do autor  (opcional)", "it": "Intenzione creativa dell'autore  (opzionale)"},
     "style_group":        {"en": "Writing Style Preferences  (optional — leave at '— auto —' to infer)", "es": "Preferencias de estilo de escritura  (opcional — dejar en '— auto —')", "fr": "Préférences de style  (optionnel)", "de": "Schreibstil-Einstellungen  (optional)", "pt": "Preferências de estilo  (opcional)", "it": "Preferenze di stile  (opzionale)"},
     "emotional_journey":  {"en": "Emotional journey\nfor the reader", "es": "Arco emocional\npara el lector", "fr": "Voyage émotionnel\ndu lecteur", "de": "Emotionale Reise\ndes Lesers", "pt": "Jornada emocional\ndo leitor", "it": "Viaggio emotivo\ndel lettore"},
     "lasting_impression": {"en": "What readers remember\nafter finishing", "es": "Lo que el lector recordará\nal terminar", "fr": "Ce que le lecteur retient\naprès lecture", "de": "Was der Leser behält\nnach dem Lesen", "pt": "O que o leitor lembrará\nao terminar", "it": "Cosa ricorderà il lettore\ndopo la lettura"},
@@ -553,7 +553,7 @@ _UI_STRINGS: dict[str, dict[str, str]] = {
     "violence_level":     {"en": "Violence", "es": "Violencia", "fr": "Violence", "de": "Gewalt", "pt": "Violência", "it": "Violenza"},
     "romance_level":      {"en": "Romance", "es": "Romance", "fr": "Romance", "de": "Romantik", "pt": "Romance", "it": "Romanticismo"},
     "chapter_length":     {"en": "Chapter length", "es": "Longitud de capítulo", "fr": "Longueur des chapitres", "de": "Kapitellänge", "pt": "Comprimento do capítulo", "it": "Lunghezza del capitolo"},
-    "genre_placeholder":  {"en": "Only if ambiguous from synopsis — e.g. psychological thriller, neo-noir", "es": "Solo si es ambiguo en la sinopsis — p. ej. thriller psicológico, neo-noir", "fr": "Seulement si ambigu dans le synopsis", "de": "Nur wenn im Synopsis unklar", "pt": "Somente se ambíguo na sinopse", "it": "Solo se ambiguo nella sinossi"},
+    "genre_placeholder":  {"en": "Only if ambiguous from draft — e.g. psychological thriller, neo-noir", "es": "Solo si es ambiguo en la sinopsis — p. ej. thriller psicológico, neo-noir", "fr": "Seulement si ambigu dans le draft", "de": "Nur wenn im Draft unklar", "pt": "Somente se ambíguo na sinopse", "it": "Solo se ambiguo nella sinossi"},
     "generate_btn":       {"en": "Generate Outline", "es": "Generar estructura", "fr": "Générer le plan", "de": "Gliederung generieren", "pt": "Gerar estrutura", "it": "Genera struttura"},
     "save_profile_btn":   {"en": "Save Profile", "es": "Guardar perfil", "fr": "Enregistrer le profil", "de": "Profil speichern", "pt": "Salvar perfil", "it": "Salva profilo"},
     "load_profile_btn":   {"en": "Load Profile...", "es": "Cargar perfil...", "fr": "Charger le profil...", "de": "Profil laden...", "pt": "Carregar perfil...", "it": "Carica profilo..."},
@@ -901,8 +901,8 @@ class OutlineTab(QWidget):
         gen_btn = self._gen_btn
         gen_btn.setObjectName("accent")
         gen_btn.setToolTip(
-            "First run generates the outline from the Synopsis. Later runs use only new "
-            "Synopsis/Draft material and append new chapters without changing existing ones."
+            "First run generates the outline from the Draft. Later runs use only new "
+            "Draft material and append new chapters without changing existing ones."
         )
         gen_btn.clicked.connect(self._on_generate_clicked)
         header_row.addWidget(gen_btn)
@@ -912,14 +912,14 @@ class OutlineTab(QWidget):
         self.editor = MarkdownEditor(
             placeholder=(
                 "Your chapter-by-chapter outline will appear here.\n\n"
-                "Click 'Generate Outline' to create one from your synopsis, "
+                "Click 'Generate Outline' to create one from your draft, "
                 "or write it manually.\n\n"
                 "Format:\n## Chapter 1: Title\nObjective:\n...\n\nStory Progression:\n...\n\nContinuity:\n..."
             ),
             empty_icon="🗂️",
             empty_title="No outline yet",
             empty_description=(
-                "The AI will build a chapter-by-chapter outline from your Synopsis, "
+                "The AI will build a chapter-by-chapter outline from your Draft, "
                 "Characters, and World — or you can write your own below."
             ),
             generate_label="✨ Generate Outline",
@@ -944,10 +944,10 @@ class OutlineTab(QWidget):
                 if not new_text:
                     QMessageBox.information(
                         self,
-                        "No new Synopsis text",
-                        "The outline already uses all of the Synopsis text.\n\n"
+                        "No new Draft text",
+                        "The outline already uses all of the Draft text.\n\n"
                         "To add chapters, first write new text below the locked part in "
-                        "Synopsis / Draft, save it, then come back here.",
+                        "Draft, save it, then come back here.",
                     )
                     return
                 existing_max = max(outline_chapter_numbers(proj.outline), default=0)
@@ -1059,8 +1059,8 @@ class OutlineTab(QWidget):
             self._gen_btn.setToolTip(tip)
         else:
             self._gen_btn.setToolTip(
-                "First run generates the outline from the Draft/Synopsis. Later runs use only new "
-                "Draft/Synopsis material and append new chapters without changing existing ones."
+                "First run generates the outline from the Draft. Later runs use only new "
+                "Draft material and append new chapters without changing existing ones."
             )
 
     def save_to(self, project: Project) -> None:
@@ -3119,7 +3119,7 @@ class StoryPanel(QWidget):
         self.synopsis_tab = SynopsisTab()
         self.synopsis_tab.task_requested.connect(self.task_requested)
         self.synopsis_tab.content_changed.connect(self._on_synopsis_changed)
-        self.tabs.addTab(self.synopsis_tab, "Draft/Synopsis")
+        self.tabs.addTab(self.synopsis_tab, "Draft")
 
         self.outline_tab = OutlineTab()
         self.outline_tab.task_requested.connect(self.task_requested)

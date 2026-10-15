@@ -1,4 +1,4 @@
-"""Small UI bridge for the Synopsis / Draft workflow.
+"""Small UI bridge for the Draft workflow.
 
 Kept separate from the main UI module so the existing Story panel layout and
 public model field names remain unchanged.
@@ -28,7 +28,7 @@ def _patch_tab(tab) -> None:
         # Section title.
         labels = header.findChildren(QLabel, "", Qt.FindDirectChildrenOnly)
         if labels:
-            labels[0].setText("Draft/Synopsis")
+            labels[0].setText("Draft")
 
         # Button now sends the text currently in the editor, even if the user
         # has not pressed Save yet.
@@ -56,7 +56,7 @@ def _patch_tab(tab) -> None:
         text_edit = getattr(editor, "editor", None)
         if text_edit is not None:
             text_edit.setPlaceholderText(
-                "Write your story draft, synopsis, or raw story material here.\n\n"
+                "Write your story draft, draft, or raw story material here.\n\n"
                 "Write Draft will check consistency, repair contradictions if needed, "
                 "develop the story using your Author Profile, and then build Characters and World."
             )
@@ -68,13 +68,13 @@ def _patch_tab(tab) -> None:
         if tabs is not None:
             index = tabs.indexOf(tab)
             if index >= 0:
-                tabs.setTabText(index, "Draft/Synopsis")
+                tabs.setTabText(index, "Draft")
 
         tab._refresh_lock_view()
         tab._synopsis_draft_ui_patched = True
-        logger.info("[synopsis_draft] Synopsis UI patched: current editor text is submitted directly.")
+        logger.info("[synopsis_draft] Draft UI patched: current editor text is submitted directly.")
     except Exception:
-        logger.exception("[synopsis_draft] Could not patch Synopsis UI.")
+        logger.exception("[synopsis_draft] Could not patch Draft UI.")
 
 
 def patch_loaded_story_ui() -> None:

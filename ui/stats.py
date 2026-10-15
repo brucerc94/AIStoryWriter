@@ -246,7 +246,7 @@ class StatsTab(QWidget):
 
         self._section_cards: dict[str, _StatCard] = {}
         for key, label in [
-            ("synopsis", "Synopsis"),
+            ("synopsis", "Draft"),
             ("outline",  "Outline"),
             ("world",    "World notes"),
             ("memory",   "Story memory"),

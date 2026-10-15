@@ -1,7 +1,7 @@
 """
 Search Tab.
 
-Plain-text search across all project content: chapters, synopsis, outline,
+Plain-text search across all project content: chapters, draft, outline,
 characters, world notes, and story memory. No model, no network — instant
 results from in-memory text.
 """
@@ -118,7 +118,7 @@ class SearchTab(QWidget):
         bar.setSpacing(8)
 
         self._search_input = QLineEdit()
-        self._search_input.setPlaceholderText("Search chapters, synopsis, outline, characters, world, memory…")
+        self._search_input.setPlaceholderText("Search chapters, draft, outline, characters, world, memory…")
         self._search_input.setMinimumHeight(38)
         self._search_input.setStyleSheet(f"""
             QLineEdit {{
@@ -262,7 +262,7 @@ class SearchTab(QWidget):
 
         sources: list[tuple[str, str, int]] = []
 
-        sources.append(("Synopsis", p.synopsis, 0))
+        sources.append(("Draft", p.synopsis, 0))
         sources.append(("Outline", p.outline, 1))
         sources.append(("World & Setting", p.world, 2))
         sources.append(("Story Memory", p.memory, 3))

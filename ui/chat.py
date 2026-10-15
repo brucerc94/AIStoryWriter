@@ -528,7 +528,7 @@ class ChatPanel(QWidget):
         self.clear_chat_btn = QPushButton("🗑 Clear Chat")
         self.clear_chat_btn.setObjectName("subtle")
         self.clear_chat_btn.setToolTip(
-            "Clears the conversation history only. Synopsis, outline, "
+            "Clears the conversation history only. Draft, outline, "
             "chapters, world notes, and story memory are untouched."
         )
         self.clear_chat_btn.clicked.connect(self._clear_chat)
@@ -980,7 +980,7 @@ class ChatPanel(QWidget):
 
     def clear_chat(self, prompt: bool = True) -> None:
         """
-        Clears the conversation history only. Synopsis, outline, chapters,
+        Clears the conversation history only. Draft, outline, chapters,
         world notes, and story memory all live on the Project separately
         and are completely untouched — this only resets project.chat_messages
         and the rolling conversation summary, so you can start a fresh
@@ -999,7 +999,7 @@ class ChatPanel(QWidget):
                 self,
                 "Clear Chat",
                 "Clear the conversation history?\n\n"
-                "This only resets the chat — your synopsis, outline, chapters, "
+                "This only resets the chat — your draft, outline, chapters, "
                 "world notes, and story memory are kept exactly as they are.\n\n"
                 "This cannot be undone.",
                 QMessageBox.Yes | QMessageBox.Cancel,
