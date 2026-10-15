@@ -632,13 +632,25 @@ def _run_extend_outline(worker) -> None:
     language_note = f" Write in {language}." if language else ""
 
     new_material = _extract_new_material(user_request)
-    if new_material and len(new_material) >= _MIN_SOURCE_CHARS:
-        worker.step_started.emit(f"Splitting new text into {requested_count} chapter(s)...")
-        blocks = _split_story(
-            worker,
-            requested_count,
-            _story_source(worker, requested_count, source_text=new_material),
-        )
+    if new_material:
+        # Material from the Synopsis / Draft always goes through the same split path
+        # as Generate Outline, never through the planner (which ignores this text).
+        if len(new_material) >= _MIN_SOURCE_CHARS:
+            worker.step_started.emit(f"Splitting new text into {requested_count} chapter(s)...")
+            blocks = _split_story(
+                worker,
+                requested_count,
+                _story_source(worker, requested_count, source_text=new_material),
+            )
+        elif requested_count == 1:
+            # Short text but one chapter: the whole text is that chapter's source.
+            blocks = [new_material]
+        else:
+            worker.error_occurred.emit(
+                f"The new Synopsis text is too short to split into {requested_count} chapters. "
+                "Nothing was appended — add more text or choose 1 chapter."
+            )
+            return
         if len(blocks) != requested_count:
             worker.error_occurred.emit(
                 f"Could not split the new Synopsis text into {requested_count} chapter(s). "
