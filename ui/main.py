@@ -244,7 +244,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.chat_panel, "Chat")
 
         self.images_panel = ImagesPanel()
-        self.tabs.addTab(self.images_panel, "Images")
+        self.tabs.addTab(self.images_panel, "Images (In Development)")
 
         self.models_panel = ModelsPanel()
         self.tabs.addTab(self.models_panel, "Text Models")
