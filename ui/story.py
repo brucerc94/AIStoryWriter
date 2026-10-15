@@ -217,7 +217,7 @@ class SynopsisTab(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
 
-        self._gen_header = SectionHeader("Synopsis", "✨ Generate Synopsis")
+        self._gen_header = SectionHeader("Draft/Synopsis", "✨ Write Draft")
         header = self._gen_header
         if header.action_btn:
             header.action_btn.clicked.connect(
@@ -249,16 +249,16 @@ class SynopsisTab(QWidget):
 
         self.editor = MarkdownEditor(
             placeholder=(
-                "Write your story synopsis here, or use 'Generate Synopsis' to create one.\n\n"
+                "Write your story here, then press 'Write Draft' to develop it.\n\n"
                 "A good synopsis covers: premise, main characters, central conflict, and stakes."
             ),
             empty_icon="📝",
-            empty_title="Every story starts with a synopsis",
+            empty_title="Every story starts with a draft",
             empty_description=(
-                "A short premise, main characters, central conflict, and stakes. "
-                "The AI can draft one for you to refine, or you can write it yourself."
+                "Write your story, or paste it, then press Write Draft. "
+                "You can also write the draft yourself."
             ),
-            generate_label="✨ Generate Synopsis",
+            generate_label="",
         )
         self.editor.generate_requested.connect(
             lambda: self.task_requested.emit(TaskType.WRITE_SYNOPSIS, "")
@@ -294,14 +294,14 @@ class SynopsisTab(QWidget):
             self._source_lock_label.setText(
                 "🔒 Gray = already in the outline (locked).    "
                 "🟣 Purple = new text, NOT in the outline yet. "
-                "Click ✨ Develop New Text to refine only the purple part; "
+                "Click ✨ Write Draft to develop only the purple part; "
                 "then click Generate Outline to add those chapters."
             )
         text_edit.setExtraSelections(selections)
 
         header_btn = getattr(self._gen_header, "action_btn", None)
         if header_btn is not None:
-            header_btn.setText("✨ Develop New Text" if locked else "✨ Generate Draft")
+            header_btn.setText("✨ Write Draft")
             header_btn.setToolTip(
                 "Only develops the purple (new) text. The gray text is not changed."
                 if locked else "Develops the whole draft."
@@ -888,14 +888,6 @@ class OutlineTab(QWidget):
         gen_btn.clicked.connect(self._on_generate_clicked)
         header_row.addWidget(gen_btn)
 
-        self._extend_btn = QPushButton("➕ Extend Outline")
-        self._extend_btn.setObjectName("subtle")
-        self._extend_btn.setToolTip(
-            "Add new chapters onto the end of the existing outline without changing it."
-        )
-        self._extend_btn.clicked.connect(self._on_extend_outline_clicked)
-        header_row.addWidget(self._extend_btn)
-
         layout.addLayout(header_row)
 
         self.editor = MarkdownEditor(
@@ -1024,33 +1016,6 @@ class OutlineTab(QWidget):
             f"{OUTLINE_SUGGESTION_MARKER}\n{suggestion.strip()}",
         )
 
-    def _on_extend_outline_clicked(self) -> None:
-        if not self._project or not self.editor.get_text().strip():
-            QMessageBox.information(
-                self,
-                "No outline yet",
-                "Generate an outline first, then you can extend it.",
-            )
-            return
-
-
-        self.content_changed.emit(self.editor.get_text())
-
-        lang = storage.load_settings().response_language
-        dialog = ExtendOutlineDialog(default_new_chapters=5, lang=lang, parent=self)
-        if dialog.exec() != QDialog.Accepted:
-            return
-
-        request = dialog.cover_request()
-        if not request:
-            return
-        n = dialog.chapter_count()
-
-        self.task_requested.emit(
-            TaskType.GENERATE_OUTLINE,
-            f"{OUTLINE_EXTEND_MARKER}\n{n}\n{request}",
-        )
-
     def _update_count_label(self) -> None:
         numbers = outline_chapter_numbers(self.editor.get_text())
         if not numbers:
@@ -1071,17 +1036,12 @@ class OutlineTab(QWidget):
     def set_busy(self, busy: bool, project_name: str = "") -> None:
         tip = f"Generating content for \"{project_name}\"…" if busy and project_name else ""
         self._gen_btn.setEnabled(not busy)
-        self._extend_btn.setEnabled(not busy)
         if busy:
             self._gen_btn.setToolTip(tip)
-            self._extend_btn.setToolTip(tip)
         else:
             self._gen_btn.setToolTip(
-                "First run generates the outline from the Synopsis. Later runs use only new "
-                "Synopsis/Draft material and append new chapters without changing existing ones."
-            )
-            self._extend_btn.setToolTip(
-                "Add new chapters onto the end of the existing outline without changing it."
+                "First run generates the outline from the Draft/Synopsis. Later runs use only new "
+                "Draft/Synopsis material and append new chapters without changing existing ones."
             )
 
     def save_to(self, project: Project) -> None:
@@ -3140,7 +3100,7 @@ class StoryPanel(QWidget):
         self.synopsis_tab = SynopsisTab()
         self.synopsis_tab.task_requested.connect(self.task_requested)
         self.synopsis_tab.content_changed.connect(self._on_synopsis_changed)
-        self.tabs.addTab(self.synopsis_tab, "Synopsis")
+        self.tabs.addTab(self.synopsis_tab, "Draft/Synopsis")
 
         self.outline_tab = OutlineTab()
         self.outline_tab.task_requested.connect(self.task_requested)

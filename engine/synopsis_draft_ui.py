@@ -28,7 +28,7 @@ def _patch_tab(tab) -> None:
         # Section title.
         labels = header.findChildren(QLabel, "", Qt.FindDirectChildrenOnly)
         if labels:
-            labels[0].setText("Synopsis / Draft")
+            labels[0].setText("Draft/Synopsis")
 
         # Button now sends the text currently in the editor, even if the user
         # has not pressed Save yet.
@@ -57,7 +57,7 @@ def _patch_tab(tab) -> None:
         if text_edit is not None:
             text_edit.setPlaceholderText(
                 "Write your story draft, synopsis, or raw story material here.\n\n"
-                "Generate Draft will check consistency, repair contradictions if needed, "
+                "Write Draft will check consistency, repair contradictions if needed, "
                 "develop the story using your Author Profile, and then build Characters and World."
             )
 
@@ -68,7 +68,7 @@ def _patch_tab(tab) -> None:
         if tabs is not None:
             index = tabs.indexOf(tab)
             if index >= 0:
-                tabs.setTabText(index, "Synopsis / Draft")
+                tabs.setTabText(index, "Draft/Synopsis")
 
         tab._refresh_lock_view()
         tab._synopsis_draft_ui_patched = True
