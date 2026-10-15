@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import uuid
 from datetime import datetime
 from typing import Callable, Optional
@@ -29,6 +30,12 @@ from PySide6.QtCore import QObject, QThread, Signal
 
 from engine import storage
 from engine.image_engine import get_image_engine
+
+# The image engine is a process-wide singleton holding one loaded model. Panel
+# generations and character portraits run on different threads, so every
+# load/generate/unload goes through this lock to avoid two jobs stepping on
+# each other's model.
+IMAGE_ENGINE_LOCK = threading.RLock()
 from engine.models import (
     AppSettings,
     ImageBackend,
@@ -87,7 +94,8 @@ class ImageWorkflowWorker(QObject):
             f"[image_workflow] Task started: {self.request.task_type.value}"
         )
         try:
-            self._run_generation()
+            with IMAGE_ENGINE_LOCK:
+                self._run_generation()
         except Exception as e:
             import traceback
             msg = f"Image workflow error: {e}\n{traceback.format_exc()}"
@@ -215,7 +223,13 @@ def _default_output_directory() -> str:
 
 
 def generate_character_image(project_id: str, character, settings: Optional[AppSettings] = None) -> tuple[bool, Optional[dict], str]:
-    """Generate a character image and persist it through the existing encrypted storage layer."""
+    """Generate a character portrait and save it encrypted in the given project."""
+    with IMAGE_ENGINE_LOCK:
+        return _generate_character_image_locked(project_id, character, settings)
+
+
+def _generate_character_image_locked(project_id: str, character, settings: Optional[AppSettings] = None) -> tuple[bool, Optional[dict], str]:
+    """Body of generate_character_image. Callers must hold IMAGE_ENGINE_LOCK."""
     prompt = (
         "Character portrait. "
         f"{character.description}. "
@@ -345,4 +359,4 @@ class ImageWorkflowThread(QThread):
         self.worker.run()
 
     def cancel(self) -> None:
-        self.worker.cancel()
+        self.worker.cancel()

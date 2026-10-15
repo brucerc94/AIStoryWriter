@@ -26,10 +26,18 @@ class ManagerAgent:
             return TaskType.GENERATE_OUTLINE, "Generate the chapter outline"
 
 
-        for ch in project.chapters:
+        chapters = sorted(project.chapters, key=lambda c: c.number)
+
+        # A chapter that exists but has no text yet must be written, not reviewed.
+        unwritten = next((ch for ch in chapters if not (ch.content or "").strip()), None)
+        if unwritten is not None:
+            return TaskType.WRITE_CHAPTER, f"Write Chapter {unwritten.number}"
+
+        for ch in chapters:
             if not ch.reviewed:
                 return TaskType.REVIEW_CHAPTER, f"Review Chapter {ch.number}"
 
-
-        next_num = len(project.chapters) + 1
+        # Numbering can have gaps after deletions or reordering, so continue
+        # from the highest existing number instead of counting chapters.
+        next_num = max((ch.number for ch in chapters), default=0) + 1
         return TaskType.WRITE_CHAPTER, f"Write Chapter {next_num}"

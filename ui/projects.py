@@ -136,9 +136,9 @@ class ProjectListRow(QWidget):
             outer.addWidget(date_lbl)
 
     def mousePressEvent(self, event) -> None:
-
-
-        self.open_requested.emit(self.project_id)
+        # Only a left click opens the project; right click opens the context menu.
+        if event.button() == Qt.LeftButton:
+            self.open_requested.emit(self.project_id)
         super().mousePressEvent(event)
 
 
@@ -151,6 +151,7 @@ class ProjectsPanel(QWidget):
     project_selected = Signal(str)
     project_created = Signal(str)
     project_deleted = Signal(str)
+    project_renamed = Signal(str)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -239,7 +240,14 @@ class ProjectsPanel(QWidget):
     def refresh(self) -> None:
         projects = storage.load_all_projects()
         self._projects = {p.id: p for p in projects}
+        selected_id = self._selected_project_id()
         self._populate(projects)
+        if selected_id:
+            self.select_project(selected_id)
+
+    def _selected_project_id(self) -> Optional[str]:
+        item = self.list_widget.currentItem()
+        return item.data(Qt.UserRole) if item else None
 
     def _populate(self, projects: list[Project]) -> None:
         self.list_widget.clear()
@@ -330,6 +338,7 @@ class ProjectsPanel(QWidget):
         if ok and new_title.strip():
             storage.rename_project(project_id, new_title.strip())
             self.refresh()
+            self.project_renamed.emit(project_id)
 
     def _delete_project(self, project_id: str, title: str) -> None:
         reply = QMessageBox.question(
@@ -397,4 +406,4 @@ class NewProjectDialog(QDialog):
 
 
 
-from PySide6.QtWidgets import QTextEdit as QTextEdit_small
+from PySide6.QtWidgets import QTextEdit as QTextEdit_small

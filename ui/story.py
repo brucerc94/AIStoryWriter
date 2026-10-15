@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import shiboken6
 import html
 import math
 import re
@@ -42,9 +44,10 @@ from PySide6.QtWidgets import (
 )
 
 from engine import storage
-from engine.image_workflow import generate_character_image
+from engine.character_images import PortraitOutcome, mark_generating, record_outcome
 from engine.models import AuthorIntent, Chapter, Character, CharacterRelationship, Project, TaskType, WritingStyle
 from engine.workflow import OUTLINE_EXTEND_MARKER, OUTLINE_SUGGESTION_MARKER, WRITE_CHAPTER_TARGET_MARKER
+from ui.workers import CharacterPortraitWorker, is_running, start_worker
 from ui.styles import (
     COLOR_ACCENT,
     COLOR_ACCENT_DIM,
@@ -62,6 +65,21 @@ from ui.widgets import EmptyStateCard, SizeAdjustingTabWidget
 
 from ui.stats import StatsTab
 from ui.search import SearchTab
+
+
+LOCKED_TEXT_BG = "#26262d"
+LOCKED_TEXT_FG = "#8b8899"
+NEW_TEXT_BG = "#2e2448"
+
+
+def _qt_len(text: str) -> int:
+    """Length in UTF-16 code units, which is what QTextDocument positions use."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def _suggest_new_chapters(new_text: str) -> int:
+    words = len((new_text or "").split())
+    return max(1, min(50, round(words / 450)))
 
 
 def outline_chapter_numbers(outline_text: str) -> list[int]:
@@ -98,6 +116,7 @@ class MarkdownEditor(QWidget):
 
     content_saved = Signal(str)
     generate_requested = Signal()
+    page_changed = Signal()
 
     def __init__(
         self,
@@ -170,11 +189,16 @@ class MarkdownEditor(QWidget):
         if self._stack is not None:
             self._stack.setCurrentIndex(1)
             self.editor.setFocus()
+            self.page_changed.emit()
+
+    def is_editor_page_visible(self) -> bool:
+        return self._stack is None or self._stack.currentIndex() == 1
 
     def set_text(self, text: str) -> None:
         self.editor.setPlainText(text)
         if self._stack is not None:
             self._stack.setCurrentIndex(1 if text.strip() else 0)
+            self.page_changed.emit()
 
     def get_text(self) -> str:
         return self.editor.toPlainText()
@@ -189,39 +213,232 @@ class SynopsisTab(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self._project: Optional[Project] = None
+        self._loading = False
+        self._protected_synopsis_prefix = ""
+        self._last_valid_synopsis = ""
+        self._protection_notice_shown = False
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
 
-        self._gen_header = SectionHeader("Synopsis", "✨ Generate Synopsis")
+        self._gen_header = SectionHeader("Draft/Synopsis", "✨ Write Draft")
         header = self._gen_header
         if header.action_btn:
-            header.action_btn.clicked.connect(
-                lambda: self.task_requested.emit(TaskType.WRITE_SYNOPSIS, "")
-            )
+            header.action_btn.clicked.connect(self.request_write_draft)
         layout.addWidget(header)
+
+        source_lock_row = QHBoxLayout()
+        source_lock_row.setContentsMargins(0, 0, 0, 0)
+        source_lock_row.setSpacing(8)
+
+        self._source_lock_label = QLabel()
+        self._source_lock_label.setWordWrap(True)
+        self._source_lock_label.setStyleSheet(
+            f"color: {COLOR_TEXT_MUTED}; font-size: 11px;"
+        )
+        source_lock_row.addWidget(self._source_lock_label, 1)
+
+        self._unlock_source_btn = QPushButton("Unlock Synopsis to Regenerate")
+        self._unlock_source_btn.setObjectName("subtle")
+        self._unlock_source_btn.setToolTip(
+            "Allow editing text already used for the current outline. "
+            "Regenerate the outline afterward."
+        )
+        self._unlock_source_btn.clicked.connect(self._unlock_outline_source)
+        source_lock_row.addWidget(self._unlock_source_btn, 0)
+
+        layout.addLayout(source_lock_row)
 
         self.editor = MarkdownEditor(
             placeholder=(
-                "Write your story synopsis here, or use 'Generate Synopsis' to create one.\n\n"
+                "Write your story here, then press 'Write Draft' to develop it.\n\n"
                 "A good synopsis covers: premise, main characters, central conflict, and stakes."
             ),
             empty_icon="📝",
-            empty_title="Every story starts with a synopsis",
+            empty_title="Every story starts with a draft",
             empty_description=(
-                "A short premise, main characters, central conflict, and stakes. "
-                "The AI can draft one for you to refine, or you can write it yourself."
+                "Write your story, or paste it, then press Write Draft. "
+                "You can also write the draft yourself."
             ),
-            generate_label="✨ Generate Synopsis",
+            generate_label="",
         )
-        self.editor.generate_requested.connect(
-            lambda: self.task_requested.emit(TaskType.WRITE_SYNOPSIS, "")
-        )
+        self.editor.generate_requested.connect(self.request_write_draft)
         self.editor.content_saved.connect(self.content_changed.emit)
+        self.editor.page_changed.connect(self._update_write_draft_visibility)
+        self.editor.editor.textChanged.connect(self._on_synopsis_editor_changed)
         layout.addWidget(self.editor, 1)
 
+        self._source_lock_label.hide()
+        self._unlock_source_btn.hide()
+        self._refresh_lock_view()
+
+    def request_write_draft(self) -> None:
+        """Save the current draft to disk first, then ask for the AI draft."""
+        text = self.editor.get_text()
+        # content_changed is wired to the panel, which stores the project.
+        # Saving first means the text is not lost if the author never pressed Save.
+        self.content_changed.emit(text)
+        self.task_requested.emit(TaskType.WRITE_SYNOPSIS, text)
+
+    def _update_write_draft_visibility(self) -> None:
+        """Write Draft is hidden on the empty-state card and appears once the
+        author chooses to write (or the project already has text)."""
+        header_btn = getattr(self._gen_header, "action_btn", None)
+        if header_btn is not None:
+            header_btn.setVisible(self.editor.is_editor_page_visible())
+
+    def _refresh_lock_view(self) -> None:
+        """Color the locked text (used by the outline) and the new text, and
+        show the matching button label. Only display; never changes the text."""
+        text_edit = self.editor.editor
+        full = self.editor.get_text()
+        # Keep the in-memory project in step with what the author sees, so
+        # Generate Outline / Generate Draft always use the latest text even if
+        # the author did not press Save. Disk is still written by Save/normal flow.
+        if self._project is not None and not self._loading:
+            self._project.synopsis = full
+        prefix = self._protected_synopsis_prefix
+        selections = []
+        locked = bool(prefix)
+
+        if locked:
+            locked_len = _qt_len(prefix)
+            selections.append(self._range_selection(text_edit, 0, locked_len, LOCKED_TEXT_BG, LOCKED_TEXT_FG))
+            total_len = _qt_len(full)
+            if total_len > locked_len:
+                selections.append(self._range_selection(text_edit, locked_len, total_len, NEW_TEXT_BG, None))
+            self._source_lock_label.setText(
+                "🔒 Gray = already in the outline (locked).    "
+                "🟣 Purple = new text, NOT in the outline yet. "
+                "Click ✨ Write Draft to develop only the purple part; "
+                "then click Generate Outline to add those chapters."
+            )
+        text_edit.setExtraSelections(selections)
+
+        header_btn = getattr(self._gen_header, "action_btn", None)
+        if header_btn is not None:
+            header_btn.setText("✨ Write Draft")
+            header_btn.setToolTip(
+                "Only develops the purple (new) text. The gray text is not changed."
+                if locked else "Develops the whole draft."
+            )
+        self._update_write_draft_visibility()
+
+    @staticmethod
+    def _range_selection(text_edit, start: int, end: int, background: str, foreground: Optional[str]):
+        from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
+        from PySide6.QtWidgets import QTextEdit
+
+        cursor = QTextCursor(text_edit.document())
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.KeepAnchor)
+        fmt = QTextCharFormat()
+        fmt.setBackground(QColor(background))
+        if foreground:
+            fmt.setForeground(QColor(foreground))
+        selection = QTextEdit.ExtraSelection()
+        selection.cursor = cursor
+        selection.format = fmt
+        return selection
+
+    def _on_synopsis_editor_changed(self) -> None:
+        if self._loading:
+            return
+
+        current = self.editor.get_text()
+        protected = self._protected_synopsis_prefix
+        if not protected:
+            self._last_valid_synopsis = current
+            self._refresh_lock_view()
+            return
+
+        if current.startswith(protected):
+            self._last_valid_synopsis = current
+            self._refresh_lock_view()
+            return
+
+        self._loading = True
+        self.editor.set_text(self._last_valid_synopsis)
+        cursor = self.editor.editor.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        self.editor.editor.setTextCursor(cursor)
+        self._loading = False
+        self._refresh_lock_view()
+
+        if not self._protection_notice_shown:
+            self._protection_notice_shown = True
+            QMessageBox.information(
+                self,
+                "Synopsis section locked",
+                "This text has already been used to generate the current Outline. "
+                "Only new text appended after the protected section can be edited. "
+                "Use 'Unlock Synopsis to Regenerate' to change the protected text.",
+            )
+
+    def _unlock_outline_source(self) -> None:
+        if not self._project or not self._protected_synopsis_prefix:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Unlock Synopsis",
+            "This will allow editing the Synopsis text already used for the current "
+            "Outline. The current Outline will stay unchanged until you regenerate it. "
+            "Continue?",
+            QMessageBox.Yes | QMessageBox.Cancel,
+            QMessageBox.Cancel,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        self._project.outline_source_length = 0
+        self._project.outline_source_hash = ""
+        self._protected_synopsis_prefix = ""
+        self._last_valid_synopsis = self.editor.get_text()
+        self._protection_notice_shown = False
+        self._source_lock_label.hide()
+        self._unlock_source_btn.hide()
+        self.content_changed.emit(self.editor.get_text())
+
     def load(self, project: Project) -> None:
+        self._project = project
+        self._loading = True
         self.editor.set_text(project.synopsis)
+        self._loading = False
+
+        source_length = max(0, int(project.outline_source_length or 0))
+        protected_prefix = project.synopsis[:source_length]
+        source_is_valid = (
+            bool(project.outline.strip())
+            and source_length > 0
+            and len(protected_prefix) == source_length
+            and bool(project.outline_source_hash)
+            and hashlib.sha256(protected_prefix.encode("utf-8")).hexdigest()
+            == project.outline_source_hash
+        )
+
+        self._protected_synopsis_prefix = protected_prefix if source_is_valid else ""
+        self._last_valid_synopsis = project.synopsis
+        self._protection_notice_shown = False
+
+        if source_is_valid:
+            self._source_lock_label.setText(
+                "🔒 The Synopsis text already used to generate the current Outline is locked. "
+                "Add new material after it; use the button to edit the protected text."
+            )
+            self._source_lock_label.show()
+            self._unlock_source_btn.show()
+        else:
+            self._source_lock_label.hide()
+            self._unlock_source_btn.hide()
+
+        self._refresh_lock_view()
+
+        cursor = self.editor.editor.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        self.editor.editor.setTextCursor(cursor)
 
     def save_to(self, project: Project) -> None:
         project.synopsis = self.editor.get_text()
@@ -237,6 +454,7 @@ class SynopsisTab(QWidget):
             else:
                 self._gen_header.action_btn.setToolTip("")
         self.editor.save_btn.setEnabled(not busy)
+        self._unlock_source_btn.setEnabled(not busy)
 
 
 
@@ -349,19 +567,21 @@ _UI_STRINGS: dict[str, dict[str, str]] = {
 }
 
 
-def _ui(key: str, lang: str) -> str:
+# The interface is always shown in English. The story's writing language is a
+# separate setting and does not change the UI labels.
+UI_LANGUAGE = "en"
 
-    lang_lc = lang.lower()[:2] if lang else "en"
+
+def _ui(key: str, lang: str) -> str:
     row = _UI_STRINGS.get(key, {})
-    return row.get(lang_lc) or row.get("en", key)
+    return row.get(UI_LANGUAGE) or row.get("en", key)
 
 
 def _make_combo(table: list[tuple[str, dict[str, str]]], lang: str, parent=None) -> QComboBox:
 
     cb = QComboBox(parent)
-    lang_lc = lang.lower()[:2] if lang else "en"
     for key, labels in table:
-        label = labels.get(lang_lc) or labels.get("en", key) or "— auto —"
+        label = labels.get(UI_LANGUAGE) or labels.get("en", key) or "— auto —"
         cb.addItem(label, key)
     return cb
 
@@ -399,9 +619,10 @@ class GenerateOutlineDialog(QDialog):
         writing_style: Optional[WritingStyle] = None,
         lang: str = "",
         parent=None,
+        new_chapters_mode: bool = False,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle(_ui("generate_btn", lang))
+        self.setWindowTitle("Add Chapters" if new_chapters_mode else _ui("generate_btn", lang))
         self.setMinimumWidth(560)
         self.setMinimumHeight(640)
         self.setModal(True)
@@ -432,13 +653,19 @@ class GenerateOutlineDialog(QDialog):
         struct_form.setContentsMargins(14, 18, 14, 14)
 
         self.chapters_spin = QSpinBox()
-        self.chapters_spin.setRange(1, 300)
+        self.chapters_spin.setRange(1, 50 if new_chapters_mode else 300)
         self.chapters_spin.setValue(max(1, default_chapters))
-        self.chapters_spin.setToolTip(
-            "The outline — and later \"Generate Full Book\" — will follow this number, "
-            "one chapter per heading."
-        )
-        struct_form.addRow(_ui("num_chapters", lang), self.chapters_spin)
+        if new_chapters_mode:
+            self.chapters_spin.setToolTip(
+                "Chapters to add after the current outline. Existing chapters are not changed."
+            )
+            struct_form.addRow("Number of NEW chapters to add", self.chapters_spin)
+        else:
+            self.chapters_spin.setToolTip(
+                "The outline — and later \"Generate Full Book\" — will follow this number, "
+                "one chapter per heading."
+            )
+            struct_form.addRow(_ui("num_chapters", lang), self.chapters_spin)
         body.addWidget(struct_box)
 
 
@@ -673,17 +900,12 @@ class OutlineTab(QWidget):
         self._gen_btn = QPushButton("✨ Generate Outline")
         gen_btn = self._gen_btn
         gen_btn.setObjectName("accent")
-        gen_btn.setToolTip("Opens the outline wizard, then generates the full outline.")
+        gen_btn.setToolTip(
+            "First run generates the outline from the Synopsis. Later runs use only new "
+            "Synopsis/Draft material and append new chapters without changing existing ones."
+        )
         gen_btn.clicked.connect(self._on_generate_clicked)
         header_row.addWidget(gen_btn)
-
-        self._extend_btn = QPushButton("➕ Extend Outline")
-        self._extend_btn.setObjectName("subtle")
-        self._extend_btn.setToolTip(
-            "Add new chapters onto the end of the existing outline without changing it."
-        )
-        self._extend_btn.clicked.connect(self._on_extend_outline_clicked)
-        header_row.addWidget(self._extend_btn)
 
         layout.addLayout(header_row)
 
@@ -708,8 +930,53 @@ class OutlineTab(QWidget):
         layout.addWidget(self.editor, 1)
 
     def _on_generate_clicked(self) -> None:
+        proj = self._project
+        if proj is not None and (proj.outline or "").strip() and proj.outline_source_hash:
+            length = int(proj.outline_source_length or 0)
+            prefix = proj.synopsis[:length]
+            prefix_ok = (
+                length > 0
+                and len(prefix) == length
+                and hashlib.sha256(prefix.encode("utf-8")).hexdigest() == proj.outline_source_hash
+            )
+            if prefix_ok:
+                new_text = proj.synopsis[length:].strip()
+                if not new_text:
+                    QMessageBox.information(
+                        self,
+                        "No new Synopsis text",
+                        "The outline already uses all of the Synopsis text.\n\n"
+                        "To add chapters, first write new text below the locked part in "
+                        "Synopsis / Draft, save it, then come back here.",
+                    )
+                    return
+                existing_max = max(outline_chapter_numbers(proj.outline), default=0)
+                dialog = GenerateOutlineDialog(
+                    default_chapters=_suggest_new_chapters(new_text),
+                    author_intent=proj.author_intent,
+                    writing_style=proj.writing_style,
+                    lang=storage.load_settings().response_language,
+                    parent=self,
+                    new_chapters_mode=True,
+                )
+                if dialog.exec() != QDialog.Accepted:
+                    return
+                # Same as the normal path: the author style chosen here is saved to
+                # the project so every chapter prompt receives it.
+                proj.author_intent = dialog.get_author_intent()
+                proj.writing_style = dialog.get_writing_style()
+                self.profile_updated.emit()
+                count = dialog.chapter_count()
+                total = existing_max + count
+                self.task_requested.emit(
+                    TaskType.GENERATE_OUTLINE,
+                    f"The outline must contain EXACTLY {total} chapters, "
+                    f"numbered sequentially from 1 to {total}.",
+                )
+                return
+
         existing = outline_chapter_numbers(self.editor.get_text())
-        default_n = max(existing) if existing else 12
+        default_n = (max(existing) + 1) if existing else 12
 
 
         lang = storage.load_settings().response_language
@@ -768,33 +1035,6 @@ class OutlineTab(QWidget):
             f"{OUTLINE_SUGGESTION_MARKER}\n{suggestion.strip()}",
         )
 
-    def _on_extend_outline_clicked(self) -> None:
-        if not self._project or not self.editor.get_text().strip():
-            QMessageBox.information(
-                self,
-                "No outline yet",
-                "Generate an outline first, then you can extend it.",
-            )
-            return
-
-
-        self.content_changed.emit(self.editor.get_text())
-
-        lang = storage.load_settings().response_language
-        dialog = ExtendOutlineDialog(default_new_chapters=5, lang=lang, parent=self)
-        if dialog.exec() != QDialog.Accepted:
-            return
-
-        request = dialog.cover_request()
-        if not request:
-            return
-        n = dialog.chapter_count()
-
-        self.task_requested.emit(
-            TaskType.GENERATE_OUTLINE,
-            f"{OUTLINE_EXTEND_MARKER}\n{n}\n{request}",
-        )
-
     def _update_count_label(self) -> None:
         numbers = outline_chapter_numbers(self.editor.get_text())
         if not numbers:
@@ -815,14 +1055,12 @@ class OutlineTab(QWidget):
     def set_busy(self, busy: bool, project_name: str = "") -> None:
         tip = f"Generating content for \"{project_name}\"…" if busy and project_name else ""
         self._gen_btn.setEnabled(not busy)
-        self._extend_btn.setEnabled(not busy)
         if busy:
             self._gen_btn.setToolTip(tip)
-            self._extend_btn.setToolTip(tip)
         else:
-            self._gen_btn.setToolTip("Opens the outline wizard, then generates the full outline.")
-            self._extend_btn.setToolTip(
-                "Add new chapters onto the end of the existing outline without changing it."
+            self._gen_btn.setToolTip(
+                "First run generates the outline from the Draft/Synopsis. Later runs use only new "
+                "Draft/Synopsis material and append new chapters without changing existing ones."
             )
 
     def save_to(self, project: Project) -> None:
@@ -971,32 +1209,14 @@ class CharacterCard(QFrame):
         return self._project_id_value
 
 
-class _CharacterImageWorker(QObject):
-    finished = Signal(object)
-
-    def __init__(self, project_id: str, character: Character, settings) -> None:
-        super().__init__()
-        self.project_id = project_id
-        self.character = character
-        self.settings = settings
-
-    def run(self) -> None:
-        try:
-            ok, image_ref, error = generate_character_image(self.project_id, self.character, self.settings)
-        except Exception as exc:  # pragma: no cover - defensive path
-            ok, image_ref, error = False, None, str(exc)
-        self.finished.emit((ok, image_ref, error))
-
-
 class CharactersTab(QWidget):
     project_changed = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._project: Optional[Project] = None
-        self._settings = storage.load_settings()
         self._image_thread: Optional[QThread] = None
-        self._image_worker: Optional[_CharacterImageWorker] = None
+        self._image_worker: Optional[CharacterPortraitWorker] = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(16, 16, 16, 16)
@@ -1112,42 +1332,30 @@ class CharactersTab(QWidget):
             self.project_changed.emit()
 
     def _handle_character_image(self, char_id: str, regenerate: bool) -> None:
-        if not self._project or (self._image_thread and self._image_thread.isRunning()):
+        if not self._project or is_running(self._image_thread):
             return
         char = next((c for c in self._project.characters if c.id == char_id), None)
         if not char:
             return
-        char.image_status = "Generating"
-        char.image_error = ""
-        storage.save_project(self._project)
+        mark_generating(self._project, char_id)
         self._refresh_cards()
 
-        self._image_worker = _CharacterImageWorker(self._project.id, char, self._settings)
-        self._image_thread = QThread(self)
-        self._image_worker.moveToThread(self._image_thread)
-        self._image_thread.started.connect(self._image_worker.run)
-        self._image_worker.finished.connect(self._on_character_image_finished)
-        self._image_worker.finished.connect(self._image_thread.quit)
-        self._image_thread.finished.connect(self._image_thread.deleteLater)
-        self._image_thread.start()
+        # Read settings now, not when the tab was created, so a change made in
+        # Settings (model, encoder, VAE, size...) applies to the next portrait.
+        self._image_worker = CharacterPortraitWorker(
+            self._project.id, char, storage.load_settings()
+        )
+        self._image_thread = start_worker(
+            self, self._image_worker, self._on_character_image_finished
+        )
 
-    def _on_character_image_finished(self, payload: tuple[bool, Optional[dict], str]) -> None:
-        if not self._project:
-            return
-        ok, image_ref, error = payload
-        char = next((c for c in self._project.characters if c.id == self._image_worker.character.id), None) if self._image_worker else None
-        if not char:
-            return
-        if ok and image_ref:
-            char.image_ref = image_ref
-            char.image_status = "Ready"
-            char.image_error = ""
-        else:
-            char.image_status = "Error"
-            char.image_error = error or "Image generation failed."
-        storage.save_project(self._project)
-        self._refresh_cards()
-        self.project_changed.emit()
+    def _on_character_image_finished(self, outcome: PortraitOutcome) -> None:
+        # The result belongs to the project the job started on, which may no
+        # longer be the one on screen. Save it there; refresh only if it is ours.
+        saved = record_outcome(outcome, loaded=self._project)
+        if saved is not None and self._project is not None and saved is self._project:
+            self._refresh_cards()
+            self.project_changed.emit()
         self._image_worker = None
         self._image_thread = None
 
@@ -2897,6 +3105,7 @@ class StoryPanel(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._project: Optional[Project] = None
+        self._editor_lock_state: Optional[list] = None
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -2910,7 +3119,7 @@ class StoryPanel(QWidget):
         self.synopsis_tab = SynopsisTab()
         self.synopsis_tab.task_requested.connect(self.task_requested)
         self.synopsis_tab.content_changed.connect(self._on_synopsis_changed)
-        self.tabs.addTab(self.synopsis_tab, "Synopsis")
+        self.tabs.addTab(self.synopsis_tab, "Draft/Synopsis")
 
         self.outline_tab = OutlineTab()
         self.outline_tab.task_requested.connect(self.task_requested)
@@ -2979,6 +3188,35 @@ class StoryPanel(QWidget):
         self.outline_tab.set_busy(busy, project_name)
         self.world_tab.set_busy(busy, project_name)
         self.chapters_tab.set_busy(busy, project_name)
+        self._set_editors_locked(busy)
+
+    def _set_editors_locked(self, locked: bool) -> None:
+        """
+        Lock editors during AI tasks and restore their original state afterwards.
+        Qt widgets may be deleted while the task is running, so validate each
+        Shiboken wrapper before calling methods on its underlying C++ object.
+        """
+        if locked:
+            if self._editor_lock_state is not None:
+                return
+
+            self._editor_lock_state = []
+            for editor in self.findChildren(QTextEdit):
+                if not shiboken6.isValid(editor):
+                    continue
+                was_read_only = editor.isReadOnly()
+                self._editor_lock_state.append((editor, was_read_only))
+                editor.setReadOnly(True)
+        else:
+            # Clear the saved references first so stale wrappers cannot be
+            # processed again if restoring another editor raises an exception.
+            saved_states = self._editor_lock_state or []
+            self._editor_lock_state = None
+
+            for editor, was_read_only in saved_states:
+                if not shiboken6.isValid(editor):
+                    continue
+                editor.setReadOnly(was_read_only)
 
     def _save_project(self) -> None:
         if self._project:

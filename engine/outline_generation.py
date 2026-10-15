@@ -11,12 +11,13 @@ has been generated, using the user's original extension request as source.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
 
 from engine.models import TaskType
-from engine.context import build_relevant_chapter_context
+from engine.context import build_relevant_chapter_context, format_characters_block
 from engine import prompts, storage
 
 logger = logging.getLogger("workflow")
@@ -50,7 +51,7 @@ def _recover_malformed_chapter_json(raw: str, requested_count: int) -> dict | No
     """
     text = (raw or "").strip()
     pattern = re.compile(
-        r'(?m)(?:^|[\r\n])\s*\{\s*"number"\s*:\s*(\d+)\s*,\s*"source"\s*:\s*"',
+        r'\{\s*"number"\s*:\s*(\d+)\s*,\s*"source"\s*:\s*"',
         re.DOTALL,
     )
     matches = list(pattern.finditer(text))
@@ -117,7 +118,7 @@ def _parse_json_object(raw: str) -> tuple[dict | None, str]:
 
 def _infer_requested_count_from_raw(raw: str) -> int:
     text = raw or ""
-    matches = re.findall(r'(?m)(?:^|[\r\n])\s*\{\s*"number"\s*:\s*(\d+)\s*,\s*"source"', text)
+    matches = re.findall(r'\{\s*"number"\s*:\s*(\d+)\s*,\s*"source"', text)
     return len(matches)
 
 
@@ -370,6 +371,76 @@ def run_generate_outline(worker) -> None:
     if not synopsis:
         worker.error_occurred.emit("Generate Outline requires story material.")
         return
+
+    # A completed Generate Outline stores the exact Synopsis/Draft source it
+    # consumed. Later runs append only new material through the existing
+    # Extend Outline pipeline, preserving all existing chapters.
+    current_synopsis = worker.project.synopsis or ""
+    processed_length = worker.project.outline_source_length
+    processed_hash = worker.project.outline_source_hash
+    current_outline = (worker.project.outline or "").strip()
+
+    if current_outline and processed_length > 0:
+        processed_prefix = current_synopsis[:processed_length]
+        prefix_is_valid = (
+            len(processed_prefix) == processed_length
+            and bool(processed_hash)
+            and hashlib.sha256(processed_prefix.encode("utf-8")).hexdigest()
+            == processed_hash
+        )
+        if not prefix_is_valid:
+            worker.error_occurred.emit(
+                "The Synopsis text used for the current outline was changed. "
+                "Unlock the Synopsis and regenerate the outline from scratch."
+            )
+            return
+
+        new_synopsis = current_synopsis[processed_length:]
+        if not new_synopsis.strip():
+            worker.error_occurred.emit(
+                "No new Synopsis/Draft material has been added since the last outline generation."
+            )
+            return
+
+        existing_numbers = [
+            int(match.group(1))
+            for match in re.finditer(
+                r"(?im)^\s*##\s*(?:Chapter|Cap[ií]tulo)\s+(\d+)\b",
+                current_outline,
+            )
+        ]
+        existing_count = max(existing_numbers, default=0)
+        additional_count = requested_count - existing_count
+        if additional_count < 1:
+            worker.error_occurred.emit(
+                f"The existing outline already reaches Chapter {existing_count}. "
+                f"Set the total chapter count higher than {existing_count} "
+                "to append new chapters, or use Extend Outline explicitly."
+            )
+            return
+
+        original_extra_input = worker.extra_input
+        worker.extra_input = (
+            f"{OUTLINE_EXTEND_MARKER}\n"
+            f"{additional_count}\n"
+            "Use only the new Synopsis/Draft material below. Do not rewrite or "
+            "modify any existing chapter. Generate the new chapters sequentially "
+            f"starting at Chapter {existing_count + 1}.\n\n"
+            f"NEW SYNOPSIS/DRAFT MATERIAL:\n{new_synopsis.strip()}"
+        )
+        try:
+            _run_extend_outline(worker)
+        finally:
+            worker.extra_input = original_extra_input
+
+        if worker.project.outline.strip() != current_outline:
+            worker.project.outline_source_length = len(current_synopsis)
+            worker.project.outline_source_hash = hashlib.sha256(
+                current_synopsis.encode("utf-8")
+            ).hexdigest()
+            storage.save_project(worker.project)
+        return
+
     source_blocks = _split_story(worker, requested_count, _story_source(worker, requested_count, synopsis))
     if len(source_blocks) != requested_count:
         worker.error_occurred.emit("Could not reliably divide the story draft into the requested number of chapters. Nothing was saved — try again.")
@@ -387,6 +458,10 @@ def run_generate_outline(worker) -> None:
         generated_entries.append(entry)
         previous_entry = entry
     worker.project.outline = "\n\n".join(generated_entries).strip()
+    worker.project.outline_source_length = len(worker.project.synopsis or "")
+    worker.project.outline_source_hash = hashlib.sha256(
+        (worker.project.synopsis or "").encode("utf-8")
+    ).hexdigest()
     storage.save_project(worker.project)
     worker.step_finished.emit("Outline", worker.project.outline)
     logger.info("[generate_outline] Generate Outline complete: %d chapter(s). No Character/World creation or update performed.", requested_count)
@@ -410,51 +485,316 @@ def _last_outline_entry(outline: str) -> str:
     return text[matches[-1].start():].strip() if matches else text[-_CONTINUATION_CHECKPOINT_CHARS:].strip()
 
 
-def _run_extend_outline(worker) -> None:
-    parsed = _parse_extend_payload(worker)
-    if parsed is None:
-        worker.error_occurred.emit("Extend Outline requires a valid chapter count and story material.")
-        return
-    requested_count, user_request = parsed
-    current_outline = (worker.project.outline or "").strip()
-    if not current_outline:
-        worker.error_occurred.emit("There is no outline to extend. Generate an outline first.")
-        return
-    chapter_numbers = [int(match.group(1)) for match in re.finditer(r"(?im)^\s*##\s*(?:Chapter|Cap[ií]tulo)\s+(\d+)\b", current_outline)]
-    next_chapter = max(chapter_numbers, default=0) + 1
-    split_source = _story_source(worker, requested_count, user_request)
-    worker.step_started.emit(f"Dividing extension request into {requested_count} chapter source blocks...")
-    source_blocks = _split_story(worker, requested_count, split_source)
-    if len(source_blocks) != requested_count:
-        worker.error_occurred.emit("Could not reliably divide the extension request into the requested number of chapters. Nothing was appended — try again.")
-        return
-    generated_entries: list[str] = []
+def _last_outline_entries(outline: str, count: int = 2) -> str:
+    """Return the last *count* complete chapter entries from an existing outline."""
+    text = (outline or "").strip()
+    if not text or count <= 0:
+        return ""
+
+    matches = list(
+        re.finditer(
+            r"(?im)^\s*##\s*(?:Chapter|Cap[ií]tulo)\s+\d+\b[^\n]*$",
+            text,
+        )
+    )
+    if not matches:
+        return text[-_CONTINUATION_CHECKPOINT_CHARS:].strip()
+
+    start = matches[max(0, len(matches) - count)].start()
+    return text[start:].strip()
+
+
+def _parse_extend_plan(
+    plan_text: str,
+    next_chapter: int,
+    requested_count: int,
+) -> list[str]:
+    """Parse the exact Chapter N -> description plan required by Extend Outline.
+
+    Local models occasionally use ':', '—', or markdown/bullets instead of
+    the requested arrow. Those formatting differences are normalized here,
+    while chapter numbering remains strict and consecutive.
+    """
+    final_chapter = next_chapter + requested_count - 1
+    by_number: dict[int, str] = {}
+
+    for raw_line in (plan_text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        line = re.sub(r"^\s*[-*•]\s+", "", line)
+        line = re.sub(r"^\s*#{1,6}\s*", "", line)
+
+        match = re.match(
+            r"(?i)^chapter\s+(\d+)\s*(?:→|->|–>|—>|:|-|—)\s*(.+?)\s*$",
+            line,
+        )
+        if not match:
+            match = re.match(r"^\s*(\d+)[.)]\s+(.+?)\s*$", line)
+        if not match:
+            continue
+
+        number = int(match.group(1))
+        description = match.group(2).strip()
+        if not (next_chapter <= number <= final_chapter):
+            continue
+        if description and number not in by_number:
+            by_number[number] = description
+
+    expected = list(range(next_chapter, final_chapter + 1))
+    parsed = sorted(by_number)
+    if parsed != expected:
+        logger.warning(
+            "[extend_outline] Could not parse exact plan range. Expected=%s Parsed=%s Raw=%r",
+            expected,
+            parsed,
+            (plan_text or "")[:3000],
+        )
+        return []
+
+    return [by_number[number] for number in expected]
+
+_NEW_MATERIAL_MARKER = "NEW SYNOPSIS/DRAFT MATERIAL:"
+
+
+def _extract_new_material(request: str) -> str:
+    """The text the author added to the Synopsis/Draft (empty for a plain cover request)."""
+    if _NEW_MATERIAL_MARKER in request:
+        return request.split(_NEW_MATERIAL_MARKER, 1)[1].strip()
+    return ""
+
+
+def _write_extend_blocks(worker, current_outline: str, blocks: list[str], next_chapter: int, final_chapter: int, requested_count: int) -> None:
+    """Write each new chapter from its real source block, exactly like the first
+    Generate Outline does (same chapter prompt, same Author Profile/style)."""
+    entries: list[str] = []
     previous_entry = _last_outline_entry(current_outline)
-    for index, source_block in enumerate(source_blocks):
+    for index, block in enumerate(blocks):
         if worker._cancelled:
             return
         chapter_num = next_chapter + index
-        worker.step_started.emit(f"Writing outline for Chapter {chapter_num}/{next_chapter + requested_count - 1}...")
-        entry = _write_chapter_outline(worker, chapter_num, source_block, previous_entry)
+        worker.step_started.emit(f"Writing outline for Chapter {chapter_num}/{final_chapter}...")
+        entry = _write_chapter_outline(worker, chapter_num, block, previous_entry)
         if not entry:
-            worker.error_occurred.emit(f"Could not complete the outline for Chapter {chapter_num}. Nothing was appended — try again.")
+            worker.error_occurred.emit(
+                f"Could not complete the outline for Chapter {chapter_num}. Nothing was appended — try again."
+            )
             return
+        entries.append(entry)
+        previous_entry = entry
+
+    new_outline = "\n\n".join(entries).strip()
+    worker.project.outline = (current_outline.rstrip() + "\n\n" + new_outline).strip()
+    # Characters and World were already built from this text when the Draft was
+    # developed, so they are not extracted again here.
+    storage.save_project(worker.project)
+    worker.step_finished.emit(
+        f"Outline Extended (Chapters {next_chapter}-{final_chapter})", new_outline,
+    )
+    logger.info("[extend_outline] Appended %d chapter(s) from new Synopsis text.", len(entries))
+
+
+def _run_extend_outline(worker) -> None:
+    parsed = _parse_extend_payload(worker)
+    if parsed is None:
+        worker.error_occurred.emit(
+            "Extend Outline requires a valid chapter count and story material."
+        )
+        return
+
+    requested_count, user_request = parsed
+    current_outline = (worker.project.outline or "").strip()
+    if not current_outline:
+        worker.error_occurred.emit(
+            "There is no outline to extend. Generate an outline first."
+        )
+        return
+
+    chapter_numbers = [
+        int(match.group(1))
+        for match in re.finditer(
+            r"(?im)^\s*##\s*(?:Chapter|Cap[ií]tulo)\s+(\d+)\b",
+            current_outline,
+        )
+    ]
+    next_chapter = max(chapter_numbers, default=0) + 1
+    final_chapter = next_chapter + requested_count - 1
+
+    characters = (
+        format_characters_block(worker.project.characters) or "(none)"
+    )
+    world = (worker.project.world or "").strip() or "(none)"
+    memory = (worker.project.memory or "").strip() or "(none)"
+    intent_frag = worker.project.author_intent.to_prompt_fragment() or "(none)"
+    style_frag = worker.project.writing_style.to_prompt_fragment() or "(none)"
+    language = worker._response_language()
+    language_note = f" Write in {language}." if language else ""
+
+    new_material = _extract_new_material(user_request)
+    if new_material:
+        # Material from the Synopsis / Draft always goes through the same split path
+        # as Generate Outline, never through the planner (which ignores this text).
+        if len(new_material) >= _MIN_SOURCE_CHARS:
+            worker.step_started.emit(f"Splitting new text into {requested_count} chapter(s)...")
+            blocks = _split_story(
+                worker,
+                requested_count,
+                _story_source(worker, requested_count, source_text=new_material),
+            )
+        elif requested_count == 1:
+            # Short text but one chapter: the whole text is that chapter's source.
+            blocks = [new_material]
+        else:
+            worker.error_occurred.emit(
+                f"The new Synopsis text is too short to split into {requested_count} chapters. "
+                "Nothing was appended — add more text or choose 1 chapter."
+            )
+            return
+        if len(blocks) != requested_count:
+            worker.error_occurred.emit(
+                f"Could not split the new Synopsis text into {requested_count} chapter(s). "
+                "Nothing was appended — try again or change the number of chapters."
+            )
+            return
+        _write_extend_blocks(worker, current_outline, blocks, next_chapter, final_chapter, requested_count)
+        return
+
+    # The extension request may be only one sentence. Do NOT reject it just
+    # because it is under the semantic-splitter's generic 200-character
+    # threshold. Extend Outline is an instruction to distribute that request
+    # across new chapters, so the planner receives the request plus a small
+    # read-only tail of the existing outline for continuity.
+    existing_ref = _last_outline_entries(current_outline, count=2)
+
+    worker.step_started.emit(
+        f"Planning {requested_count} new chapter(s) starting at Chapter {next_chapter}..."
+    )
+    logger.info(
+        "[extend_outline] Phase 1: planning %d chapters (%d–%d).",
+        requested_count,
+        next_chapter,
+        final_chapter,
+    )
+
+    plan_system = prompts.render(
+        "outline/extend_plan_system",
+        language_note=language_note,
+        requested_count=requested_count,
+        next_chapter=next_chapter,
+        last_new_chapter=final_chapter,
+    )
+    plan_user = prompts.render(
+        "outline/extend_plan_user",
+        title=worker.project.title,
+        user_request=user_request,
+        requested_count=requested_count,
+        next_chapter=next_chapter,
+        last_new_chapter=final_chapter,
+        characters=characters,
+        world=world,
+        memory=memory,
+        author_intent=intent_frag,
+        writing_style=style_frag,
+        current_outline=existing_ref,
+    )
+
+    chapter_plans: list[str] = []
+    for attempt in range(1, 3):
+        if worker._cancelled:
+            return
+
+        plan_raw = worker._run_lean_inference(
+            TaskType.GENERATE_OUTLINE,
+            plan_system,
+            plan_user,
+            max_tokens=min(512, worker._content_max_tokens()),
+        )
+        chapter_plans = _parse_extend_plan(
+            plan_raw.strip(),
+            next_chapter,
+            requested_count,
+        )
+        if chapter_plans:
+            logger.info(
+                "[extend_outline] Phase 1 complete: %d chapter plans parsed.",
+                len(chapter_plans),
+            )
+            break
+
+        logger.warning(
+            "[extend_outline] Phase 1 attempt %d/2 did not yield a valid %d-chapter plan.",
+            attempt,
+            requested_count,
+        )
+
+    if len(chapter_plans) != requested_count:
+        worker.error_occurred.emit(
+            f"Extend Outline: could not create the {requested_count}-chapter planning "
+            "distribution. Nothing was appended — try again."
+        )
+        return
+
+    # Generate each new chapter entry from its planned events. The existing
+    # outline is only a continuity reference; it is never rewritten.
+    generated_entries: list[str] = []
+    previous_entry = _last_outline_entry(current_outline)
+
+    for index, chapter_plan in enumerate(chapter_plans):
+        if worker._cancelled:
+            return
+
+        chapter_num = next_chapter + index
+        worker.step_started.emit(
+            f"Writing outline for Chapter {chapter_num}/{final_chapter}..."
+        )
+
+        entry = _write_chapter_outline(
+            worker,
+            chapter_num,
+            chapter_plan,
+            previous_entry,
+        )
+        if not entry:
+            worker.error_occurred.emit(
+                f"Could not complete the outline for Chapter {chapter_num}. "
+                "Nothing was appended — try again."
+            )
+            return
+
         generated_entries.append(entry)
         previous_entry = entry
-    new_outline = "\n\n".join(generated_entries).strip()
-    if len(generated_entries) != requested_count:
-        worker.error_occurred.emit(f"Expected {requested_count} new chapters but generated {len(generated_entries)}.")
-        return
-    worker.project.outline = (current_outline.rstrip() + "\n\n" + new_outline).strip()
 
-    logger.info("[extend_outline] Updating Characters and World from the user's original extension request.")
+    if len(generated_entries) != requested_count:
+        worker.error_occurred.emit(
+            f"Expected {requested_count} new chapters but generated "
+            f"{len(generated_entries)}."
+        )
+        return
+
+    new_outline = "\n\n".join(generated_entries).strip()
+    worker.project.outline = (
+        current_outline.rstrip() + "\n\n" + new_outline
+    ).strip()
+
+    logger.info(
+        "[extend_outline] Updating Characters and World from the user's original extension request."
+    )
     worker._extract_and_merge_characters(user_request)
-    worker._update_world_incremental(user_request, source_type="outline_extend_input")
+    worker._update_world_incremental(
+        user_request,
+        source_type="outline_extend_input",
+    )
 
     storage.save_project(worker.project)
-    worker.step_finished.emit(f"Outline Extended (Chapters {next_chapter}-{next_chapter + requested_count - 1})", new_outline)
-    logger.info("[extend_outline] Extend Outline complete: %d chapter(s); canon updated from user input.", requested_count)
-
+    worker.step_finished.emit(
+        f"Outline Extended (Chapters {next_chapter}-{final_chapter})",
+        new_outline,
+    )
+    logger.info(
+        "[extend_outline] Extend Outline complete: %d chapter(s); canon updated from user input.",
+        requested_count,
+    )
 
 def install(module) -> None:
     if getattr(module, "_outline_generation_installed", False):

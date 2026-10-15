@@ -10,7 +10,8 @@ from typing import Optional
 
 from PySide6.QtCore import QObject, QThread, Signal
 
-from engine.chat import get_engine
+from engine.llm_router import get_engine
+from engine.model_refs import display_name
 from engine.context import (
     build_context_for_model,
     build_review_context_for_model,
@@ -28,6 +29,7 @@ from engine.models import (
     Character,
     CharacterRelationship,
     ChatMessage,
+    ChatMode,
     MessageRole,
     Project,
     TaskType,
@@ -342,6 +344,7 @@ class WorkflowWorker(QObject):
         extra_input: str = "",
         settings=None,
         include_story_context: bool = True,
+        chat_mode: ChatMode = ChatMode.NORMAL,
     ) -> None:
         super().__init__()
         self.project = project
@@ -349,6 +352,7 @@ class WorkflowWorker(QObject):
         self.extra_input = extra_input
         self.settings = settings
         self.include_story_context = include_story_context
+        self.chat_mode = chat_mode
         self._cancelled = False
         self._stop_after_current_chapter = False
         self._approval_result: Optional[bool] = None
@@ -392,12 +396,10 @@ class WorkflowWorker(QObject):
             return False
 
         engine = get_engine()
-        if not engine.is_available:
-            logger.error("llama-cpp-python is not installed.")
-            self.error_occurred.emit(
-                "llama-cpp-python is not installed.\n"
-                "Run: pip install llama-cpp-python"
-            )
+        unavailable = engine.availability_error(model_path)
+        if unavailable:
+            logger.error(unavailable)
+            self.error_occurred.emit(unavailable)
             return False
 
         ctx = 4096
@@ -415,7 +417,7 @@ class WorkflowWorker(QObject):
             moe_n_ubatch = getattr(self.settings, "moe_n_ubatch", 1024)
 
         logger.info(
-            f"[{task.value}] requesting model load: {model_path} "
+            f"[{task.value}] requesting model load: {display_name(model_path)} "
             f"(n_ctx={ctx}, n_gpu_layers={gpu}, n_threads={threads}, "
             f"n_threads_batch={threads_batch or 'auto'})"
         )
@@ -423,6 +425,7 @@ class WorkflowWorker(QObject):
             with _StepTimer(f"model_load({task.value})"):
                 engine.load_model(
                     model_path,
+                    settings=self.settings,
                     n_ctx=ctx,
                     n_gpu_layers=gpu,
                     n_threads=threads,
@@ -481,6 +484,7 @@ class WorkflowWorker(QObject):
             task=task,
             reply_reserved=reply_reserved,
             include_story_context=include_story_context,
+            chat_mode=self.chat_mode,
         )
 
     def _run_inference_v2(
@@ -504,6 +508,7 @@ class WorkflowWorker(QObject):
             language=self._response_language(),
             allow_nsfw=self._allow_nsfw(),
             include_story_context=self.include_story_context,
+            chat_mode=self.chat_mode,
         )
         context_limit = self._model_context_limit()
         # Use the user's configured content_max_tokens as the reply budget so the
@@ -555,7 +560,11 @@ class WorkflowWorker(QObject):
                 self.error_occurred.emit(error)
                 return ""
 
-        effective_max_tokens = min(max_tokens, max(0, context_limit - prompt_tokens))
+        effective_max_tokens = self._effective_output_tokens(
+            task,
+            prompt_tokens,
+            max_tokens,
+        )
         if prompt_tokens + effective_max_tokens > context_limit:
             error = (
                 f"[{task.value}] prompt_tokens({prompt_tokens}) + "
@@ -595,28 +604,6 @@ class WorkflowWorker(QObject):
                 "The response will be capped to the effective limit."
             )
 
-
-        _ROLE_COLORS = {
-            "system":    "\033[36m",
-            "user":      "\033[32m",
-            "assistant": "\033[33m",
-        }
-        _RESET = "\033[0m"
-        _DIVIDER = "─" * 72
-
-        print(f"\n{'═' * 72}")
-        print(f"  PROMPT DUMP  [{task.value.upper()}]  "
-              f"{len(messages)} msg(s)  ~{prompt_tokens} tokens")
-        print(f"{'═' * 72}")
-        for idx, msg in enumerate(messages):
-            role = msg.get("role", "?")
-            content = msg.get("content", "")
-            color = _ROLE_COLORS.get(role, "")
-            print(f"{color}[{idx}] {role.upper()}{_RESET}")
-            print(_DIVIDER)
-            print(content)
-            print()
-        print(f"{'═' * 72}\n")
 
         accumulated = []
 
@@ -977,6 +964,24 @@ class WorkflowWorker(QObject):
     ) -> str:
         return self._run_inference_v2(task, user_message, add_to_chat=add_to_chat, max_tokens=max_tokens)
 
+    def _effective_output_tokens(
+        self,
+        task: TaskType,
+        prompt_tokens: int,
+        requested_max_tokens: int,
+    ) -> int:
+        """Calculate the reply budget from the active model context.
+        
+        Write Chapter is long-form generation, so it uses all tokens left after
+        the prompt instead of being capped by the shared Max Tokens setting.
+        Other tasks keep their explicit requested limit.
+        """
+        context_limit = self._model_context_limit()
+        available = max(0, context_limit - prompt_tokens - 256)
+        if task == TaskType.WRITE_CHAPTER:
+            return available
+        return min(requested_max_tokens, available)
+
     def _run_lean_inference(
         self,
         task: TaskType,
@@ -1170,7 +1175,13 @@ class WorkflowWorker(QObject):
             self._run_chat_with_chapter_attachment()
             return
 
-        target_chapter_num = self._detect_chapter_continuation_request(self.extra_input)
+        # Define Idea is a pure narrative-development operation. It must never
+        # be redirected into chapter continuation, because continuation mutates
+        # chapter content, characters, and world.
+        target_chapter_num = None
+        if self.chat_mode != ChatMode.DEFINE_IDEA:
+            target_chapter_num = self._detect_chapter_continuation_request(self.extra_input)
+
         if target_chapter_num is not None:
             self._run_chat_continue_chapter(target_chapter_num)
             return
@@ -1301,6 +1312,8 @@ class WorkflowWorker(QObject):
         result = self._run_inference(TaskType.WRITE_SYNOPSIS, prompt, add_to_chat=True, max_tokens=1024)
         if result:
             self.project.synopsis = result
+            self.project.outline_source_length = 0
+            self.project.outline_source_hash = ""
             self._extract_and_merge_characters(result)
 
             storage.save_project(self.project)
@@ -1326,8 +1339,6 @@ class WorkflowWorker(QObject):
             base_prompt += f"\n\nSynopsis: {self.project.synopsis}"
 
         requested_n = self._extract_requested_chapter_count(self.extra_input)
-
-
 
         _outline_template_key = "task_instructions/generate_outline"
         _requested_count_str = str(requested_n) if requested_n is not None else "(not specified)"
@@ -2165,7 +2176,10 @@ class WorkflowWorker(QObject):
             ctx_tokens = self._model_context_limit()
         except Exception:
             ctx_tokens = 4096
-        reply_tokens = self._content_max_tokens()
+        # Reserve roughly half the model window for the continuation
+        # reply. The inference call below may use any additional space that
+        # remains after the actual prompt is built.
+        reply_tokens = max(1024, min(ctx_tokens - 1024, ctx_tokens // 2))
         prompt_token_budget = max(256, ctx_tokens - reply_tokens - FIXED_OVERHEAD_TOKENS)
         total_chars = prompt_token_budget * CHARS_PER_TOKEN
 
@@ -2927,10 +2941,17 @@ class WorkflowThread(QThread):
         settings=None,
         parent=None,
         include_story_context: bool = True,
+        chat_mode: ChatMode = ChatMode.NORMAL,
     ) -> None:
         super().__init__(parent)
-        self.worker = WorkflowWorker(project, task, extra_input, settings,
-                                     include_story_context=include_story_context)
+        self.worker = WorkflowWorker(
+            project,
+            task,
+            extra_input,
+            settings,
+            include_story_context=include_story_context,
+            chat_mode=chat_mode,
+        )
         self.worker.moveToThread(self)
 
 
@@ -3217,4 +3238,4 @@ if __name__ == "__main__":
     _test_saves_exactly_n_new_entries()
     _test_existing_chapters_not_modified()
     _test_fifth_chapter_never_generated()
-    print("\nAll tests passed.")
+    print("\nAll tests passed.")

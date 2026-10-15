@@ -63,6 +63,11 @@ class TaskType(str, Enum):
     CHAT = "chat"
 
 
+class ChatMode(str, Enum):
+    NORMAL = "normal"
+    DEFINE_IDEA = "define_idea"
+
+
 class WorkflowStatus(str, Enum):
     IDLE = "idle"
     RUNNING = "running"
@@ -445,9 +450,11 @@ class Project:
     workflow_status: WorkflowStatus = WorkflowStatus.IDLE
     current_chapter: int = 0
     recent_message_window: int = 20
+    outline_source_length: int = 0
+    outline_source_hash: str = ""
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "title": self.title, "synopsis": self.synopsis, "outline": self.outline, "world": self.world, "memory": self.memory, "chat_summary": self.chat_summary, "model_assignments": self.model_assignments.to_dict(), "task_temperatures": self.task_temperatures.to_dict(), "author_intent": self.author_intent.to_dict(), "writing_style": self.writing_style.to_dict(), "created_at": self.created_at, "updated_at": self.updated_at, "workflow_status": self.workflow_status.value, "current_chapter": self.current_chapter, "recent_message_window": self.recent_message_window}
+        return {"id": self.id, "title": self.title, "synopsis": self.synopsis, "outline": self.outline, "world": self.world, "memory": self.memory, "chat_summary": self.chat_summary, "model_assignments": self.model_assignments.to_dict(), "task_temperatures": self.task_temperatures.to_dict(), "author_intent": self.author_intent.to_dict(), "writing_style": self.writing_style.to_dict(), "created_at": self.created_at, "updated_at": self.updated_at, "workflow_status": self.workflow_status.value, "current_chapter": self.current_chapter, "recent_message_window": self.recent_message_window, "outline_source_length": self.outline_source_length, "outline_source_hash": self.outline_source_hash}
 
     @classmethod
     def from_dict(cls, d: dict) -> "Project":
@@ -455,7 +462,7 @@ class Project:
         tt = TaskTemperatures.from_dict(d.get("task_temperatures", {}))
         ai = AuthorIntent.from_dict(d.get("author_intent", {}))
         ws = WritingStyle.from_dict(d.get("writing_style", {}))
-        return cls(id=d.get("id", str(uuid.uuid4())), title=d["title"], synopsis=d.get("synopsis", ""), outline=d.get("outline", ""), world=d.get("world", ""), memory=d.get("memory", ""), chat_summary=d.get("chat_summary", ""), model_assignments=ma, task_temperatures=tt, author_intent=ai, writing_style=ws, created_at=d.get("created_at", datetime.now().isoformat()), updated_at=d.get("updated_at", datetime.now().isoformat()), workflow_status=WorkflowStatus(d.get("workflow_status", "idle")), current_chapter=d.get("current_chapter", 0), recent_message_window=d.get("recent_message_window", 20))
+        return cls(id=d.get("id", str(uuid.uuid4())), title=d["title"], synopsis=d.get("synopsis", ""), outline=d.get("outline", ""), world=d.get("world", ""), memory=d.get("memory", ""), chat_summary=d.get("chat_summary", ""), model_assignments=ma, task_temperatures=tt, author_intent=ai, writing_style=ws, created_at=d.get("created_at", datetime.now().isoformat()), updated_at=d.get("updated_at", datetime.now().isoformat()), workflow_status=WorkflowStatus(d.get("workflow_status", "idle")), current_chapter=d.get("current_chapter", 0), recent_message_window=d.get("recent_message_window", 20), outline_source_length=d.get("outline_source_length", 0), outline_source_hash=d.get("outline_source_hash", ""))
 
 
 @dataclass
@@ -477,6 +484,9 @@ class AppSettings:
     moe_n_batch: int = 1024
     moe_n_ubatch: int = 1024
     log_full_prompts: bool = False
+    ollama_base_url: str = "http://localhost:11434"
+    # provider id -> {"api_key": str, "base_url": str, "models": [str]}
+    cloud_providers: dict = field(default_factory=dict)
     image_model_path: str = ""
     image_text_encoder_path: str = ""
     image_vae_path: str = ""
@@ -511,6 +521,8 @@ class AppSettings:
             "moe_n_batch": self.moe_n_batch,
             "moe_n_ubatch": self.moe_n_ubatch,
             "log_full_prompts": self.log_full_prompts,
+            "ollama_base_url": self.ollama_base_url,
+            "cloud_providers": self.cloud_providers if self.cloud_providers is not None else {},
             "image_model_path": self.image_model_path,
             "image_text_encoder_path": self.image_text_encoder_path,
             "image_vae_path": self.image_vae_path,

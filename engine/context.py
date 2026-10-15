@@ -14,7 +14,7 @@ import re
 from typing import Optional
 
 from engine import prompts
-from engine.models import ChatMessage, MessageRole, Project, TaskType
+from engine.models import ChatMessage, ChatMode, MessageRole, Project, TaskType
 
 logger = logging.getLogger("context")
 
@@ -210,12 +210,24 @@ def _section_payloads(
     task: TaskType,
     system_prompt: str,
     user_message: str = "",
+    chat_mode: ChatMode = ChatMode.NORMAL,
 ) -> dict[str, str]:
     synopsis = f"Story Synopsis:\n{project.synopsis.strip()}" if project.synopsis.strip() else ""
     characters = format_characters_block(project.characters)
     world = project.world.strip()
     memory = project.memory.strip()
     chat_summary = project.chat_summary.strip()
+
+    if task == TaskType.CHAT and chat_mode == ChatMode.DEFINE_IDEA:
+        # Idea development is driven by the author's current idea. Reuse the
+        # existing relevance selectors instead of flooding the prompt with the
+        # entire cast/world document.
+        characters = select_relevant_characters(
+            project.characters, user_message, max_characters=12, max_chars=5000
+        )
+        world = select_relevant_world(
+            project.world, user_message, max_sections=4, max_chars=6000
+        )
 
     creative_direction = ""
     intent = project.author_intent
@@ -239,9 +251,16 @@ def _section_payloads(
     elif task == TaskType.REVIEW_CHAPTER:
         parts = [p for p in (intent.to_prompt_fragment(), style.to_prompt_fragment()) if p]
         creative_direction = "\n".join(parts)
+    elif task == TaskType.CHAT and chat_mode == ChatMode.DEFINE_IDEA:
+        parts = [p for p in (intent.to_prompt_fragment(), style.to_prompt_fragment()) if p]
+        creative_direction = "\n".join(parts)
 
     outline = ""
-    if task != TaskType.GENERATE_OUTLINE and project.outline.strip():
+    if (
+        task != TaskType.GENERATE_OUTLINE
+        and not (task == TaskType.CHAT and chat_mode == ChatMode.DEFINE_IDEA)
+        and project.outline.strip()
+    ):
         if task in (TaskType.WRITE_CHAPTER, TaskType.REWRITE_CHAPTER, TaskType.CHANGE_CHAPTER):
             chapter_num = project.current_chapter or max((c.number for c in project.chapters), default=1)
             specific = extract_outline_section(project.outline, chapter_num)
@@ -277,6 +296,7 @@ def _compact_sections(
     max_context_tokens: int,
     task: TaskType,
     project: Project,
+    chat_mode: ChatMode = ChatMode.NORMAL,
 ) -> dict[str, str]:
     # These are caps for story context only. The full task/system prompt is
     # kept intact and is not subjected to these budgets.
@@ -300,6 +320,16 @@ def _compact_sections(
             "Chat Summary": 0,
             "Creative Direction": max(80, min(300, max_context_tokens // 14)),
         }
+    elif task == TaskType.CHAT and chat_mode == ChatMode.DEFINE_IDEA:
+        budgets = {
+            "Synopsis": max(180, min(360, max_context_tokens // 10)),
+            "Characters": max(300, min(700, max_context_tokens // 6)),
+            "Outline": 0,
+            "World": max(180, min(450, max_context_tokens // 10)),
+            "Memory": max(180, min(450, max_context_tokens // 10)),
+            "Chat Summary": max(120, min(300, max_context_tokens // 16)),
+            "Creative Direction": max(240, min(600, max_context_tokens // 7)),
+        }
     else:
         budgets = {
             "Synopsis": max(120, max_context_tokens // 20),
@@ -311,7 +341,9 @@ def _compact_sections(
             "Creative Direction": max(60, max_context_tokens // 20),
         }
 
-    if len(project.characters) > 12:
+    if len(project.characters) > 12 and not (
+        task == TaskType.CHAT and chat_mode == ChatMode.DEFINE_IDEA
+    ):
         sections["Characters"] = format_characters_block(project.characters[:12])
 
     for name, text in list(sections.items()):
@@ -333,15 +365,19 @@ def _build_story_context_text(
     user_message: str,
     max_context_tokens: int,
     include_story_context: bool,
+    chat_mode: ChatMode = ChatMode.NORMAL,
 ) -> str:
     core_system, custom_instructions = _split_custom_instructions(system_prompt)
     parts = [core_system]
     if include_story_context:
         sections = _compact_sections(
-            _section_payloads(project, task, system_prompt, user_message),
+            _section_payloads(
+                project, task, system_prompt, user_message, chat_mode=chat_mode
+            ),
             max_context_tokens=max_context_tokens,
             task=task,
             project=project,
+            chat_mode=chat_mode,
         )
         if task == TaskType.GENERATE_OUTLINE:
             if sections["Characters"]:
@@ -395,6 +431,7 @@ def build_context_for_model(
     task: TaskType = TaskType.CHAT,
     reply_reserved: Optional[int] = None,
     include_story_context: bool = True,
+    chat_mode: ChatMode = ChatMode.NORMAL,
 ) -> list[dict]:
     """Build [system, recent chat, user] while preserving the complete task prompt."""
     system_content = _build_story_context_text(
@@ -404,6 +441,7 @@ def build_context_for_model(
         user_message,
         max_context_tokens,
         include_story_context,
+        chat_mode=chat_mode,
     )
 
     # Chat can explicitly run without any project/history context.
@@ -672,6 +710,7 @@ def build_system_prompt(
     language: str = "",
     allow_nsfw: bool = False,
     include_story_context: bool = True,
+    chat_mode: ChatMode = ChatMode.NORMAL,
 ) -> str:
     """Build the complete task system prompt. It must not be silently truncated."""
     if task == TaskType.CHAT and not include_story_context:
@@ -706,7 +745,10 @@ def build_system_prompt(
             "summarize scenes that the story calls for. Write them fully and directly. "
             "No content filtering is applied to this project."
         )
-    instruction = _estimate_task_instruction(task)
+    if task == TaskType.CHAT and chat_mode == ChatMode.DEFINE_IDEA:
+        instruction = prompts.load_raw("chat/define_idea_system")
+    else:
+        instruction = _estimate_task_instruction(task)
     prompt = base.strip()
     if instruction:
         prompt += f"\n\n{instruction}"

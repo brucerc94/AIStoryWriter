@@ -1,7 +1,8 @@
 """
-LLM inference engine.
-Wraps llama-cpp-python. Manages model loading and unloading.
-One model loaded at a time to conserve RAM.
+LLM inference engine for local GGUF models (llama-cpp-python).
+Generation for every backend goes through engine.llm_router.get_engine(),
+which picks the backend from the model reference (see engine.model_refs).
+Only one model is loaded at a time to conserve RAM.
 
 Also auto-detects the NVIDIA GPU (via nvidia-smi) and, for cards without
 real Tensor Cores (e.g. the GTX 16-series, Compute Capability 7.5 but no
@@ -50,8 +51,6 @@ import subprocess
 import threading
 from pathlib import Path
 from typing import Callable, Iterator, Optional
-
-from sympy import true
 
 from engine import gguf_meta, llama_features
 
@@ -322,7 +321,7 @@ class LLMEngine:
                 n_ctx=n_ctx,
                 n_gpu_layers=n_gpu_layers,
                 n_threads=n_threads,
-                verbose=true,
+                verbose=False,
                 **extra_kwargs,
             )
             self._current_path = model_path
@@ -543,5 +542,6 @@ class LLMEngine:
 _engine = LLMEngine()
 
 
-def get_engine() -> LLMEngine:
+def get_local_engine() -> LLMEngine:
+    """The llama-cpp-python backend. Use engine.llm_router.get_engine() for generation."""
     return _engine
