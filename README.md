@@ -35,7 +35,7 @@
 
 AI Story Studio is a desktop writing application for building novels with AI. Run models locally from GGUF files with `llama-cpp-python`, connect to an **Ollama** server, or use **hosted cloud models** through supported API providers. Choose the backend per model assignment instead of being locked to a single runtime.
 
-The application combines story drafting, outline planning, character and world management, chapter generation and revision, author preferences, contextual chat, memory, local image generation, statistics, search, and export in one workspace.
+The application combines story drafting, outline planning, character and world management, chapter generation and revision, author preferences, contextual chat, memory, statistics, search, and export in one workspace.
 
 The writing pipeline is deliberately separated into stages so that each model call has a clear job and receives only the context it needs.
 
@@ -237,7 +237,6 @@ Characters can contain:
 - backstory
 - traits
 - relationships
-- generated portraits
 
 Automatic character extraction attempts to merge candidates with existing records when they represent the same character.
 
@@ -399,13 +398,12 @@ Chat history is not automatically carried into Write Chapter or Change Chapter.
 | 📚 **Projects** | Create, open, search, rename, and delete projects. |
 | ✍️ **Synopsis / Draft** | Write or paste story material, validate consistency, repair contradictions, develop the draft with the Author Profile, then build Characters and World from the finalized draft. Text already used by the outline is locked (gray); new text is purple and can be developed on its own with **Develop New Text**. |
 | 🧭 **Outline** | Split the story into chronological chapter source blocks, generate rich chapter treatments, add chapters from new draft text (Add Chapters mode), and extend an existing outline with a cover request. Requires the `## Chapter N: Title` format in English. |
-| 👤 **Characters** | Manage character details, traits, backstories, relationships, and portraits. |
+| 👤 **Characters** | Manage character details, traits, backstories, and relationships. |
 | 🌍 **World** | Manage reusable setting and world information. |
 | 📖 **Chapters** | Generate, continue, review, change, edit, save, and delete chapters. Generate the remaining book sequentially. |
 | 🧠 **Memory** | Maintain separate reusable story-state information. |
 | 🎨 **Author** | Define creative intent and writing-style preferences. |
 | 💬 **Chat** | General writing assistance, optional project context, chapter attachment, and Define Idea mode for developing rough narrative ideas. |
-| 🖼️ **Images** | Generate book covers, scenes, locations, objects/items, and character portraits locally. |
 | 📊 **Stats** | Inspect word counts, chapter counts, reading-time information, review state, and progress. |
 | 🔎 **Search** | Search project content with normal, case-sensitive, or regex-based matching. |
 | ⚙️ **Models & Settings** | Configure local GGUF inference, an Ollama server, cloud API providers (including custom OpenAI-compatible endpoints), model assignments, context size, generation parameters, and response language. |
@@ -600,20 +598,6 @@ Connect to an Ollama server (local by default, or a different server URL). The a
 Use hosted models with your own provider credentials. Built-in provider presets are **OpenAI**, **Anthropic (Claude)**, **Google Gemini**, and **OpenRouter**. The **Custom OpenAI-compatible server** preset supports compatible APIs, gateways, proxies, or self-hosted endpoints that implement the OpenAI Chat Completions request format. Anthropic uses its Messages API format.
 
 Each provider can be configured with an API key (where required), a Base URL, and a list of model IDs. Use **Fetch model list** to query the provider, then assign a chosen model in **Text Models**. Cloud models run remotely, so prompts and story context included in the request are sent to that provider. Review that provider's data-handling terms before use.
----
-
-## Images
-
-The Images area provides separate local image-generation workflows for:
-
-- character portraits
-- book covers
-- scene illustrations
-- locations
-- object/item images
-
-Image generation is intentionally separate from the text-generation pipeline.
-
 ---
 
 ## TODO
