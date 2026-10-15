@@ -36,10 +36,9 @@ def _patch_tab(tab) -> None:
             button.clicked.disconnect()
         except (TypeError, RuntimeError):
             pass
-        button.setText("✨ Generate Draft")
 
         def emit_current_draft() -> None:
-            text = editor.get_text().strip()
+            text = editor.get_text()  # no strip: the lock is an exact-text hash
             tab.task_requested.emit(__import__("engine.models", fromlist=["TaskType"]).TaskType.WRITE_SYNOPSIS, text)
 
         button.clicked.connect(emit_current_draft)
@@ -71,6 +70,7 @@ def _patch_tab(tab) -> None:
             if index >= 0:
                 tabs.setTabText(index, "Synopsis / Draft")
 
+        tab._refresh_lock_view()
         tab._synopsis_draft_ui_patched = True
         logger.info("[synopsis_draft] Synopsis UI patched: current editor text is submitted directly.")
     except Exception:

@@ -1,0 +1,15 @@
+NOVEL TITLE:
+{{title}}
+
+{{language_note}}AUTHOR PROFILE:
+{{author_profile}}
+
+EXISTING STORY (already developed and already used by the chapter outline; context only, do NOT repeat, rewrite or summarize it):
+{{existing_story}}
+
+NEW MATERIAL (the author just added this; develop ONLY this):
+{{new_material}}
+
+Develop only the NEW MATERIAL so it continues the EXISTING STORY. Keep the same style, point of view, format and character names, and respect the chronology and events already established. Do not add direct dialogue. Do not create chapter headings, lists or planning sections.
+
+Return ONLY the developed new material as coherent paragraphs. Do not include any part of the existing story.

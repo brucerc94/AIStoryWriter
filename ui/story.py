@@ -67,6 +67,21 @@ from ui.stats import StatsTab
 from ui.search import SearchTab
 
 
+LOCKED_TEXT_BG = "#26262d"
+LOCKED_TEXT_FG = "#8b8899"
+NEW_TEXT_BG = "#2e2448"
+
+
+def _qt_len(text: str) -> int:
+    """Length in UTF-16 code units, which is what QTextDocument positions use."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def _suggest_new_chapters(new_text: str) -> int:
+    words = len((new_text or "").split())
+    return max(1, min(50, round(words / 450)))
+
+
 def outline_chapter_numbers(outline_text: str) -> list[int]:
 
     numbers = set()
@@ -254,6 +269,60 @@ class SynopsisTab(QWidget):
 
         self._source_lock_label.hide()
         self._unlock_source_btn.hide()
+        self._refresh_lock_view()
+
+    def _refresh_lock_view(self) -> None:
+        """Color the locked text (used by the outline) and the new text, and
+        show the matching button label. Only display; never changes the text."""
+        text_edit = self.editor.editor
+        full = self.editor.get_text()
+        # Keep the in-memory project in step with what the author sees, so
+        # Generate Outline / Generate Draft always use the latest text even if
+        # the author did not press Save. Disk is still written by Save/normal flow.
+        if self._project is not None and not self._loading:
+            self._project.synopsis = full
+        prefix = self._protected_synopsis_prefix
+        selections = []
+        locked = bool(prefix)
+
+        if locked:
+            locked_len = _qt_len(prefix)
+            selections.append(self._range_selection(text_edit, 0, locked_len, LOCKED_TEXT_BG, LOCKED_TEXT_FG))
+            total_len = _qt_len(full)
+            if total_len > locked_len:
+                selections.append(self._range_selection(text_edit, locked_len, total_len, NEW_TEXT_BG, None))
+            self._source_lock_label.setText(
+                "🔒 Gris = ya usado en el outline (no se toca).    "
+                "🟣 Morado = texto nuevo, todavía NO está en el outline. "
+                "Al pulsar ✨ Desarrollar texto nuevo se pule solo lo morado; "
+                "luego en Outline pulsa Generate Outline para agregar esos capítulos."
+            )
+        text_edit.setExtraSelections(selections)
+
+        header_btn = getattr(self._gen_header, "action_btn", None)
+        if header_btn is not None:
+            header_btn.setText("✨ Desarrollar texto nuevo" if locked else "✨ Generate Draft")
+            header_btn.setToolTip(
+                "Solo desarrolla el texto morado. El texto gris no se modifica."
+                if locked else "Desarrolla todo el draft."
+            )
+
+    @staticmethod
+    def _range_selection(text_edit, start: int, end: int, background: str, foreground: Optional[str]):
+        from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
+        from PySide6.QtWidgets import QTextEdit
+
+        cursor = QTextCursor(text_edit.document())
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.KeepAnchor)
+        fmt = QTextCharFormat()
+        fmt.setBackground(QColor(background))
+        if foreground:
+            fmt.setForeground(QColor(foreground))
+        selection = QTextEdit.ExtraSelection()
+        selection.cursor = cursor
+        selection.format = fmt
+        return selection
 
     def _on_synopsis_editor_changed(self) -> None:
         if self._loading:
@@ -263,10 +332,12 @@ class SynopsisTab(QWidget):
         protected = self._protected_synopsis_prefix
         if not protected:
             self._last_valid_synopsis = current
+            self._refresh_lock_view()
             return
 
         if current.startswith(protected):
             self._last_valid_synopsis = current
+            self._refresh_lock_view()
             return
 
         self._loading = True
@@ -275,6 +346,7 @@ class SynopsisTab(QWidget):
         cursor.movePosition(QTextCursor.End)
         self.editor.editor.setTextCursor(cursor)
         self._loading = False
+        self._refresh_lock_view()
 
         if not self._protection_notice_shown:
             self._protection_notice_shown = True
@@ -342,6 +414,8 @@ class SynopsisTab(QWidget):
         else:
             self._source_lock_label.hide()
             self._unlock_source_btn.hide()
+
+        self._refresh_lock_view()
 
         cursor = self.editor.editor.textCursor()
         cursor.movePosition(QTextCursor.End)
@@ -836,6 +910,48 @@ class OutlineTab(QWidget):
         layout.addWidget(self.editor, 1)
 
     def _on_generate_clicked(self) -> None:
+        proj = self._project
+        if proj is not None and (proj.outline or "").strip() and proj.outline_source_hash:
+            length = int(proj.outline_source_length or 0)
+            prefix = proj.synopsis[:length]
+            prefix_ok = (
+                length > 0
+                and len(prefix) == length
+                and hashlib.sha256(prefix.encode("utf-8")).hexdigest() == proj.outline_source_hash
+            )
+            if prefix_ok:
+                new_text = proj.synopsis[length:].strip()
+                if not new_text:
+                    QMessageBox.information(
+                        self,
+                        "No new Synopsis text",
+                        "The outline already uses all of the Synopsis text.\n\n"
+                        "To add chapters, first write new text below the locked part in "
+                        "Synopsis / Draft, save it, then come back here.",
+                    )
+                    return
+                existing_max = max(outline_chapter_numbers(proj.outline), default=0)
+                suggested = _suggest_new_chapters(new_text)
+                count, ok = QInputDialog.getInt(
+                    self,
+                    "Add chapters",
+                    f"The Synopsis has new text that is not in the outline yet.\n"
+                    f"How many NEW chapters do you want to add?\n\n"
+                    f"Chapters 1–{existing_max} will not be changed.",
+                    suggested,
+                    1,
+                    50,
+                )
+                if not ok:
+                    return
+                total = existing_max + count
+                self.task_requested.emit(
+                    TaskType.GENERATE_OUTLINE,
+                    f"The outline must contain EXACTLY {total} chapters, "
+                    f"numbered sequentially from 1 to {total}.",
+                )
+                return
+
         existing = outline_chapter_numbers(self.editor.get_text())
         default_n = (max(existing) + 1) if existing else 12
 
