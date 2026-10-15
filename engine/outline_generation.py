@@ -555,6 +555,46 @@ def _parse_extend_plan(
 
     return [by_number[number] for number in expected]
 
+_NEW_MATERIAL_MARKER = "NEW SYNOPSIS/DRAFT MATERIAL:"
+
+
+def _extract_new_material(request: str) -> str:
+    """The text the author added to the Synopsis/Draft (empty for a plain cover request)."""
+    if _NEW_MATERIAL_MARKER in request:
+        return request.split(_NEW_MATERIAL_MARKER, 1)[1].strip()
+    return ""
+
+
+def _write_extend_blocks(worker, current_outline: str, blocks: list[str], next_chapter: int, final_chapter: int, requested_count: int) -> None:
+    """Write each new chapter from its real source block, exactly like the first
+    Generate Outline does (same chapter prompt, same Author Profile/style)."""
+    entries: list[str] = []
+    previous_entry = _last_outline_entry(current_outline)
+    for index, block in enumerate(blocks):
+        if worker._cancelled:
+            return
+        chapter_num = next_chapter + index
+        worker.step_started.emit(f"Writing outline for Chapter {chapter_num}/{final_chapter}...")
+        entry = _write_chapter_outline(worker, chapter_num, block, previous_entry)
+        if not entry:
+            worker.error_occurred.emit(
+                f"Could not complete the outline for Chapter {chapter_num}. Nothing was appended — try again."
+            )
+            return
+        entries.append(entry)
+        previous_entry = entry
+
+    new_outline = "\n\n".join(entries).strip()
+    worker.project.outline = (current_outline.rstrip() + "\n\n" + new_outline).strip()
+    # Characters and World were already built from this text when the Draft was
+    # developed, so they are not extracted again here.
+    storage.save_project(worker.project)
+    worker.step_finished.emit(
+        f"Outline Extended (Chapters {next_chapter}-{final_chapter})", new_outline,
+    )
+    logger.info("[extend_outline] Appended %d chapter(s) from new Synopsis text.", len(entries))
+
+
 def _run_extend_outline(worker) -> None:
     parsed = _parse_extend_payload(worker)
     if parsed is None:
@@ -590,6 +630,23 @@ def _run_extend_outline(worker) -> None:
     style_frag = worker.project.writing_style.to_prompt_fragment() or "(none)"
     language = worker._response_language()
     language_note = f" Write in {language}." if language else ""
+
+    new_material = _extract_new_material(user_request)
+    if new_material and len(new_material) >= _MIN_SOURCE_CHARS:
+        worker.step_started.emit(f"Splitting new text into {requested_count} chapter(s)...")
+        blocks = _split_story(
+            worker,
+            requested_count,
+            _story_source(worker, requested_count, source_text=new_material),
+        )
+        if len(blocks) != requested_count:
+            worker.error_occurred.emit(
+                f"Could not split the new Synopsis text into {requested_count} chapter(s). "
+                "Nothing was appended — try again or change the number of chapters."
+            )
+            return
+        _write_extend_blocks(worker, current_outline, blocks, next_chapter, final_chapter, requested_count)
+        return
 
     # The extension request may be only one sentence. Do NOT reject it just
     # because it is under the semantic-splitter's generic 200-character

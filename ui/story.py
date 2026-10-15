@@ -292,19 +292,19 @@ class SynopsisTab(QWidget):
             if total_len > locked_len:
                 selections.append(self._range_selection(text_edit, locked_len, total_len, NEW_TEXT_BG, None))
             self._source_lock_label.setText(
-                "🔒 Gris = ya usado en el outline (no se toca).    "
-                "🟣 Morado = texto nuevo, todavía NO está en el outline. "
-                "Al pulsar ✨ Desarrollar texto nuevo se pule solo lo morado; "
-                "luego en Outline pulsa Generate Outline para agregar esos capítulos."
+                "🔒 Gray = already in the outline (locked).    "
+                "🟣 Purple = new text, NOT in the outline yet. "
+                "Click ✨ Develop New Text to refine only the purple part; "
+                "then click Generate Outline to add those chapters."
             )
         text_edit.setExtraSelections(selections)
 
         header_btn = getattr(self._gen_header, "action_btn", None)
         if header_btn is not None:
-            header_btn.setText("✨ Desarrollar texto nuevo" if locked else "✨ Generate Draft")
+            header_btn.setText("✨ Develop New Text" if locked else "✨ Generate Draft")
             header_btn.setToolTip(
-                "Solo desarrolla el texto morado. El texto gris no se modifica."
-                if locked else "Desarrolla todo el draft."
+                "Only develops the purple (new) text. The gray text is not changed."
+                if locked else "Develops the whole draft."
             )
 
     @staticmethod
@@ -548,19 +548,21 @@ _UI_STRINGS: dict[str, dict[str, str]] = {
 }
 
 
-def _ui(key: str, lang: str) -> str:
+# The interface is always shown in English. The story's writing language is a
+# separate setting and does not change the UI labels.
+UI_LANGUAGE = "en"
 
-    lang_lc = lang.lower()[:2] if lang else "en"
+
+def _ui(key: str, lang: str) -> str:
     row = _UI_STRINGS.get(key, {})
-    return row.get(lang_lc) or row.get("en", key)
+    return row.get(UI_LANGUAGE) or row.get("en", key)
 
 
 def _make_combo(table: list[tuple[str, dict[str, str]]], lang: str, parent=None) -> QComboBox:
 
     cb = QComboBox(parent)
-    lang_lc = lang.lower()[:2] if lang else "en"
     for key, labels in table:
-        label = labels.get(lang_lc) or labels.get("en", key) or "— auto —"
+        label = labels.get(UI_LANGUAGE) or labels.get("en", key) or "— auto —"
         cb.addItem(label, key)
     return cb
 
