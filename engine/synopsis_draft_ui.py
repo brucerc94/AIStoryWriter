@@ -38,8 +38,8 @@ def _patch_tab(tab) -> None:
             pass
 
         def emit_current_draft() -> None:
-            text = editor.get_text()  # no strip: the lock is an exact-text hash
-            tab.task_requested.emit(__import__("engine.models", fromlist=["TaskType"]).TaskType.WRITE_SYNOPSIS, text)
+            # Saves the editor text to disk first, then requests the draft.
+            tab.request_write_draft()
 
         button.clicked.connect(emit_current_draft)
 

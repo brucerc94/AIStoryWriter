@@ -116,6 +116,7 @@ class MarkdownEditor(QWidget):
 
     content_saved = Signal(str)
     generate_requested = Signal()
+    page_changed = Signal()
 
     def __init__(
         self,
@@ -188,11 +189,16 @@ class MarkdownEditor(QWidget):
         if self._stack is not None:
             self._stack.setCurrentIndex(1)
             self.editor.setFocus()
+            self.page_changed.emit()
+
+    def is_editor_page_visible(self) -> bool:
+        return self._stack is None or self._stack.currentIndex() == 1
 
     def set_text(self, text: str) -> None:
         self.editor.setPlainText(text)
         if self._stack is not None:
             self._stack.setCurrentIndex(1 if text.strip() else 0)
+            self.page_changed.emit()
 
     def get_text(self) -> str:
         return self.editor.toPlainText()
@@ -220,9 +226,7 @@ class SynopsisTab(QWidget):
         self._gen_header = SectionHeader("Draft/Synopsis", "✨ Write Draft")
         header = self._gen_header
         if header.action_btn:
-            header.action_btn.clicked.connect(
-                lambda: self.task_requested.emit(TaskType.WRITE_SYNOPSIS, "")
-            )
+            header.action_btn.clicked.connect(self.request_write_draft)
         layout.addWidget(header)
 
         source_lock_row = QHBoxLayout()
@@ -260,16 +264,30 @@ class SynopsisTab(QWidget):
             ),
             generate_label="",
         )
-        self.editor.generate_requested.connect(
-            lambda: self.task_requested.emit(TaskType.WRITE_SYNOPSIS, "")
-        )
+        self.editor.generate_requested.connect(self.request_write_draft)
         self.editor.content_saved.connect(self.content_changed.emit)
+        self.editor.page_changed.connect(self._update_write_draft_visibility)
         self.editor.editor.textChanged.connect(self._on_synopsis_editor_changed)
         layout.addWidget(self.editor, 1)
 
         self._source_lock_label.hide()
         self._unlock_source_btn.hide()
         self._refresh_lock_view()
+
+    def request_write_draft(self) -> None:
+        """Save the current draft to disk first, then ask for the AI draft."""
+        text = self.editor.get_text()
+        # content_changed is wired to the panel, which stores the project.
+        # Saving first means the text is not lost if the author never pressed Save.
+        self.content_changed.emit(text)
+        self.task_requested.emit(TaskType.WRITE_SYNOPSIS, text)
+
+    def _update_write_draft_visibility(self) -> None:
+        """Write Draft is hidden on the empty-state card and appears once the
+        author chooses to write (or the project already has text)."""
+        header_btn = getattr(self._gen_header, "action_btn", None)
+        if header_btn is not None:
+            header_btn.setVisible(self.editor.is_editor_page_visible())
 
     def _refresh_lock_view(self) -> None:
         """Color the locked text (used by the outline) and the new text, and
@@ -306,6 +324,7 @@ class SynopsisTab(QWidget):
                 "Only develops the purple (new) text. The gray text is not changed."
                 if locked else "Develops the whole draft."
             )
+        self._update_write_draft_visibility()
 
     @staticmethod
     def _range_selection(text_edit, start: int, end: int, background: str, foreground: Optional[str]):
