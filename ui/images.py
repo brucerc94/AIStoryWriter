@@ -15,7 +15,7 @@ Character Portraits are handled inside the Characters tab (ui/story.py).
 This panel covers Book Cover, Scene Illustration, Location, and Object/Item.
 All generated images are saved encrypted inside the active project folder.
 
-The story workflow (Synopsis, Outline, Chapters, etc.) is NOT modified
+The story workflow (Draft, Outline, Chapters, etc.) is NOT modified
 by this module in any way.
 """
 

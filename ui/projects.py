@@ -383,7 +383,7 @@ class NewProjectDialog(QDialog):
         self.title_input.setPlaceholderText("e.g. The Midnight Chronicle")
         layout.addWidget(self.title_input)
 
-        layout.addWidget(QLabel("Initial Synopsis (optional)"))
+        layout.addWidget(QLabel("Initial Draft (optional)"))
         self.synopsis_input = QTextEdit_small()
         self.synopsis_input.setPlaceholderText(
             "Brief description of your story idea…"

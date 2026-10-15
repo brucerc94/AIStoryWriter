@@ -26,7 +26,7 @@ class SizeAdjustingTabWidget(QTabWidget):
     ones — so the window's minimum size balloons to fit whichever tab has
     the most content (e.g. Chapters, once a project with a long chapter
     is loaded) and can never shrink back down even while viewing a small
-    tab like Synopsis. Overriding both hints to only consider the current
+    tab like Draft. Overriding both hints to only consider the current
     page fixes this: the window resizes/shrinks based on what's actually
     on screen, exactly like a normal (non-tabbed) widget would.
     """

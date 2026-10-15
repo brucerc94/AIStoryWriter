@@ -477,7 +477,7 @@ class AppSettings:
     auto_save: bool = True
     custom_system_prompt: str = ""
     temperature: float = 0.7
-    response_language: str = "Español"
+    response_language: str = "English"
     enable_thinking: bool = False
     content_max_tokens: int = 4000
     allow_nsfw: bool = False

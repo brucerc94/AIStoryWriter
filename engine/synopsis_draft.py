@@ -1,6 +1,6 @@
-"""Synopsis / Draft normalization pipeline.
+"""Draft normalization pipeline.
 
-The Synopsis tab is the author's raw story draft. Before characters and world
+The Draft tab is the author's raw story draft. Before characters and world
 are extracted, the draft is checked for internal consistency, repaired when
 necessary, then rewritten into a richer planning-oriented draft using the
 full Author Profile. Each model call uses a fresh inference context.
@@ -142,7 +142,7 @@ def _generate_draft(worker, source: str) -> str:
         title=worker.project.title,
         language_note=language_note,
     )
-    worker.step_started.emit("Developing Synopsis / Draft with Author Profile...")
+    worker.step_started.emit("Developing Draft with Author Profile...")
     logger.info("[synopsis_draft] Draft generation in a fresh context (response language=%r).", language)
     return worker._run_lean_inference(
         TaskType.WRITE_SYNOPSIS,
@@ -173,7 +173,7 @@ def _lock_state(worker, source: str) -> tuple[str, str, str]:
 
 def _run_extend_synopsis_draft(worker, locked_prefix: str, new_text: str) -> None:
     """Develop only the new material; the locked prefix is kept byte-for-byte."""
-    worker.step_started.emit("Checking new Synopsis / Draft text...")
+    worker.step_started.emit("Checking new Draft text...")
     combined = f"{locked_prefix.rstrip()}\n\n{new_text.strip()}"
     result = _check_consistency(worker, combined)
     if result["valid"] and not result["consistent"] and result["issues"]:
@@ -195,7 +195,7 @@ def _run_extend_synopsis_draft(worker, locked_prefix: str, new_text: str) -> Non
         existing_story=context or "(none)",
         new_material=new_text.strip(),
     )
-    worker.step_started.emit("Developing new Synopsis / Draft text...")
+    worker.step_started.emit("Developing new Draft text...")
     developed = worker._run_lean_inference(
         TaskType.WRITE_SYNOPSIS,
         system,
@@ -217,7 +217,7 @@ def _run_extend_synopsis_draft(worker, locked_prefix: str, new_text: str) -> Non
     worker._update_world_incremental(developed, source_type="synopsis_draft")
 
     storage.save_project(worker.project)
-    worker.step_finished.emit("Synopsis / Draft", developed)
+    worker.step_finished.emit("Draft", developed)
     logger.info("[synopsis_draft] Developed only the new text; locked prefix kept.")
 
 
@@ -229,7 +229,7 @@ def run_write_synopsis(worker) -> None:
         logger.info("[synopsis_draft] Using story text submitted by the UI task request.")
     if not source:
         worker.error_occurred.emit(
-            "Synopsis / Draft is empty. Write your story first, then generate the draft."
+            "Draft is empty. Write your story first, then generate the draft."
         )
         return
 
@@ -240,30 +240,30 @@ def run_write_synopsis(worker) -> None:
     state, locked_prefix, new_text = _lock_state(worker, raw_source)
     if state == "broken":
         worker.error_occurred.emit(
-            "The locked Synopsis text no longer matches the current outline. "
-            "Nothing was changed. Use 'Unlock Synopsis to Regenerate' to edit it."
+            "The locked Draft text no longer matches the current outline. "
+            "Nothing was changed. Use 'Unlock Draft to Regenerate' to edit it."
         )
         return
     if state == "ok":
         if not new_text.strip():
             worker.error_occurred.emit(
-                "There is no new Synopsis text to develop. Write below the locked text first."
+                "There is no new Draft text to develop. Write below the locked text first."
             )
             return
         _run_extend_synopsis_draft(worker, locked_prefix, new_text)
         return
 
-    worker.step_started.emit("Checking Synopsis / Draft consistency...")
+    worker.step_started.emit("Checking Draft consistency...")
     checked_source = source
     result = _check_consistency(worker, checked_source)
 
     if result["valid"] and not result["consistent"] and result["issues"]:
         checked_source = _repair_draft(worker, checked_source, result["issues"])
-        worker.step_started.emit("Rechecking repaired Synopsis / Draft consistency...")
+        worker.step_started.emit("Rechecking repaired Draft consistency...")
         result = _check_consistency(worker, checked_source)
         if result["valid"] and not result["consistent"] and result["issues"]:
             worker.error_occurred.emit(
-                "Synopsis / Draft still contains consistency problems after repair. "
+                "Draft still contains consistency problems after repair. "
                 "No draft or canon was changed."
             )
             return
@@ -271,7 +271,7 @@ def run_write_synopsis(worker) -> None:
     final_draft = _generate_draft(worker, checked_source)
     if len(final_draft) < _MIN_DRAFT_CHARS:
         worker.error_occurred.emit(
-            "Could not generate a sufficiently developed Synopsis / Draft. Nothing was saved."
+            "Could not generate a sufficiently developed Draft. Nothing was saved."
         )
         return
 
@@ -284,7 +284,7 @@ def run_write_synopsis(worker) -> None:
     worker._update_world_incremental(final_draft, source_type="synopsis_draft")
 
     storage.save_project(worker.project)
-    worker.step_finished.emit("Synopsis / Draft", final_draft)
+    worker.step_finished.emit("Draft", final_draft)
     logger.info(
         "[synopsis_draft] Final draft saved; Characters and World updated from final draft."
     )
@@ -298,7 +298,7 @@ def _schedule_ui_patch() -> None:
         for delay_ms in (0, 250, 1000):
             QTimer.singleShot(delay_ms, patch_loaded_story_ui)
     except Exception:
-        logger.exception("[synopsis_draft] Could not schedule Synopsis UI patch.")
+        logger.exception("[synopsis_draft] Could not schedule Draft UI patch.")
 
 
 def install(module) -> None:
@@ -306,9 +306,9 @@ def install(module) -> None:
         return
     worker_cls = getattr(module, "WorkflowWorker", None)
     if worker_cls is None:
-        raise RuntimeError("Synopsis draft hook could not find WorkflowWorker.")
+        raise RuntimeError("Draft hook could not find WorkflowWorker.")
     worker_cls._run_write_synopsis = run_write_synopsis
     worker_cls._synopsis_draft_installed = True
     module._synopsis_draft_installed = True
     _schedule_ui_patch()
-    logger.info("[synopsis_draft] Synopsis / Draft pipeline installed.")
+    logger.info("[synopsis_draft] Draft pipeline installed.")

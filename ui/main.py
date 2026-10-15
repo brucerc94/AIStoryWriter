@@ -54,6 +54,7 @@ from ui.styles import (
     COLOR_TEXT,
     COLOR_TEXT_DIM,
     COLOR_TEXT_MUTED,
+    FONT_SERIF,
 )
 from ui.widgets import EmptyStateCard, SizeAdjustingTabWidget
 
@@ -61,27 +62,85 @@ logger = logging.getLogger("ui.main")
 
 
 class EmptyStateWidget(QWidget):
-    """Shown in the right pane when no project is open yet."""
+    """Welcome screen shown in the right pane when no project is open yet.
+
+    Kept deliberately simple: one title, three short steps, one button.
+    """
 
     new_project_requested = Signal()
 
+    _STEPS = (
+        ("1", "Draft", "Write your story idea or first pages."),
+        ("2", "Outline", "The AI splits your story into chapters."),
+        ("3", "Chapters", "Generate, review and refine each chapter."),
+    )
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignCenter)
+        outer = QVBoxLayout(self)
+        outer.setAlignment(Qt.AlignCenter)
 
-        card = EmptyStateCard(
-            icon="✒️",
-            title="Welcome to AI Story Studio",
-            description=(
-                "Select a project on the left to keep working on it, or start a "
-                "new one — you'll write a synopsis, then let the AI help build "
-                "an outline, characters, world, and chapters from there."
-            ),
-            primary_label="+ New Project",
+        panel = QWidget()
+        panel.setMaximumWidth(460)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        title = QLabel("AI Story Studio")
+        title.setStyleSheet(
+            f"font-family: {FONT_SERIF}; font-size: 28px; font-weight: 700; color: {COLOR_TEXT};"
         )
-        card.primary_clicked.connect(self.new_project_requested)
-        layout.addWidget(card)
+        layout.addWidget(title)
+
+        subtitle = QLabel("From idea to finished novel, step by step.")
+        subtitle.setWordWrap(True)
+        subtitle.setStyleSheet(f"font-size: 14px; color: {COLOR_TEXT_DIM}; margin-top: 4px;")
+        layout.addWidget(subtitle)
+        layout.addSpacing(28)
+
+        for number, name, description in self._STEPS:
+            layout.addLayout(self._step_row(number, name, description))
+            layout.addSpacing(16)
+
+        layout.addSpacing(8)
+        cta = QPushButton("+ New Project")
+        cta.setObjectName("emptyStateCta")
+        cta.setCursor(Qt.PointingHandCursor)
+        cta.clicked.connect(self.new_project_requested)
+        layout.addWidget(cta, 0, Qt.AlignLeft)
+
+        layout.addSpacing(12)
+        hint = QLabel("Or pick an existing project from the list on the left.")
+        hint.setStyleSheet(f"font-size: 12px; color: {COLOR_TEXT_MUTED};")
+        layout.addWidget(hint)
+
+        outer.addWidget(panel, 0, Qt.AlignCenter)
+
+    @staticmethod
+    def _step_row(number: str, name: str, description: str) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setSpacing(14)
+
+        badge = QLabel(number)
+        badge.setAlignment(Qt.AlignCenter)
+        badge.setFixedSize(30, 30)
+        badge.setStyleSheet(
+            f"background: {COLOR_ACCENT_DIM}; color: {COLOR_TEXT}; "
+            "border-radius: 15px; font-size: 13px; font-weight: 700;"
+        )
+        row.addWidget(badge, 0, Qt.AlignTop)
+
+        text = QVBoxLayout()
+        text.setSpacing(2)
+        name_lbl = QLabel(name)
+        name_lbl.setStyleSheet(f"font-size: 14px; font-weight: 600; color: {COLOR_TEXT};")
+        desc_lbl = QLabel(description)
+        desc_lbl.setWordWrap(True)
+        desc_lbl.setStyleSheet(f"font-size: 13px; color: {COLOR_TEXT_DIM};")
+        text.addWidget(name_lbl)
+        text.addWidget(desc_lbl)
+        row.addLayout(text, 1)
+        return row
 
 
 class MainWindow(QMainWindow):
@@ -157,7 +216,7 @@ class MainWindow(QMainWindow):
             f"QPushButton#subtle:hover {{ color: {COLOR_ACCENT_HOVER}; background: {COLOR_ACCENT_DIM}; border-radius: 6px; }}"
         )
         self.next_step_btn.setToolTip(
-            "Suggested next step in the synopsis → outline → characters/world → "
+            "Suggested next step in the draft → outline → characters/world → "
             "chapters → memory flow. Click to jump there."
         )
         self.next_step_btn.clicked.connect(self._go_to_suggested_step)
@@ -448,7 +507,7 @@ class MainWindow(QMainWindow):
     def _update_next_step(self) -> None:
         """
         Refreshes the "suggested next step" chip in the title bar, using
-        the synopsis → outline → chapters → memory flow ManagerAgent
+        the draft → outline → chapters → memory flow ManagerAgent
         already knows about. Clicking the chip jumps to where that step
         happens — it never triggers generation on its own, since some
         steps (like the outline) need the author to make a choice first

@@ -57,7 +57,7 @@ from ui.styles import (
 
 TASK_LABELS: dict[TaskType, str] = {
     TaskType.CHAT: "Chat / Q&A",
-    TaskType.WRITE_SYNOPSIS: "Write Synopsis",
+    TaskType.WRITE_SYNOPSIS: "Write Draft",
     TaskType.GENERATE_OUTLINE: "Generate Outline",
     TaskType.REVIEW_OUTLINE: "Review Outline",
     TaskType.GENERATE_WORLD: "Generate World",
@@ -344,7 +344,7 @@ class AppSettingsWidget(QWidget):
         self.allow_nsfw_check.setToolTip(
             "When enabled, the model receives an explicit instruction that it may write "
             "adult content without restrictions — graphic violence, explicit sexuality, "
-            "strong language, and dark themes — for the creative writing tasks: synopsis, "
+            "strong language, and dark themes — for the creative writing tasks: draft, "
             "outline, chapters, rewrite, world-building, and story memory.\n\n"
             "Has no effect on review, chat, or summary tasks.\n\n"
             "Use this when your model has been uncensored/fine-tuned for adult fiction "

@@ -1303,7 +1303,7 @@ class WorkflowWorker(QObject):
         self.step_finished.emit("Chat", result)
 
     def _run_write_synopsis(self) -> None:
-        self.step_started.emit("Writing synopsis...")
+        self.step_started.emit("Writing draft...")
         prompt = (
             self.extra_input
             if self.extra_input
@@ -1317,7 +1317,7 @@ class WorkflowWorker(QObject):
             self._extract_and_merge_characters(result)
 
             storage.save_project(self.project)
-            self.step_finished.emit("Synopsis", result)
+            self.step_finished.emit("Draft", result)
 
     def _run_generate_outline(self) -> None:
 
