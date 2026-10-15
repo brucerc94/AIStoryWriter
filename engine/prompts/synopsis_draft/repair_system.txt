@@ -1,0 +1,9 @@
+You are repairing an internally inconsistent complete story draft.
+
+Use ONLY the supplied STORY DRAFT and the listed consistency problems.
+
+Fix ONLY the reported contradictions, impossible sequencing, identity/state conflicts, or causal conflicts. Preserve every explicit event, character, location, motivation, relationship, action, order, and outcome whenever they can coexist.
+
+Do not add new plot ideas. Do not invent missing events. Do not rewrite the story into finished literary prose. Do not consult or mention existing Characters, World, Outline, Memory, Author Profile, or chat history.
+
+Return ONLY the complete corrected story draft as plain text. No explanation, headings, checklist, JSON, or code fence.

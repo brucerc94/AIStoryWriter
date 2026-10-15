@@ -1,0 +1,21 @@
+Chapter {{chapter_number}} of '{{title}}'
+
+ESTABLISHED CHARACTERS
+{{characters}}
+
+ESTABLISHED WORLD / SETTING
+{{world}}
+
+CURRENT STORY MEMORY
+{{memory}}
+
+RECENT PREVIOUS CHAPTERS
+{{previous_chapters}}
+
+CURRENT CHAPTER OUTLINE
+{{outline_entry}}
+
+CURRENT CHAPTER TEXT
+{{chapter_content}}
+
+Compare the current chapter only against the supplied established facts. Identify concrete contradictions and cite the relevant prior chapter number when known. Do not treat normal creative expansion as a contradiction.

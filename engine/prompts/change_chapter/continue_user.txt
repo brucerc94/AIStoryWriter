@@ -1,14 +1,25 @@
 Chapter {{chapter_number}}: '{{chapter_title}}'
 
-AUTHOR'S ORIGINAL REQUEST — AUTHORITATIVE:
-{{instruction}}
+Previously satisfied requirements are already complete. Do not repeat or regress them.
 
-INTERNAL CHECKLIST — MANDATORY:
-{{checklist}}
+LAST COMPLETED NARRATIVE BEAT:
+{{last_completed_beat}}
 
-MISSING REQUIREMENTS (must be addressed in the continuation):
-{{missing_text}}
+This beat is already established. Preserve its resulting location, character presence, relationships, and immediate state, then continue from there. Do not reinterpret or redo it.
 
---- END OF CURRENT REWRITE (last ~7000 chars) ---
+ACTIVE REQUIREMENTS — ADDRESS IN ORDER:
+{{remaining_checklist}}
+
+Start with the first requirement listed above. Treat these requirements only as narrative constraints to transform into natural prose; never reproduce their labels, numbering, or wording as output.
+
+{{continuity_context}}
+
+CONTINUITY IS STRICT: continue the SAME scene and immediate narrative state shown at the end of the current rewrite. Preserve the exact active characters, their identities and relationships, location, POV, tense, and immediate objective. Do not substitute another character simply because that character appears in the chapter plan or continuity anchors.
+
+PACING RULE: the active requirements are an ordered narrative sequence. Continue from the current ending and advance only through the requirements listed above, in order. Do not jump ahead to later story beats or introduce a future character, event, location, relationship, revelation, or consequence before its required position.
+
+Do not restart, summarize, rewrite, or repeat the existing prose. Do not introduce a new scene, location, time jump, POV, character, relationship, or plot direction unless the current ending and the active requirements explicitly require it.
+
+--- END OF CURRENT REWRITE ---
 {{chapter_tail}}
---- CONTINUE IMMEDIATELY FROM EXACTLY HERE — NO REPETITION ---
+--- CONTINUE IMMEDIATELY FROM EXACTLY HERE — NO REPETITION, NO AHEAD-OF-SEQUENCE EVENTS ---

@@ -1,7 +1,8 @@
 """
-LLM inference engine.
-Wraps llama-cpp-python. Manages model loading and unloading.
-One model loaded at a time to conserve RAM.
+LLM inference engine for local GGUF models (llama-cpp-python).
+Generation for every backend goes through engine.llm_router.get_engine(),
+which picks the backend from the model reference (see engine.model_refs).
+Only one model is loaded at a time to conserve RAM.
 
 Also auto-detects the NVIDIA GPU (via nvidia-smi) and, for cards without
 real Tensor Cores (e.g. the GTX 16-series, Compute Capability 7.5 but no
@@ -50,8 +51,6 @@ import subprocess
 import threading
 from pathlib import Path
 from typing import Callable, Iterator, Optional
-
-from sympy import true
 
 from engine import gguf_meta, llama_features
 
@@ -322,7 +321,7 @@ class LLMEngine:
                 n_ctx=n_ctx,
                 n_gpu_layers=n_gpu_layers,
                 n_threads=n_threads,
-                verbose=true,
+                verbose=False,
                 **extra_kwargs,
             )
             self._current_path = model_path
@@ -361,10 +360,50 @@ class LLMEngine:
         except Exception:
             return {"enable_thinking": False}
 
+    def _qwen_sampling_kwargs(self) -> dict:
+        """
+        Apply Qwen3.5's anti-repetition sampling defaults only to Qwen models.
+
+        Qwen recommends presence_penalty=1.5 and repetition_penalty=1.0 for
+        general generation. llama-cpp-python exposes the latter as
+        repeat_penalty. Feature detection keeps older builds safe: an
+        unsupported parameter is simply omitted instead of breaking generation.
+        """
+        model_info = self._last_model_info
+        if not model_info:
+            return {}
+
+        arch = (model_info.architecture or "").lower()
+        if not arch.startswith("qwen"):
+            return {}
+
+        sampling: dict = {}
+
+        if llama_features.supports_chat_completion_param("presence_penalty"):
+            sampling["presence_penalty"] = 1.5
+        if llama_features.supports_chat_completion_param("repeat_penalty"):
+            sampling["repeat_penalty"] = 1.0
+
+        if sampling:
+            logger.info(
+                "[llm_engine] Qwen sampling: presence_penalty=%s, repeat_penalty=%s",
+                sampling.get("presence_penalty", "unsupported"),
+                sampling.get("repeat_penalty", "unsupported"),
+            )
+
+        return sampling
+
     def _create_chat_completion(self, **kwargs):
         chat_template_kwargs = self._chat_template_kwargs()
         if chat_template_kwargs is not None:
             kwargs["chat_template_kwargs"] = chat_template_kwargs
+
+        # Keep Qwen-specific anti-repetition handling centralized so every
+        # chat-completion path (streaming and non-streaming) gets the same
+        # behavior without duplicating generation code.
+        for name, value in self._qwen_sampling_kwargs().items():
+            kwargs.setdefault(name, value)
+
         return self._model.create_chat_completion(**kwargs)
 
     def unload(self) -> None:
@@ -503,5 +542,6 @@ class LLMEngine:
 _engine = LLMEngine()
 
 
-def get_engine() -> LLMEngine:
+def get_local_engine() -> LLMEngine:
+    """The llama-cpp-python backend. Use engine.llm_router.get_engine() for generation."""
     return _engine

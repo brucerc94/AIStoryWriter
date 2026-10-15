@@ -1,0 +1,23 @@
+CHAPTER NUMBER: {{chapter_number}}
+
+=== CHAPTER SOURCE BLOCK ===
+{{source_block}}
+=== END CHAPTER SOURCE BLOCK ===
+
+=== AUTHOR PROFILE ===
+{{author_profile}}
+=== END AUTHOR PROFILE ===
+
+=== ESTABLISHED CHARACTERS ===
+{{characters}}
+=== END ESTABLISHED CHARACTERS ===
+
+=== RELEVANT WORLD ===
+{{world}}
+=== END RELEVANT WORLD ===
+
+=== PREVIOUS CHAPTER CONTEXT ===
+{{previous_continuity}}
+=== END PREVIOUS CHAPTER CONTEXT ===
+
+Develop this chapter source block into the complete rich narrative treatment for this chapter. Expand the supplied material into coherent, chronological scenes with concrete character behavior, interactions, representative dialogue, emotional responses, setting, sensory detail, pacing, and transitions. Preserve the source's story events and meaning. Do not reduce the chapter to a summary or numbered checklist. The Author Profile must directly shape how the treatment is developed.

@@ -1,0 +1,8 @@
+USER CHANGE REQUEST:
+
+{{change_request}}
+
+CLEAR CONSISTENCY PROBLEMS:
+{{issues}}
+
+Rewrite ONLY the user's change request so that its intended actions remain intact but the sequence is internally coherent. Preserve all explicit requested events, characters, locations, dialogue, order, and outcomes whenever they can coexist. Do not add unrelated ideas. Do not consult or mention the existing chapter or project context. Return ONLY the corrected change request text, with no explanation, headings, checklist IDs, JSON, or code fence.

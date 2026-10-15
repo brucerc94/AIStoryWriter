@@ -3,8 +3,10 @@ Chapter {{chapter_number}}: '{{chapter_title}}'
 AUTHOR'S ORIGINAL REQUEST — AUTHORITATIVE:
 {{instruction}}
 
-INTERNAL CHECKLIST — ALL ITEMS ARE MANDATORY:
+INTERNAL STORY REQUIREMENTS — ALL ITEMS ARE MANDATORY:
 {{checklist}}
+
+Treat each requirement only as a narrative constraint describing something that must happen. Transform every requirement into natural novel prose. Never quote, copy, reproduce, or format a requirement as text in the chapter. The requirement number, wording, labels, or checklist formatting must never appear in the output.
 
 {{context_sections}}
 

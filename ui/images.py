@@ -40,14 +40,15 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from engine import storage
-from engine.image_workflow import ImageWorkflowThread, generate_character_image
+from engine.character_images import PortraitOutcome, mark_generating, record_outcome
+from engine.image_engine import get_image_model_profile
+from engine.image_workflow import ImageWorkflowThread
 from engine.models import (
     AppSettings,
     ImageGenerationRequest,
@@ -55,6 +56,7 @@ from engine.models import (
     ImageTaskType,
     Project,
 )
+from ui.workers import CharacterPortraitWorker, is_running, start_worker
 from ui.styles import (
     COLOR_ACCENT,
     COLOR_BORDER,
@@ -336,13 +338,23 @@ class _ImageTaskSection(QGroupBox):
 
 
     def apply_settings(self, settings: AppSettings) -> None:
-        """Pre-fill dimensions and sampling defaults from AppSettings."""
+        """Apply global image settings plus the selected model family's defaults."""
         if self.width_spin:
             self.width_spin.setValue(getattr(settings, "image_default_width", 512))
         if self.height_spin:
             self.height_spin.setValue(getattr(settings, "image_default_height", 512))
-        self.steps_spin.setValue(getattr(settings, "image_default_steps", 20))
-        self.cfg_spin.setValue(getattr(settings, "image_default_cfg_scale", 7.0))
+
+        profile = get_image_model_profile(getattr(settings, "image_model_path", ""))
+        steps = profile.default_steps
+        cfg = profile.default_cfg_scale
+
+        if steps is None:
+            steps = getattr(settings, "image_default_steps", 20)
+        if cfg is None:
+            cfg = getattr(settings, "image_default_cfg_scale", 7.0)
+
+        self.steps_spin.setValue(steps)
+        self.cfg_spin.setValue(cfg)
 
     def set_busy(self, busy: bool) -> None:
         self.generate_btn.setEnabled(not busy)
@@ -423,35 +435,6 @@ class _ImageTaskSection(QGroupBox):
 
 
 
-class _CharacterImageBatchWorker(Qt.QObject if hasattr(Qt, "QObject") else object):
-    pass
-
-
-from PySide6.QtCore import QObject
-
-class _CharacterBatchWorker(QObject):
-    finished = Signal(object)
-
-    def __init__(self, project_id: str, character, settings) -> None:
-        super().__init__()
-        self.project_id = project_id
-        self.character = character
-        self.settings = settings
-
-    def run(self) -> None:
-        try:
-            ok, image_ref, error = generate_character_image(
-                self.project_id, self.character, self.settings
-            )
-        except Exception as exc:
-            ok, image_ref, error = False, None, str(exc)
-        self.finished.emit((ok, image_ref, error, self.character.id))
-
-
-
-
-
-
 class ImagesPanel(QWidget):
     """
     The Images tab.  Acts as the ImageController:
@@ -466,6 +449,8 @@ class ImagesPanel(QWidget):
     No story-workflow code is touched.
     """
 
+    open_settings_requested = Signal()
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._settings: Optional[AppSettings] = None
@@ -477,7 +462,9 @@ class ImagesPanel(QWidget):
 
 
         self._char_batch_thread: Optional[QThread] = None
-        self._char_batch_worker: Optional[_CharacterBatchWorker] = None
+        self._char_batch_worker: Optional[CharacterPortraitWorker] = None
+        self._char_batch_project_id: str = ""
+        self._active_project_id: str = ""
         self._char_batch_queue: list[str] = []
         self._char_batch_label: Optional[QLabel] = None
 
@@ -515,8 +502,9 @@ class ImagesPanel(QWidget):
         layout.addLayout(header_row)
 
         subtitle = QLabel(
-            "Generate images for your story — characters, covers, scenes, locations, and objects.\n"
-            "All images are saved encrypted inside the active project."
+            "Images are generated on this computer with stable-diffusion.cpp. "
+            "This tab does not use the text models from the Text Models tab.\n"
+            "Each image is saved encrypted inside the project it was made for."
         )
         subtitle.setObjectName("subheading")
         subtitle.setWordWrap(True)
@@ -533,17 +521,22 @@ class ImagesPanel(QWidget):
 
         self._no_model_notice = self._build_notice(
             "🖼️",
-            "No image model configured.",
-            "Go to Settings and set an Image Model path to enable generation.\n"
-            "The model file should be a diffusion checkpoint compatible with the selected backend.",
+            "Image generation is not set up yet.",
+            "Choose a diffusion model file (.gguf or .safetensors) in\n"
+            "Settings → Image Generation. Checkpoints for SD 1.x / SDXL need only\n"
+            "the diffusion model; Z-Image, Flux and Qwen Image also need a text encoder and VAE.",
         )
+        open_settings_btn = QPushButton("Open Image Settings")
+        open_settings_btn.setObjectName("accent")
+        open_settings_btn.clicked.connect(self.open_settings_requested)
+        self._no_model_notice.layout().addWidget(open_settings_btn, 0, Qt.AlignCenter)
         layout.addWidget(self._no_model_notice)
 
         layout.addSpacing(20)
 
 
         char_row = QHBoxLayout()
-        self._character_batch_btn = QPushButton("🎭  Create Character Images")
+        self._character_batch_btn = QPushButton("🎭  Create Missing Character Portraits")
         self._character_batch_btn.setObjectName("accent")
         self._character_batch_btn.setMinimumHeight(36)
         self._character_batch_btn.setToolTip(
@@ -621,11 +614,14 @@ class ImagesPanel(QWidget):
         """Called by MainWindow whenever AppSettings change."""
         self._settings = settings
 
-        backend_raw = getattr(settings, "image_backend", "stable_diffusion_cpp")
-        friendly = {
-            "stable_diffusion_cpp": "stable-diffusion.cpp",
-        }.get(backend_raw, backend_raw)
-        self._backend_badge.setText(f"Backend: {friendly}")
+        model_path = getattr(settings, "image_model_path", "") or ""
+        if model_path:
+            family = get_image_model_profile(model_path).label
+            self._backend_badge.setText(f"Image model: {family}")
+            self._backend_badge.setToolTip(model_path)
+        else:
+            self._backend_badge.setText("No image model set")
+            self._backend_badge.setToolTip("Set one in Settings → Image Generation.")
         self._backend_badge.setVisible(True)
 
         self._update_notices()
@@ -653,40 +649,40 @@ class ImagesPanel(QWidget):
         if not self._project:
             QMessageBox.warning(self, "No Project", "Open a project first.")
             return
-        if not self._settings:
-            return
-        if self._char_batch_thread and self._char_batch_thread.isRunning():
+        if is_running(self._char_batch_thread):
             return
 
-        pending = [c for c in self._project.characters if not c.image_ref]
+        pending = [c.id for c in self._project.characters if not c.image_ref]
         if not pending:
             QMessageBox.information(
                 self, "All Done",
-                "All characters already have images.\n"
-                "Use the 'Regenerate Image' button on a character card to update one."
+                "All characters already have portraits.\n"
+                "Use 'Regenerate Image' on a character card in the Story tab to update one."
             )
             return
 
-        self._char_batch_queue = [c.id for c in pending]
+        # The batch belongs to the project it was started on, even if the user
+        # switches projects while it runs.
+        self._char_batch_project_id = self._project.id
+        self._char_batch_queue = pending
         self._character_batch_btn.setEnabled(False)
-        self._char_batch_status.setText(f"Queued {len(self._char_batch_queue)} character(s)…")
         self._char_batch_status.setVisible(True)
         self._start_next_char_batch()
 
-    def _start_next_char_batch(self) -> None:
-        if not self._char_batch_queue or not self._project:
-            self._character_batch_btn.setEnabled(True)
-            remaining = len(self._char_batch_queue)
-            if remaining == 0:
-                self._char_batch_status.setText("✓ All character images generated.")
-            self._char_batch_worker = None
-            self._char_batch_thread = None
-            return
+    def _project_for_batch(self, project_id: str) -> Optional[Project]:
+        if self._project and self._project.id == project_id:
+            return self._project
+        return storage.load_project(project_id)
 
-        char_id = self._char_batch_queue.pop(0)
-        char = next((c for c in self._project.characters if c.id == char_id), None)
-        if not char:
-            self._start_next_char_batch()
+    def _start_next_char_batch(self) -> None:
+        project = self._project_for_batch(self._char_batch_project_id)
+        char = None
+        while self._char_batch_queue and project is not None and char is None:
+            char_id = self._char_batch_queue.pop(0)
+            char = next((c for c in project.characters if c.id == char_id), None)
+
+        if project is None or char is None:
+            self._finish_char_batch()
             return
 
         remaining = len(self._char_batch_queue)
@@ -694,39 +690,25 @@ class ImagesPanel(QWidget):
             f"Generating portrait for {char.name}…"
             + (f" ({remaining} more after this)" if remaining else "")
         )
+        mark_generating(project, char.id)
 
-        char.image_status = "Generating"
-        char.image_error = ""
-        storage.save_project(self._project)
+        self._char_batch_worker = CharacterPortraitWorker(project.id, char, storage.load_settings())
+        self._char_batch_thread = start_worker(
+            self, self._char_batch_worker, self._on_char_batch_finished
+        )
 
-        worker = _CharacterBatchWorker(self._project.id, char, self._settings)
-        thread = QThread(self)
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.finished.connect(self._on_char_batch_finished)
-        worker.finished.connect(thread.quit)
-        thread.finished.connect(thread.deleteLater)
-
-        self._char_batch_worker = worker
-        self._char_batch_thread = thread
-        thread.start()
-
-    def _on_char_batch_finished(self, payload) -> None:
-        ok, image_ref, error, char_id = payload
-        if self._project:
-            char = next((c for c in self._project.characters if c.id == char_id), None)
-            if char:
-                if ok and image_ref:
-                    char.image_ref = image_ref
-                    char.image_status = "Ready"
-                    char.image_error = ""
-                else:
-                    char.image_status = "Error"
-                    char.image_error = error or "Image generation failed."
-                storage.save_project(self._project)
+    def _on_char_batch_finished(self, outcome: PortraitOutcome) -> None:
+        record_outcome(outcome, loaded=self._project)
         self._char_batch_worker = None
         self._char_batch_thread = None
         self._start_next_char_batch()
+
+    def _finish_char_batch(self) -> None:
+        self._character_batch_btn.setEnabled(True)
+        self._char_batch_status.setText("✓ Character portraits finished.")
+        self._char_batch_project_id = ""
+        self._char_batch_worker = None
+        self._char_batch_thread = None
 
 
 
@@ -748,6 +730,8 @@ class ImagesPanel(QWidget):
 
         self._active_section = section
         self._active_request = request
+        # Remember the owner now: the user may switch projects before the job ends.
+        self._active_project_id = self._project.id
         section.set_busy(True)
         section.show_status("Starting…")
 
@@ -789,7 +773,7 @@ class ImagesPanel(QWidget):
 
         image_bytes: Optional[bytes] = None
 
-        if result.success and result.image_path and self._project:
+        if result.success and result.image_path and self._active_project_id:
 
             try:
                 with open(result.image_path, "rb") as fh:
@@ -800,7 +784,7 @@ class ImagesPanel(QWidget):
                 uid = uuid.uuid4().hex[:6]
                 filename = f"{self._active_request.task_type.value}_{ts}_{uid}.png"
                 storage.save_binary_resource(
-                    self._project.id,
+                    self._active_project_id,
                     filename,
                     image_bytes,
                     mime_type="image/png",
@@ -829,6 +813,7 @@ class ImagesPanel(QWidget):
         self._active_thread = None
         self._active_section = None
         self._active_request = None
+        self._active_project_id = ""
 
 
 

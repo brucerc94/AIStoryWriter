@@ -1,0 +1,33 @@
+CHAPTER NUMBER: {{chapter_number}}
+
+The chapter treatment below is partially written. Continue only the missing portion. This is a fresh inference with no chat history.
+
+=== CHAPTER SOURCE BLOCK ===
+{{source_block}}
+=== END CHAPTER SOURCE BLOCK ===
+
+=== AUTHOR PROFILE ===
+{{author_profile}}
+=== END AUTHOR PROFILE ===
+
+=== ESTABLISHED CHARACTERS ===
+{{characters}}
+=== END ESTABLISHED CHARACTERS ===
+
+=== RELEVANT WORLD ===
+{{world}}
+=== END RELEVANT WORLD ===
+
+=== PREVIOUS CHAPTER CONTEXT ===
+{{previous_continuity}}
+=== END PREVIOUS CHAPTER CONTEXT ===
+
+=== RECENT TREATMENT CHECKPOINT ===
+{{partial_checkpoint}}
+=== END RECENT TREATMENT CHECKPOINT ===
+
+Continue the rich narrative treatment from the checkpoint. Do not restart the chapter, repeat the checkpoint, or turn the continuation into a checklist. Keep the same narrative voice, level of detail, pacing, dialogue style, emotional depth, and descriptive density established by the Author Profile.
+
+Continue developing the supplied source material into concrete scene treatment: character actions and reactions, interactions, representative dialogue, thoughts and emotions, setting and sensory detail, transitions, and consequences. Preserve chronology and do not introduce new major plot facts, characters, relationships, revelations, or outcomes that are not supported by the source or established canon.
+
+Return ONLY the missing treatment text. Do not output the chapter heading, labels, bullets, numbered items, or Markdown section headings.

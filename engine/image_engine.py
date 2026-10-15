@@ -13,23 +13,19 @@ The engine is intentionally generic:
     set diffusion_model_path (= image_model_path in AppSettings),
     plus the optional llm_path and vae_path that the model requires.
 
-Z-Image-Turbo specifics
------------------------
-Z-Image-Turbo is a three-component model:
-  diffusion_model_path  → z_image_turbo-Q4_0.gguf
-  llm_path              → Qwen3-4B-ZImage-Heretic-Genesis-Q8.gguf
-  vae_path              → ae.safetensors
+Multi-component model support
+-----------------------------
+The engine detects known image-model families from filenames and uses a
+centralized profile for each family. Multi-component models are loaded with
+diffusion_model_path plus their standalone text encoder and VAE; legacy
+monolithic checkpoints continue using model_path.
 
-It must be constructed with diffusion_model_path (NOT model_path) or
-the C library tries to auto-detect the SD version from a GGUF that is
-not a full SD checkpoint — hence the "get sd version from file failed"
-and the subsequent NULL pointer error.
+Known profiles currently include:
+  • Z-Image
+  • Qwen Image 2.1
 
-The engine detects a multi-component setup automatically:
-  • If image_text_encoder_path OR image_vae_path is set AND
-    image_model_path looks like a diffusion-only file (not a
-    full checkpoint) → use diffusion_model_path + optional components.
-  • Otherwise fall back to plain model_path for legacy checkpoints.
+Unknown filenames fall back to the generic profile so additional models can
+still be used when stable-diffusion.cpp accepts their component layout.
 
 IMPORTANT — why "load tensors from model loader failed" did NOT raise
 -----------------------------------------------------------------------
@@ -85,9 +81,13 @@ import ctypes
 import inspect
 import logging
 import os
+import re
+import shutil
 import struct
+import subprocess
 import threading
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Callable, Optional
 
 from engine.models import (
@@ -98,6 +98,81 @@ from engine.models import (
 )
 
 logger = logging.getLogger("image_engine")
+
+
+@dataclass(frozen=True)
+class ImageModelProfile:
+    """Centralized behavior for known image-model families."""
+
+    key: str
+    label: str
+    multi_component: bool = False
+    requires_text_encoder: bool = False
+    requires_vae: bool = False
+    default_steps: Optional[int] = None
+    default_cfg_scale: Optional[float] = None
+    sample_method: Optional[str] = None
+
+
+_IMAGE_MODEL_PROFILES: dict[str, ImageModelProfile] = {
+    "generic": ImageModelProfile(key="generic", label="Generic"),
+    "z_image": ImageModelProfile(
+        key="z_image",
+        label="Z-Image",
+        multi_component=True,
+        requires_text_encoder=True,
+        requires_vae=True,
+        default_steps=8,
+        default_cfg_scale=1.0,
+        sample_method="euler",
+    ),
+    "qwen_image_2_1": ImageModelProfile(
+        key="qwen_image_2_1",
+        label="Qwen Image 2.1",
+        multi_component=True,
+        requires_text_encoder=True,
+        requires_vae=True,
+        default_steps=20,
+        default_cfg_scale=6.0,
+        sample_method="euler",
+    ),
+}
+
+
+def detect_image_model_family(path: str) -> str:
+    """Detect family from filename; no model weights are loaded."""
+    raw_name = os.path.basename(path or "").lower()
+    name = raw_name.replace("-", "_")
+    if ("qwen-image-2.1" in raw_name or "qwen_image_2.1" in name or "qwen_image_2_1" in name or "qwenimage_2_1" in name):
+        return "qwen_image_2_1"
+    if "z_image" in name or "zimage" in name:
+        return "z_image"
+    return "generic"
+
+
+def get_image_model_profile(path: str) -> ImageModelProfile:
+    """Return the centralized profile used by settings and runtime."""
+    return _IMAGE_MODEL_PROFILES[detect_image_model_family(path)]
+
+
+def _get_sd_cli_path() -> Optional[str]:
+    """Return the standalone stable-diffusion.cpp CLI executable path."""
+    candidates: list[str] = []
+    explicit = os.environ.get("STABLE_DIFFUSION_CPP_CLI", "").strip()
+    if explicit:
+        candidates.append(explicit)
+    lib_path = os.environ.get("STABLE_DIFFUSION_CPP_LIB", "").strip()
+    if lib_path:
+        candidates.append(os.path.join(os.path.dirname(lib_path), "sd-cli.exe"))
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    candidates.append(os.path.join(project_root, "sd-cpp", "sd-cli.exe"))
+    which = shutil.which("sd-cli.exe") or shutil.which("sd-cli")
+    if which:
+        candidates.append(which)
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate):
+            return os.path.abspath(candidate)
+    return None
 
 
 
@@ -117,7 +192,8 @@ def _is_diffusion_only_file(path: str) -> bool:
     name = os.path.basename(path).lower()
     keywords = (
         "turbo", "diffusion_model", "flux", "anima", "ovis",
-        "z_image", "zimage", "wan", "chroma", "klein",
+        "z_image", "zimage", "qwen_image_2.1", "qwen_image_2_1", "qwenimage_2_1",
+        "wan", "chroma", "klein",
     )
     return any(kw in name for kw in keywords)
 
@@ -408,36 +484,25 @@ class StableDiffusionCppEngine(ImageEngine):
       • Monolithic checkpoints  — load via model_path=
       • Multi-component setups — load via diffusion_model_path= + llm_path= + vae_path=
 
-    Z-Image-Turbo defaults
-    ----------------------
-    When a multi-component setup is detected (text_encoder_path or vae_path
-    is set, or the diffusion file name matches known patterns), the engine
-    automatically applies the Z-Image-Turbo recommended defaults:
-        sample_steps         = 8
-        cfg_scale            = 1.0
-        offload_params_to_cpu = True
-        diffusion_flash_attn  = True  (if supported by the installed build)
-
-    These load-time defaults are fixed. The *generation-time* defaults
-    (sample_steps / cfg_scale) are additionally enforced in generate():
-    Z-Image-Turbo is a distilled/turbo model and simply does not behave
-    correctly with generic SD settings (e.g. steps=20, cfg=7.0) — using
-    them isn't "more thorough", it produces broken output. generate()
-    therefore clamps to the recommended values whenever a multi-component
-    model is loaded, unless the caller explicitly opted out via
-    request.allow_custom_sampling (see generate() below).
+    Model-family behavior
+    ---------------------
+    Known profiles provide component requirements and generation defaults.
+    All multi-component models use CPU parameter offload to reduce VRAM use,
+    and diffusion flash attention is enabled when the installed binding
+    exposes that option.
     """
 
 
-    _ZIMAGE_STEPS_DEFAULT: int = 8
-    _ZIMAGE_CFG_DEFAULT: float = 1.0
-
     def __init__(self) -> None:
         self._sd = None
+        self._model_loaded = False
+        self._process = None
         self._model_path: str = ""
         self._text_encoder_path: str = ""
         self._vae_path: str = ""
         self._is_multi_component: bool = False
+        self._model_family: str = "generic"
+        self._model_profile: ImageModelProfile = _IMAGE_MODEL_PROFILES["generic"]
         self._loras: list[dict] = []
         self._loaded_lora_dir: str = ""
 
@@ -501,16 +566,12 @@ class StableDiffusionCppEngine(ImageEngine):
 
     @property
     def is_available(self) -> bool:
-        """True when stable_diffusion_cpp is importable."""
-        try:
-            import stable_diffusion_cpp  # noqa: F401
-            return True
-        except ImportError:
-            return False
+        """True when the standalone stable-diffusion.cpp CLI is available."""
+        return _get_sd_cli_path() is not None
 
     @property
     def is_model_loaded(self) -> bool:
-        return self._sd is not None
+        return self._model_loaded
 
 
 
@@ -522,183 +583,65 @@ class StableDiffusionCppEngine(ImageEngine):
         vae_path: str = "",
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> None:
-        """
-        Load the image model.
-
-        Automatically chooses between:
-          • diffusion_model_path=  for multi-component setups
-          • model_path=            for monolithic checkpoints
-
-        Multi-component is assumed when any of the following is true:
-          1. text_encoder_path is non-empty.
-          2. vae_path is non-empty.
-          3. The model filename matches known diffusion-only patterns
-             AND at least one companion path is supplied.
-
-        For Z-Image-Turbo:
-            load_model(
-                model_path  = "/path/z_image_turbo-Q4_0.gguf",
-                text_encoder_path = "/path/Qwen3-4B-ZImage-Heretic-Genesis-Q8.gguf",
-                vae_path    = "/path/ae.safetensors",
-            )
-
-        IMPORTANT: constructing `StableDiffusion(**kwargs)` succeeding
-        (i.e. not raising) does NOT by itself mean the model loaded
-        correctly — see the module docstring. This method additionally
-        inspects the native log output captured during construction and
-        treats known failure markers (e.g. "not in model file") as a
-        hard failure, tearing the half-loaded context back down instead
-        of leaving self._sd pointing at a broken context.
-        """
+        """Validate and register image model components for CLI execution."""
         if not model_path or not os.path.isfile(model_path):
             raise RuntimeError(f"Model file not found: {model_path!r}")
-
         if text_encoder_path and not os.path.isfile(text_encoder_path):
             raise RuntimeError(f"Text encoder file not found: {text_encoder_path!r}")
-
         if vae_path and not os.path.isfile(vae_path):
             raise RuntimeError(f"VAE file not found: {vae_path!r}")
 
+        cli_path = _get_sd_cli_path()
+        if not cli_path:
+            raise RuntimeError(
+                "stable-diffusion.cpp CLI (sd-cli.exe) was not found. "
+                "Set STABLE_DIFFUSION_CPP_LIB or STABLE_DIFFUSION_CPP_CLI to its path."
+            )
+
+        profile = get_image_model_profile(model_path)
+        is_multi = profile.multi_component or bool(text_encoder_path or vae_path)
+        if not is_multi and _is_diffusion_only_file(model_path):
+            is_multi = True
+        if profile.requires_text_encoder and not text_encoder_path:
+            raise RuntimeError(f"{profile.label} requires a standalone text encoder.")
+        if profile.requires_vae and not vae_path:
+            raise RuntimeError(f"{profile.label} requires a standalone VAE.")
+
         same_model = (
-            self._sd is not None
+            self._model_loaded
             and self._model_path == model_path
             and self._text_encoder_path == text_encoder_path
             and self._vae_path == vae_path
             and self._lora_model_dir() == getattr(self, "_loaded_lora_dir", "")
         )
-
         if same_model:
-            logger.info("[sd_cpp] Model already loaded — reusing existing instance.")
             return
-
-
-
-        if self._sd is not None:
+        if self._model_loaded:
             self.unload_model()
 
-        try:
-            from stable_diffusion_cpp import StableDiffusion
-        except ImportError as exc:
-            raise RuntimeError(
-                "stable_diffusion_cpp is not installed. "
-                "Install stable-diffusion-cpp-python to enable image generation."
-            ) from exc
-
-
-        is_multi = bool(text_encoder_path or vae_path) or (
-            _is_diffusion_only_file(model_path)
-            and bool(text_encoder_path or vae_path)
-        )
-
-
-
-        if not is_multi and _is_diffusion_only_file(model_path):
-            is_multi = True
-
-
-
-
-
-
-
-
+        self._model_profile = profile
+        self._model_family = profile.key
         self._is_multi_component = is_multi
+        self._model_path = model_path
+        self._text_encoder_path = text_encoder_path
+        self._vae_path = vae_path
+        self._loaded_lora_dir = self._lora_model_dir()
+        self._sd = cli_path
+        self._model_loaded = True
 
-
-        kwargs: dict = {}
-
-        if is_multi:
-            kwargs["diffusion_model_path"] = model_path
-            if text_encoder_path:
-                kwargs["llm_path"] = text_encoder_path
-            if vae_path:
-                kwargs["vae_path"] = vae_path
-
-            kwargs["offload_params_to_cpu"] = True
-
-            if _sd_supports_diffusion_flash_attn():
-                kwargs["diffusion_flash_attn"] = True
-        else:
-
-            kwargs["model_path"] = model_path
-            if vae_path:
-                kwargs["vae_path"] = vae_path
-
-
-
-
-        lora_dir = self._lora_model_dir()
-        if lora_dir and os.path.isdir(lora_dir):
-            kwargs["lora_model_dir"] = lora_dir
-            logger.info("[sd_cpp] lora_model_dir=%s", lora_dir)
-
-        basename = os.path.basename(model_path)
         if progress_callback:
             mode_label = "multi-component" if is_multi else "monolithic"
-            progress_callback(
-                f"Loading image model [{mode_label}]: {basename}…"
-            )
+            progress_callback(f"Model ready [{mode_label}]: {os.path.basename(model_path)}")
 
         logger.info(
-            "[sd_cpp] Loading model (mode=%s): %s | encoder=%s | vae=%s",
+            "[sd_cpp] CLI model configured (family=%s, mode=%s): %s | encoder=%s | vae=%s | cli=%s",
+            profile.label,
             "multi-component" if is_multi else "monolithic",
             model_path,
             text_encoder_path or "(none)",
             vae_path or "(none)",
+            cli_path,
         )
-
-
-
-        _install_capturing_log_callback()
-        _drain_log_buffer()
-
-        new_sd = None
-        try:
-            new_sd = StableDiffusion(**kwargs)
-        except Exception as exc:
-            captured = _drain_log_buffer()
-            detail = f" Native log: {captured[-800:]}" if captured else ""
-            raise RuntimeError(
-                f"Failed to load image model from {model_path!r}: {exc}.{detail}"
-            ) from exc
-
-        captured_log = _drain_log_buffer()
-        failure_marker = _detect_load_failure(captured_log)
-        if failure_marker is not None:
-
-
-
-
-
-            try:
-
-
-                del new_sd
-            except Exception:
-                pass
-            self._sd = None
-            snippet = captured_log[-1200:] if captured_log else "(no output captured)"
-            raise RuntimeError(
-                "Image model failed to load correctly: the native library "
-                f"reported '{failure_marker}'. This means diffusion_model_path, "
-                "llm_path, or vae_path point at a file whose tensor names don't "
-                "match what stable-diffusion.cpp expects for this architecture "
-                "(see engine/image_engine.py module docstring for the exact "
-                "naming stable-diffusion.cpp requires for Z-Image-Turbo's "
-                "llm_path and vae_path). "
-                f"Native log tail:\n{snippet}"
-            )
-
-        self._sd = new_sd
-        self._model_path = model_path
-        self._text_encoder_path = text_encoder_path
-        self._vae_path = vae_path
-        self._loaded_lora_dir = kwargs.get("lora_model_dir", "")
-
-        logger.info("[sd_cpp] Model loaded successfully.")
-
-
-
     def generate(
         self,
         request: ImageGenerationRequest,
@@ -707,115 +650,203 @@ class StableDiffusionCppEngine(ImageEngine):
         progress_callback: Optional[Callable[[int, int], None]] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
     ) -> ImageGenerationResult:
-        """
-        Generate an image from *request* and save it to *output_path*.
+        """Generate an image through the standalone stable-diffusion.cpp CLI."""
+        if not self._model_loaded:
+            return ImageGenerationResult(success=False, error_message="No image model loaded. Select a model in Settings.")
 
-        For multi-component / Z-Image-Turbo models, request.steps and
-        request.cfg_scale are clamped to the Z-Image-Turbo recommended
-        values (8 steps, cfg 1.0) regardless of what the caller passed,
-        because the generic SD defaults (e.g. 20 steps / cfg 7.0) are
-        not just suboptimal for a turbo/distilled model — they are wrong
-        and produce degraded or broken output. If request.steps or
-        request.cfg_scale already match the recommended values, nothing
-        changes; otherwise the override is logged so it's visible why the
-        effective settings differ from what was requested.
-        """
-        if not self.is_model_loaded:
-            return ImageGenerationResult(
-                success=False,
-                error_message=(
-                    "No image model loaded. "
-                    "Select a model in Settings → Image Generation."
-                ),
-            )
+        cli_path = str(self._sd) if self._sd else _get_sd_cli_path()
+        if not cli_path or not os.path.isfile(cli_path):
+            return ImageGenerationResult(success=False, error_message="sd-cli.exe is not available.")
 
-        effective_steps = request.steps
-        effective_cfg = request.cfg_scale
+        profile = self._model_profile
+        effective_steps = profile.default_steps if profile.default_steps is not None and request.steps == 20 else request.steps
+        effective_cfg = profile.default_cfg_scale if profile.default_cfg_scale is not None and abs(request.cfg_scale - 7.0) < 1e-6 else request.cfg_scale
+        effective_prompt = self._lora_prompt_tags(request.prompt)
+        output_path = os.path.abspath(output_path)
+        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
+        args = [cli_path]
+        if self._is_multi_component:
+            args += ["--diffusion-model", self._model_path]
+            if self._text_encoder_path:
+                args += ["--llm", self._text_encoder_path]
+            if self._vae_path:
+                args += ["--vae", self._vae_path]
+            args += ["--offload-to-cpu", "--diffusion-fa"]
+        else:
+            args += ["--model", self._model_path]
+            if self._vae_path:
+                args += ["--vae", self._vae_path]
 
+        lora_dir = self._lora_model_dir()
+        if lora_dir and os.path.isdir(lora_dir):
+            args += ["--lora-model-dir", lora_dir]
 
-        logger.info(
-            "[sd_cpp] generate() — task=%s prompt=%.60r size=%dx%d steps=%d cfg=%.1f",
-            request.task_type.value,
-            request.prompt,
-            request.width,
-            request.height,
-            effective_steps,
-            effective_cfg,
+        args += [
+            "--steps", str(effective_steps),
+            "--cfg-scale", str(effective_cfg),
+            "--sampling-method", profile.sample_method or "euler",
+            "-W", str(request.width),
+            "-H", str(request.height),
+            "--seed", str(request.seed),
+            "-p", effective_prompt,
+            "-n", request.negative_prompt or "",
+            "-o", output_path,
+            "--log-level", "verbose",
+        ]
+
+        env = os.environ.copy()
+        cli_dir = os.path.dirname(cli_path)
+        env["PATH"] = cli_dir + os.pathsep + env.get("PATH", "")
+        cuda_path = env.get("CUDA_PATH", "").strip()
+        if cuda_path:
+            env["PATH"] = os.path.join(cuda_path, "bin") + os.pathsep + env["PATH"]
+
+        if progress_callback:
+            progress_callback(0, effective_steps)
+
+        process = None
+        captured = []
+        reader_done = threading.Event()
+
+        ansi_escape_re = re.compile(
+            r"\\x1B(?:[@-Z\\-_]|\\[[0-?]*[ -/]*[@-~])"
         )
 
+        def _emit_progress_from_line(line: str) -> None:
+            if not progress_callback:
+                return
 
-        def _progress(step: int, steps: int, _time: float) -> None:
-            if progress_callback:
-                progress_callback(step, steps)
-
-
-        effective_prompt = self._lora_prompt_tags(request.prompt)
-        if effective_prompt != request.prompt:
-            logger.info("[sd_cpp] LoRA prompt — original : %s", request.prompt)
-            logger.info("[sd_cpp] LoRA prompt — effective: %s", effective_prompt)
-            for i, entry in enumerate(self._loras):
-                logger.info(
-                    "[sd_cpp] LoRA[%d] path=%s  weight=%.2f  trigger=%r",
-                    i, entry.get("path", ""), entry.get("weight", 0.0), entry.get("trigger", ""),
+            # stable-diffusion.cpp can print progress using slightly different
+            # formats depending on the model/sampler, for example:
+            #   "1/15 - ..."
+            #   "step 1 / 15 ..."
+            #   "  1 / 15"
+            # ANSI control sequences are also possible when the CLI uses a
+            # terminal-style progress display. Only look for a numeric
+            # current/total pair so unrelated log lines are ignored.
+            clean = ansi_escape_re.sub("", line).replace("\\b", "").strip()
+            match = re.search(r"(?<!\\d)(\\d+)\\s*/\\s*(\\d+)(?!\\d)", clean)
+            if not match:
+                match = re.search(
+                    r"\\bstep\\s+(\\d+)\\s*(?:of|/)\\s*(\\d+)\\b",
+                    clean,
+                    re.IGNORECASE,
                 )
+            if not match:
+                return
+
+            step = int(match.group(1))
+            total = int(match.group(2))
+            if total <= 0 or step < 0:
+                return
+
+            # Do not allow an unrelated counter to move the image progress
+            # backwards or beyond the configured generation range.
+            total = effective_steps if total != effective_steps else total
+            step = min(step, total)
+            progress_callback(step, total)
+
+        def _reader() -> None:
+            try:
+                if process is None or process.stdout is None:
+                    return
+                buffer = ""
+                while True:
+                    ch = process.stdout.read(1)
+                    if not ch:
+                        break
+                    if ch in ("\\r", "\\n"):
+                        line = buffer
+                        buffer = ""
+                        if line.strip():
+                            captured.append(ansi_escape_re.sub("", line).strip())
+                            _emit_progress_from_line(line)
+                    else:
+                        buffer += ch
+                if buffer.strip():
+                    captured.append(ansi_escape_re.sub("", buffer).strip())
+                    _emit_progress_from_line(buffer)
+            except Exception as exc:
+                logger.debug("[sd_cpp] CLI output reader stopped: %s", exc)
+            finally:
+                reader_done.set()
 
         try:
-            images = self._sd.generate_image(
-                prompt=effective_prompt,
-                negative_prompt=request.negative_prompt or "",
-                width=request.width,
-                height=request.height,
-                sample_steps=effective_steps,
-                cfg_scale=effective_cfg,
-                seed=request.seed,
-                progress_callback=_progress,
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            process = subprocess.Popen(
+                args,
+                cwd=cli_dir,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                text=True,
+                bufsize=1,
+                creationflags=flags,
             )
+            self._process = process
+            threading.Thread(target=_reader, name="sd-cli-reader", daemon=True).start()
 
-            if not images:
-                return ImageGenerationResult(
-                    success=False,
-                    error_message="generate_image() returned an empty list.",
-                )
+            while process.poll() is None:
+                if cancel_check and cancel_check():
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=5)
+                    return ImageGenerationResult(success=False, error_message="Image generation cancelled.")
+                reader_done.wait(timeout=0.1)
 
+            reader_done.wait(timeout=2)
+            return_code = process.returncode
+            if return_code != 0:
+                tail = "\\n".join(captured[-30:])
+                return ImageGenerationResult(success=False, error_message=f"stable-diffusion.cpp exited with code {return_code}.\\n{tail}")
 
-            os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-            images[0].save(output_path)
-
+            if not os.path.isfile(output_path):
+                tail = "\\n".join(captured[-30:])
+                return ImageGenerationResult(success=False, error_message=f"stable-diffusion.cpp finished but no output image was created.\\n{tail}")
 
             seed_used = request.seed
             try:
-                seed_used = int(images[0].info.get("seed", request.seed))
+                from PIL import Image
+                with Image.open(output_path) as img:
+                    seed_used = int(img.info.get("seed", request.seed))
             except Exception:
                 pass
+            # The CLI finished successfully, so make sure the UI reaches the
+            # terminal state even when the final progress line was rendered
+            # with terminal control characters that were not parseable.
+            if progress_callback:
+                progress_callback(effective_steps, effective_steps)
 
             logger.info("[sd_cpp] Image saved to %s (seed=%d)", output_path, seed_used)
-            return ImageGenerationResult(
-                success=True,
-                image_path=output_path,
-                seed_used=seed_used,
-            )
-
+            return ImageGenerationResult(success=True, image_path=output_path, seed_used=seed_used)
         except Exception as exc:
-            logger.exception("[sd_cpp] generate() failed: %s", exc)
-            return ImageGenerationResult(
-                success=False,
-                error_message=str(exc),
-            )
-
-
-
+            logger.exception("[sd_cpp] CLI generation failed: %s", exc)
+            return ImageGenerationResult(success=False, error_message=str(exc))
+        finally:
+            self._process = None
     def unload_model(self) -> None:
-        logger.info("[sd_cpp] Unloading image model.")
+        logger.info("[sd_cpp] Unloading image model configuration.")
+        process = getattr(self, "_process", None)
+        if process is not None and process.poll() is None:
+            try:
+                process.terminate()
+            except Exception:
+                pass
+        self._process = None
         self._sd = None
+        self._model_loaded = False
         self._model_path = ""
         self._text_encoder_path = ""
         self._vae_path = ""
         self._is_multi_component = False
-
-
-
-
+        self._model_family = "generic"
+        self._model_profile = _IMAGE_MODEL_PROFILES["generic"]
+        self._loaded_lora_dir = ""
 
 
 _BACKEND_REGISTRY: dict[str, type[ImageEngine]] = {
@@ -899,28 +930,26 @@ def load_image_engine_from_settings(settings: AppSettings) -> None:
 
     text_encoder_path = getattr(settings, "image_text_encoder_path", "") or ""
     vae_path = getattr(settings, "image_vae_path", "") or ""
+    profile = get_image_model_profile(settings.image_model_path)
 
-    if _is_diffusion_only_file(settings.image_model_path):
+    if profile.requires_text_encoder or profile.requires_vae or _is_diffusion_only_file(settings.image_model_path):
         missing = []
-        if not text_encoder_path:
+        if (profile.requires_text_encoder or _is_diffusion_only_file(settings.image_model_path)) and not text_encoder_path:
             missing.append("image_text_encoder_path (Settings → Image Generation → Text Encoder)")
-        if not vae_path:
+        if (profile.requires_vae or _is_diffusion_only_file(settings.image_model_path)) and not vae_path:
             missing.append("image_vae_path (Settings → Image Generation → VAE)")
         if missing:
             raise RuntimeError(
-                f"'{os.path.basename(settings.image_model_path)}' is a multi-component "
-                "diffusion-only model (e.g. Z-Image-Turbo) and requires a Text Encoder "
-                "and a VAE, but the following AppSettings field(s) are empty: "
-                + "; ".join(missing) +
-                ". Add these fields to AppSettings (see engine/models.py) and wire "
-                "them up in the Settings dialog before load_image_engine_from_settings "
-                "is called, otherwise StableDiffusion() is invoked with "
-                "llm_path='' / vae_path='' and every text-encoder/VAE tensor will be "
-                "reported 'not in model file'."
+                f"'{os.path.basename(settings.image_model_path)}' is detected as "
+                f"'{profile.label}' and requires companion files, but these AppSettings "
+                "field(s) are empty: " + "; ".join(missing) +
+                ". Set the Text Encoder and VAE in Settings → Image Generation."
             )
 
+
     logger.info(
-        "[image_engine] load_image_engine_from_settings: diffusion=%s | encoder=%s | vae=%s",
+        "[image_engine] load_image_engine_from_settings: family=%s | diffusion=%s | encoder=%s | vae=%s",
+        profile.label,
         settings.image_model_path,
         text_encoder_path or "(none)",
         vae_path or "(none)",

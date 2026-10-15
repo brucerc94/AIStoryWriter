@@ -5,64 +5,39 @@
 
   **A local-first writing studio for building novels with AI.**
 
-  Write. Plan. Develop characters. Build chapters. Generate images. Export your book.
+  Write your story. Refine the draft. Build an outline. Develop characters and world. Write chapters. Export the book.
 
   <p>
     <img src="https://img.shields.io/badge/Status-In%20Development-F59E0B?style=flat-square" alt="In Development" />
     <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+" />
     <img src="https://img.shields.io/badge/UI-PySide6-41CD52?style=flat-square&logo=qt&logoColor=white" alt="PySide6" />
-    <img src="https://img.shields.io/badge/LLM-GGUF-111827?style=flat-square" alt="GGUF" />
-    <img src="https://img.shields.io/badge/License-MIT-0F766E" alt="MIT License" />
+    <img src="https://img.shields.io/badge/LLM-Local%20%2B%20Ollama%20%2B%20Cloud-111827?style=flat-square" alt="Local, Ollama, and Cloud LLMs" />
+    <img src="https://img.shields.io/badge/License-MIT-0F7660" alt="MIT License" />
   </p>
 
   <p>
     <a href="#demo">Demo</a> ·
     <a href="#screenshots">Screenshots</a> ·
     <a href="#how-it-works">How it works</a> ·
+    <a href="#features">Features</a> ·
     <a href="#using-the-ui">Using the UI</a> ·
-    <a href="#tips">Tips</a> ·
-    <a href="#recommended-models">Recommended models</a> ·
+    <a href="#workflow-architecture">Architecture</a> ·
+    <a href="#todo">TODO</a> ·
     <a href="#quick-start">Quick Start</a>
   </p>
 </div>
 
-> **Status: In Development** — AI Story Studio is already usable, but it is **not a final or stable release yet**. The interface, workflows, model support, and behavior may continue to change while development progresses.
-
-> **Documentation policy:** this README describes the **current graphical interface**. Internal classes, backend APIs, development scaffolding, prompt files, unexposed workflow tasks, and planned features are intentionally omitted.
+> **Status: In Development** — AI Story Studio is usable, but it is not a final or stable release yet. The UI, workflows, model support, and behavior may continue to change during development.
 
 ---
 
 ## What is AI Story Studio?
 
-AI Story Studio is a desktop application for writers who want to work with **local AI models** instead of relying on a hosted writing service.
+AI Story Studio is a desktop writing application for building novels with AI. Run models locally from GGUF files with `llama-cpp-python`, connect to an **Ollama** server, or use **hosted cloud models** through supported API providers. Choose the backend per model assignment instead of being locked to a single runtime.
 
-It brings the main stages of novel creation into one workspace: story planning, characters, world notes, chapters, contextual chat, local image generation, project organization, statistics, search, and export.
+The application combines story drafting, outline planning, character and world management, chapter generation and revision, author preferences, contextual chat, memory, statistics, search, and export in one workspace.
 
-The idea is deliberately simple: **you follow the workflow, and the AI helps at each stage.**
-
-## How it works
-
-The main writing process is intentionally straightforward:
-
-```text
-Create Project
-      ↓
-Synopsis
-      ↓
-Outline
-      ↓
-Characters + World + Author
-      ↓
-Chapters
-      ↓
-Edit / Review / Continue
-      ↓
-Finish the Book
-      ↓
-Export
-```
-
-You do not need to understand agents, APIs, pipelines, or prompt files to use the application. The UI handles the underlying context and model calls for you.
+The writing pipeline is deliberately separated into stages so that each model call has a clear job and receives only the context it needs.
 
 ---
 
@@ -82,7 +57,7 @@ You do not need to understand agents, APIs, pipelines, or prompt files to use th
   <img src="docs/screenshots/story.jpg" alt="AI Story Studio — Story workspace" width="900" />
 </div>
 
-<p align="center"><sub>Story workspace — build the story from synopsis and outline through chapters.</sub></p>
+<p align="center"><sub>Story workspace — build the story from Synopsis / Draft and Outline through chapters.</sub></p>
 
 <div align="center">
   <img src="docs/screenshots/chat.jpg" alt="AI Story Studio — Chat" width="900" />
@@ -98,348 +73,547 @@ You do not need to understand agents, APIs, pipelines, or prompt files to use th
 
 ---
 
-## Features
+## How it works
 
-| Area | What you can do |
-|---|---|
-| 📚 **Projects** | Create, open, search, rename and delete projects. See status and chapter progress. |
-| ✍️ **Synopsis** | Write manually or generate a synopsis with AI. |
-| 🧭 **Outline** | Edit, generate, extend, and track planned chapters. |
-| 👤 **Characters** | Manage character details, relationships, and AI-generated portraits. |
-| 🌍 **World** | Keep world and setting notes manually. |
-| 📖 **Chapters** | Add, generate, read, edit, change, save, mark ready, and delete chapters. Generate the remaining book from the outline. |
-| 🧠 **Memory** | Maintain story memory automatically during chapter generation while keeping manual editing available. |
-| 🎨 **Author** | Define creative intent and writing-style preferences. |
-| 💬 **Chat** | Ask questions, brainstorm, request writing help, attach a chapter, and control story context. |
-| 🖼️ **Images** | Generate book covers, scenes, locations, objects/items, and character portraits. Image generation currently operates as a separate tool from the main writing workflow. |
-| 📊 **Stats** | Track words, chapters, reading time, review status, progress, and chapter breakdowns. |
-| 🔎 **Search** | Search the project with normal text, case-sensitive mode, or regex. |
-| ⚙️ **Models & Settings** | Configure local GGUF models and generation/image settings. |
-| 🖥️ **Console** | Inspect runtime logs and generation diagnostics. |
-| ⇩ **Export** | Export the finished book to Word, PDF, Markdown, or plain text. |
+The current workflow is:
+
+```text
+Create Project
+      ↓
+Synopsis / Draft
+      ↓
+Consistency + Draft Development
+      ↓
+Characters + World
+      ↓
+Outline
+      ↓
+Chapters
+      ↓
+Review / Change / Continue
+      ↓
+Export
+```
+
+`Synopsis / Draft` is the author's story source and normalization stage. `Outline` is the structured chapter blueprint used to drive chapter generation.
 
 ---
 
-## Using the UI
+## Synopsis / Draft
 
-This section is the easiest way to understand what to do when you first open the application.
+The Story tab presents the story source as **Synopsis / Draft**.
 
-### 1. Create or open a project
+The user can write or paste raw story material directly into the editor and press **Generate Draft**. The current editor text is used directly, so it does not need to be saved first.
 
-The **Projects** panel is on the left side of the window.
-
-Click **+ New** to create a project, enter a title, and optionally provide an initial synopsis. You can later open an existing project by clicking it in the list.
-
-Once a project is open, the main workspace appears on the right.
-
-### 2. Configure your local model
-
-Before asking the application to generate text, make sure a GGUF model is configured.
-
-Open **Settings** and choose your **Models Directory**. After changing the directory, scroll to the bottom of the Settings page and click **Save App Settings**. This save step is required to persist the directory change.
-
-After saving, open **Models** and assign the appropriate GGUF model to the tasks you plan to use, such as Synopsis, Outline, Chapter, Book, Chat, Review, or Rewrite. Changes made to these per-task model assignments are saved to the current project automatically.
-
-You can also adjust generation and hardware settings in **Settings**, including context size, GPU layers, CPU threads, response language, maximum tokens per pass, and other exposed options. Remember to click **Save App Settings** after changing these values.
-
-### 3. Start in the Story tab
-
-The **Story** tab contains the main writing workflow. Its internal tabs are:
+The pipeline is:
 
 ```text
-Synopsis → Outline → Characters → World → Chapters → Memory → Author → Stats → Search
+User story text
+      ↓
+Consistency check
+      ↓
+If problems exist → repair contradictions
+      ↓
+Fresh consistency check
+      ↓
+Draft development + Author Profile
+      ↓
+Final Synopsis / Draft
+      ↓
+Characters + World
 ```
 
-You do not have to fill every field manually before generating content. The application is designed so you can write what you know and let the AI help with the next stage.
+The consistency stage checks problems such as contradictory ordering, causal conflicts, character-state conflicts, location conflicts, identity conflicts, and incompatible events. Repairs are intended to change only what is necessary to make the story coherent.
 
-### 4. Write or generate the Synopsis
+The final result is a **developed draft**, not finished chapter prose. It can be substantially richer than the user's raw material, but it is not intended to turn into a full scene-by-scene chapter with extensive dialogue.
 
-Open **Story → Synopsis**.
+Characters and World are extracted or updated **only after the final draft exists**.
 
-You can write a synopsis manually. **If you already have a draft synopsis, write or paste it into the editor and click `Save` first. You can then use `Generate Synopsis` to have the AI work from the synopsis already stored in the project instead of starting with an empty synopsis.**
+The internal project field remains `project.synopsis` for compatibility while the UI presents it as **Synopsis / Draft**.
 
-You can also click **Generate Synopsis** directly when you want the AI to draft one for you. After generation, read through the result and edit or refine it as needed. Whenever you manually change the synopsis, click **Save** so the project keeps those changes before moving to the next step.
+### Locked text and adding new material
 
-### 5. Build the Outline
+After **Generate Outline** uses the draft, the text it used becomes **locked**. The editor shows two colors:
 
-Open **Story → Outline**.
+- **Gray**: text already used by the outline. It cannot be edited. The app protects it with a hash of the exact text.
+- **Purple**: new text that is not in the outline yet.
 
-Click **Generate Outline** to open the outline setup dialog. There you can choose the number of chapters and optionally define the author's creative intent and writing-style preferences used for the generation.
+A legend above the editor explains the colors. While locked text exists, the button reads **✨ Develop New Text**. It develops only the purple text. The gray text is kept exactly as it was, so the outline stays valid. Developed text is still "new" until **Generate Outline** uses it.
 
-The outline is then shown in the editor and can still be edited manually. When you manually edit the outline, click **Save** to store the changes before using another workflow action that depends on the updated outline.
+To add material to a story that already has an outline:
 
-You can also use **Extend Outline** when you want to append additional chapters to an existing outline.
-
-The outline uses chapter headings such as:
-
-```markdown
-## Chapter 1: Title
-## Chapter 2: Title
-## Chapter 3: Title
+```text
+Write new text below the gray text
+      ↓
+Save, then press ✨ Develop New Text   (only the purple text is developed)
+      ↓
+Generate Outline → "How many NEW chapters do you want to add?"
+      ↓
+Existing chapters are not changed; new chapters are appended
 ```
 
-### 6. Add Characters
+- Characters and World are built from the new text when it is developed.
+- If there is no new text, Generate Outline shows a message and changes nothing.
+- If the gray text was edited, the app refuses the change and tells you to unlock it.
 
-Open **Story → Characters**.
-
-You can add characters manually with **+ Add Character**, providing:
-
-- Name
-- Role
-- Physical description
-- Backstory
-- Traits
-- Relationships with other characters
-
-When you generate an outline, the application also extracts and adds characters found in the generated outline automatically. You can then open **Characters** to review, edit, or delete those characters, and you can always add new characters manually.
-
-Characters can also have AI-generated portraits. Existing character data is kept when you edit a character unless you explicitly change it.
-
-### 7. Add World & Setting information
-
-Open **Story → World**.
-
-Use this space for the information the story needs to remain consistent: locations, rules, history, politics, culture, technology, magic systems, or other setting details.
-
-This section is intentionally manual in the current UI. **After writing or changing the world information, click `Save` at the bottom of the editor.** The changes are not persisted until you save them.
-
-### 8. Define the Author profile
-
-Open **Story → Author**.
-
-The **Author Profile** is where you can establish long-term creative preferences such as themes, emotional goals, inspirations, point of view, pacing, dialogue style, description density, violence, romance, genre tags, and target chapter length.
-
-These settings are stored in the project and can also be used by the outline-generation workflow.
-
-### 9. Generate Chapters
-
-Open **Story → Chapters**.
-
-After an outline exists, select a chapter from the list on the left. The chapter's state determines which view you see:
-
-- An **empty chapter** opens in **Edit** mode so you can write it or generate it.
-- A chapter that already has content opens in **Read** mode.
-
-The chapter workspace provides these main actions:
-
-| Action | What it does |
-|---|---|
-| **Generate Chapter** | Generates the **currently selected chapter**. It does not create the next numbered chapter. |
-| **Generate Next Chapter** | Finds the first chapter in the outline that still has no content and generates that chapter. |
-| **Generate Full Book** | Generates all remaining chapters from the outline in order, one after another. |
-| **Change Chapter** | Opens a dialog where you describe a targeted change for the current chapter; it requires existing chapter content. |
-| **Mark as Ready** | Marks the current chapter as reviewed/ready. This does not call the AI. |
-| **Save** | Saves manual edits to the chapter content. |
-| **Delete** | Deletes the current chapter from the project. |
-
-For example, if your outline has Chapters 1–5 but Chapter 3 is still empty, **Generate Next Chapter** targets Chapter 3. If Chapter 4 is selected and you press **Generate Chapter**, it generates Chapter 4 regardless of which other chapters are empty.
-
-Use **Read** mode to review the chapter as a book page. You can move between chapters with **Previous Chapter / Next Chapter** and through pages with **Previous Page / Next Page**. Use **Edit** mode when you need to change the title or text manually.
-
-The editor also shows a live word count, character count, and estimated reading time. After an AI generation finishes, the generated chapter is opened in the book reader automatically.
-
-**Generate Full Book** is useful when you want the application to work through the remaining outline automatically. It confirms how many chapters remain before starting and updates story memory between generated chapters.
-
-### 10. Use Story Memory
-
-Open **Story → Memory** to inspect the story memory maintained by the application.
-
-During chapter generation, the application can update memory automatically. You can also edit the memory manually when needed. **After making manual changes, click `Save` at the bottom of the Memory editor to persist them.**
-
-### 11. Use Chat when you want assistance
-
-The top-level **Chat** tab is a general-purpose writing assistant.
-
-You can send questions, brainstorm ideas, ask for writing help, enable or disable project context, and attach a chapter to the conversation.
-
-With context enabled, the chat can use information from the current project such as the synopsis, outline, characters and relationships, world notes, memory, and conversation summary.
-
-### 12. Generate images separately
-
-The top-level **Images** tab provides local image generation for:
-
-- Book Cover
-- Scene Illustration
-- Location
-- Object / Item
-- Character portraits through the character workflow
-
-Image generation **works**, but it is currently a **separate tool and is not yet integrated into the main synopsis → outline → characters/world → chapters workflow**. Generated images are saved inside the active project.
-
-Open **Images**, enter a prompt, optionally set a negative prompt, seed, dimensions, steps, and CFG, then click **Generate**.
-
-### 13. Check progress and find text
-
-Use **Stats** to see project progress, chapter counts, word counts, reading-time information, and review status.
-
-Use **Search** to find text across the project.
-
-### 14. Export the finished book
-
-Use **Export Book** from the top-right of the application window.
-
-The current UI supports:
-
-- Word (`.docx`)
-- PDF (`.pdf`)
-- Markdown (`.md`)
-- Plain text (`.txt`)
+**Unlock Synopsis to Regenerate** allows editing the gray text. After unlocking, the next **Generate Outline** creates the whole outline again and **replaces** the existing chapters.
 
 ---
 
-## Tips
+## Outline
 
-These are practical settings and workflow habits that have worked well in testing. They are **recommendations, not hard requirements**; your hardware, model, and story can change the best values.
+### Required format
 
-### Keep character relationships detailed
-
-When a character has relationships with other characters, define them explicitly in the **Characters** tab instead of leaving the relationship section vague.
-
-For example:
+The app finds chapters by their headings, so the outline must use this format:
 
 ```text
-father of → Daniel
-rival of → Marcus
-friend of → Elena
+## Chapter N: Title
 ```
 
-Try to define the important relationships **for each relevant character**, not only for the protagonist. This gives chapter generation more concrete information about how characters should behave toward each other.
+- Write the outline **in English**.
+- The heading must be exactly `## Chapter N:` followed by the title. Use the number of the chapter (1, 2, 3...).
+- Labels inside the outline, such as `Chapter Plan:` and `Continuity:`, must stay in English.
+- The narrative text follows the response language set in **Settings**. If you write narrative text in another language, the headings and labels must still be English, or chapters will not be detected.
+- `## Capítulo N` and other variants are not reliably detected. Chapter writing, Export, and Generate Full Book rely on `## Chapter N`.
 
-### Use Change Chapter for precise revisions
+If a heading is missing or written differently, that chapter may not be found by Write Chapter, Review, Export, or Generate Full Book.
 
-**Change Chapter** is especially useful when you already have a chapter and want to alter how it behaves without rewriting the entire book from scratch.
+### Generate Outline
 
-Be specific. Instead of:
+`Generate Outline` takes the completed Synopsis / Draft and the requested chapter count, then partitions the story into exactly that number of chronological source blocks.
 
 ```text
-Make this chapter better.
+Synopsis / Draft
+      ↓
+Semantic chronological split
+      ↓
+Exactly N chapter source blocks
+      ↓
+For each chapter:
+      ├── relevant Characters
+      ├── relevant World
+      ├── full Author Profile
+      └── rich chapter treatment
 ```
 
-describe exactly what should change and what should remain. You can specify things such as:
+Each source block preserves meaningful events, causal order, motivations, relationships, descriptive details, turning points, and consequences needed by the chapter-treatment writer.
 
-- the tone or emotional intensity you want
-- which scene should be expanded or shortened
-- how a character should behave
-- how a relationship should affect the dialogue
-- whether pacing should become faster or slower
-- what information should be added or removed
-- how the chapter should end
-- what the AI must preserve from the current version
+The chapter treatment is a **rich planning artifact**. It can contain character actions, emotional movement, interactions, dialogue content, sensory details, turning points, and consequences. It is still not the finished novel chapter.
 
-For example:
+`Generate Outline` does **not** create or update Characters or World as a side effect.
 
-```text
-Make the confrontation between Elena and Marcus more tense.
-Keep the existing plot events and ending, but make Elena more defensive and
-Marcus more controlled and threatening. Add more subtext to their dialogue,
-slow the scene slightly, and make the final exchange end with Elena realizing
-that Marcus already knows about the letter. Do not add a new character or
-change the outcome of the chapter.
-```
+### Adding chapters from new draft text
 
-The more concrete the instruction, the easier it is to steer the revision toward the result you actually want.
+When the Synopsis / Draft already has locked text, **Generate Outline** opens in **Add Chapters** mode:
 
-### Context size
+- It asks for the number of **new** chapters, not the total. A suggestion is based on the length of the new text.
+- The Author Profile and Writing Style in that dialog are saved to the project and applied to the new chapters.
+- Existing chapters are not changed.
 
-A good starting point is **8192 tokens** for **Context Size**.
+The new text is split into exactly that many chronological blocks, using the same pipeline as the first outline. Each new chapter is then written from its own block, with relevant Characters, relevant World, and the Author Profile. Characters and World are not extracted again, because they were built when the draft was developed.
 
-You can use a smaller context if your hardware needs it. Context Size is the model's combined window for the prompt and the generated response, so increasing it can help when the project context is large, while decreasing it can reduce memory pressure.
+### Extend Outline
 
-### Max Tokens per Pass
+**Extend Outline** is a separate button. It adds chapters from a short **cover request** that describes what the new chapters should cover (for example, "the confrontation at the harbor and its aftermath"). It does not use the new text in the Synopsis / Draft.
 
-A useful starting point is **4256 tokens** for **Max Tokens per Pass**.
+- It generates the requested number of chapters without rewriting earlier ones.
+- The planner uses the cover request, a short tail of the existing outline, relevant Characters, relevant World, and the Author Profile.
+- After the chapters are generated, **Characters and World are updated from the cover request text**. This lets an extension introduce characters, relationships, locations, or world information that the draft did not contain.
 
-This is separate from Context Size: Context Size is the total model window, while Max Tokens per Pass limits how much the application asks the model to generate in one pass.
-
-The best value depends on the model and the task, so treat 4256 as a practical starting point rather than a universal setting.
-
-### Thinking mode
-
-For the current writing workflow, **Enable Thinking** can be left **off** when using a model that supports that option.
-
-In testing, keeping thinking disabled avoids spending part of the available token budget on hidden reasoning and leaves more room for the actual story response. If you prefer a different balance for a particular model, you can experiment with it.
-
-### Save manual edits
-
-Whenever you manually change content in a section that has a **Save** button, use it before moving on.
-
-This is especially important for **Synopsis**, **Outline**, **World**, **Memory**, and chapter editing.
+To add chapters from new story material, use **Add Chapters** in Generate Outline (above), not Extend Outline.
 
 ---
 
-## Recommended models
+## Characters and World
 
-AI Story Studio uses local **GGUF** language models. Choose the model that matches your hardware.
+Characters and World are reusable project canon.
 
-### 🟢 Around 6 GB VRAM
+### Characters
 
-**Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M**
+Characters can contain:
 
-Recommended as a starting point for GPUs in the **6 GB VRAM class**. The Q4_K_M file is about **5.0 GB**, so actual usable context and GPU offloading depend on the rest of your VRAM/RAM configuration.
+- name and role
+- description
+- backstory
+- traits
+- relationships
 
-[Hugging Face — Gemma-4-E4B-Uncensored-HauhauCS-Aggressive](https://huggingface.co/HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive)
+Automatic character extraction attempts to merge candidates with existing records when they represent the same character.
 
-### 🔵 More powerful hardware
+### World
 
-**Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-IQ4_XS**
+World stores reusable setting information. Chapter workflows can select only the relevant portion of the world for the current chapter instead of sending the entire document every time.
 
-For systems with substantially more memory, this is the higher-capability option. The IQ4_XS file is about **18.7 GB**. Qwen3.6-35B-A3B is a **Mixture-of-Experts (MoE)** model with 35B total parameters and an A3B configuration.
+---
 
-[Hugging Face — Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive](https://huggingface.co/HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive)
+## Author Profile
 
-> **Hardware note:** an 18.7 GB GGUF is not the same thing as “18.7 GB VRAM required” in every setup. CPU/RAM offloading is possible, but full GPU offload needs enough VRAM for the model plus runtime/context overhead.
+The Author area stores long-term creative preferences used by planning and writing workflows where appropriate.
 
-### MoE support
+It can include creative intent and writing-style preferences such as:
 
-AI Story Studio can also be used with **MoE models**. The application exposes MoE-related performance settings in **Settings → MoE Performance**, so users with compatible hardware can tune this class of model without changing the writing workflow.
+- emotional journey and lasting reader impression
+- themes and unique elements
+- inspirations and things to avoid
+- point of view
+- pacing
+- prose density
+- dialogue style
+- violence and romance level
+- genre and other chapter-writing preferences
 
-The model choice is the part that changes. The writing workflow remains the same.
+Define Idea receives the configured Author Profile and Writing Style as part of its creative direction, so these settings influence how missing narrative material is developed without overriding the author's explicit request.
+
+---
+
+## Chapter generation
+
+### Write Chapter
+
+`Write Chapter` uses the selected outline entry, a planning checklist, relevant Characters and World, the Author Profile, and immediate previous-chapter continuity where applicable.
+
+Its generation pattern is:
+
+```text
+Planner
+   ↓
+Writer
+   ↓
+Evaluator
+   ↓
+Complete? ── Yes → Save
+   │
+   No
+   ↓
+Fresh continuation pass
+```
+
+Continuation passes use bounded checkpoints and rebuild their prompts from Python state instead of depending on prior UI Chat turns.
+
+### Change Chapter
+
+`Change Chapter` performs a targeted rewrite of an existing chapter. Its request can go through a consistency precheck before the rewrite planner continues.
+
+The rewrite uses scoped chapter context and does not automatically import UI Chat history as hidden context.
+
+### Generate Full Book
+
+`Generate Full Book` is an orchestration layer over `Write Chapter`.
+
+It:
+
+- writes remaining chapters sequentially using the normal `Write Chapter` workflow;
+- therefore inherits the same long-form output budgeting used by `Write Chapter`;
+- keeps Chat cleanup between chapters;
+- reloads the project between chapters;
+- stops if a chapter is incomplete;
+- does **not** automatically update Story Memory.
+
+---
+
+## Context and workflow boundaries
+
+Dedicated chapter workflows deliberately use scoped context.
+
+### Context Size vs. output length
+
+**Context Size** is the model's total token window. It is shared by the prompt and the generated reply:
+
+```text
+Context Size = prompt tokens + generated tokens
+```
+
+For long-form `Write Chapter` generation, the effective output budget is calculated from the active model context:
+
+```text
+Available output ≈ Context Size - actual prompt tokens - 256 token safety margin
+```
+
+This calculation is applied to each fresh chapter-generation or continuation pass. `Generate Full Book` uses `Write Chapter` internally, so every chapter inherits the same behavior.
+
+The **Max Tokens per Pass** setting remains available for workflows that use an explicit requested output cap. `Write Chapter` is intentionally not artificially capped by that shared setting; it uses the remaining model context instead.
+
+```text
+Full Character DB ───┐
+                     ├──> Relevant chapter context ──> Chapter workflow
+Full World ──────────┘
+
+Outline Chapter N ────────────────────────────────────> Chapter workflow
+Author Profile ───────────────────────────────────────> Chapter workflow
+```
+
+Write Chapter and Change Chapter do not automatically use:
+
+```text
+UI Chat history        ❌
+Chat Summary           ❌
+Story Memory           ❌
+Unrelated project data ❌
+```
+
+This keeps model prompts focused on the current task.
+
+---
+
+## Memory
+
+Story Memory is a separate project feature. It can be inspected and edited manually.
+
+`Generate Full Book` does not automatically update Story Memory between chapters. Memory therefore remains separate from the chapter-writing input context unless a dedicated workflow explicitly uses it.
 
 ---
 
 ## Chat
 
-Chat is the general-purpose AI workspace.
+The top-level Chat tab is a general-purpose writing assistant.
 
-Available controls include:
+With project context enabled, Chat can work with broader project information and its own conversation history. A chapter can also be attached for focused discussion.
 
-- **Send**
-- **Stop**
-- **Insert Chapter**
-- **Context: ON/OFF**
-- **Clear Chat**
+### Define Idea
 
-With context enabled, the conversation can include the project's synopsis, outline, characters and relationships, world notes, memory, and conversation summary.
+**Define Idea** is a focused narrative-development mode for turning rough author notes into a coherent story idea without immediately writing the finished scene.
+
+The author can provide fragments or a desired outcome with missing connective logic. Define Idea is instructed to:
+
+- preserve every concrete event, outcome, constraint, and relationship explicitly requested by the author;
+- fill missing causes, transitions, obstacles, reactions, discoveries, and consequences;
+- resolve reasonable unspecified details instead of repeatedly asking the author to decide them;
+- use relevant established Characters and relevant World information;
+- use the Author Profile and Writing Style to shape tone, pacing, tension, emotional direction, themes, and dialogue;
+- use brief dialogue when it helps establish interaction, conflict, information, emotion, or a turning point;
+- produce connected developmental prose rather than a numbered list or a fully written novel scene.
+
+Define Idea uses project context for this behavior. Context therefore supplies the relevant story information and creative direction before the current author request.
+
+Define Idea is a **non-mutating planning operation**. It does not continue a chapter and does not automatically modify chapter content, Characters, or World from its response.
+
+Chat history is not automatically carried into Write Chapter or Change Chapter.
 
 ---
 
-## Image generation
+## Features
 
-The **Images** area is currently independent from the main writing workflow.
-
-It provides:
-
-| Type | Purpose |
+| Area | What it does |
 |---|---|
-| **Book Cover** | Create a visual cover concept. |
-| **Scene Illustration** | Visualize a moment from the story. |
-| **Location** | Visualize a place or setting. |
-| **Object / Item** | Visualize an important prop, artifact, weapon, object, or item. |
-
-Character portraits can also be generated from the Characters workflow or in batches from the Images tab.
-
-All generated images are saved inside the active project.
+| 📚 **Projects** | Create, open, search, rename, and delete projects. |
+| ✍️ **Synopsis / Draft** | Write or paste story material, validate consistency, repair contradictions, develop the draft with the Author Profile, then build Characters and World from the finalized draft. Text already used by the outline is locked (gray); new text is purple and can be developed on its own with **Develop New Text**. |
+| 🧭 **Outline** | Split the story into chronological chapter source blocks, generate rich chapter treatments, add chapters from new draft text (Add Chapters mode), and extend an existing outline with a cover request. Requires the `## Chapter N: Title` format in English. |
+| 👤 **Characters** | Manage character details, traits, backstories, and relationships. |
+| 🌍 **World** | Manage reusable setting and world information. |
+| 📖 **Chapters** | Generate, continue, review, change, edit, save, and delete chapters. Generate the remaining book sequentially. |
+| 🧠 **Memory** | Maintain separate reusable story-state information. |
+| 🎨 **Author** | Define creative intent and writing-style preferences. |
+| 💬 **Chat** | General writing assistance, optional project context, chapter attachment, and Define Idea mode for developing rough narrative ideas. |
+| 📊 **Stats** | Inspect word counts, chapter counts, reading-time information, review state, and progress. |
+| 🔎 **Search** | Search project content with normal, case-sensitive, or regex-based matching. |
+| ⚙️ **Models & Settings** | Configure local GGUF inference, an Ollama server, cloud API providers (including custom OpenAI-compatible endpoints), model assignments, context size, generation parameters, and response language. |
+| 🖥️ **Console** | Inspect runtime logs and generation diagnostics. |
+| ⇩ **Export Book** | Export the finished book to Word, PDF, Markdown, or plain text. |
 
 ---
 
-## Export
+## Using the UI
 
-Use **Export Book** to save the current book as:
+### 1. Create or open a project
 
-- **Word (.docx)**
-- **PDF (.pdf)**
-- **Markdown (.md)**
-- **Plain text (.txt)**
+Use **Projects** to create a project or continue an existing one.
+
+### 2. Configure models
+
+The interface is shown in English. The **response language** in Settings controls the language of generated story text, not the interface.
+
+Configure the backend you want to use in **Settings**:
+
+- **Local GGUF:** set the models directory and use a `.gguf` file with `llama-cpp-python`. GPU and CPU options apply to local inference.
+- **Ollama:** start Ollama, set its server URL if it is not running at the default address, and use **Check Connection**. Install models with `ollama pull <model-name>` before assigning them.
+- **Cloud APIs:** choose a provider card, enter its API key when required, set the optional Base URL and model list, and use **Fetch model list** where supported. The **Custom OpenAI-compatible server** option lets you configure compatible hosted services or your own endpoint.
+
+Open **Models** to assign the desired local, Ollama, or cloud model to each task. **Context Size** controls the configured model window (prompt + reply). **Max Tokens per Pass** is an explicit reply cap for workflows that use it; long-form **Write Chapter / Generate Full Book** generation uses the available context budget instead of being artificially limited by this value.
+
+### 3. Write the story
+
+Open **Story → Synopsis / Draft**, write or paste your story, then press **Generate Draft**.
+
+### 4. Generate the outline
+
+Open **Story → Outline**, choose the chapter count, and press **Generate Outline**. The outline must use the `## Chapter N: Title` format in English (see [Required format](#required-format)).
+
+### 5. Add chapters from new material
+
+1. Open **Synopsis / Draft** and write the new text **below** the gray (locked) text.
+2. Save, then press **✨ Develop New Text**. Only the purple text is developed.
+3. Open **Outline** and press **Generate Outline**. Enter the number of **new** chapters.
+4. The new chapters are appended. Existing chapters are not changed.
+
+### 6. Extend the outline with a cover request
+
+Use **Extend Outline** to add chapters from a short description of what they should cover.
+
+### 7. Review the canon
+
+Inspect **Characters** and **World** after the draft or an outline extension has updated them. Manual editing remains available.
+
+### 8. Chat and Define Idea
+
+Open **Chat** for general story discussion. Enable **Define Idea** when you want the model to turn a rough request into a developed narrative idea while using relevant story context and the configured Author Profile / Writing Style.
+
+Define Idea keeps the response in development form and does not modify Characters, World, or chapter content.
+
+### 9. Write chapters
+
+Open **Story → Chapters** and use:
+
+```text
+Generate Chapter
+Generate Next Chapter
+Generate Full Book
+Change Chapter
+Continue
+Review
+Save
+Delete
+```
+
+### 10. Export
+
+Use **Export Book** to create the final manuscript in a supported format.
+
+---
+
+## Workflow Architecture
+
+```text
+                    AUTHOR STORY INPUT
+                           │
+                           ▼
+                  ┌──────────────────┐
+                  │ SYNOPSIS / DRAFT │
+                  └────────┬─────────┘
+                           │
+                 consistency validation
+                           │
+                    repair if needed
+                           │
+                    draft development
+                    + Author Profile
+                           │
+                           ▼
+                 Final Synopsis / Draft
+                           │
+                  ┌────────┴────────┐
+                  ▼                 ▼
+             Characters          World
+                  │                 │
+                  └────────┬────────┘
+                           ▼
+                       OUTLINE
+                           │
+                  semantic split
+                           │
+                relevant canon per chunk
+                           │
+                    Author Profile
+                           │
+                           ▼
+                 detailed chapter plans
+                           │
+                           ▼
+                       CHAPTERS
+                           │
+                 write / change / review
+                           │
+                           ▼
+                         BOOK
+```
+
+### Generate Outline
+
+```text
+Final Synopsis / Draft
+        ↓
+Split into exactly N chronological blocks
+        ↓
+Chunk N
+   ├── relevant Characters
+   ├── relevant World
+   └── Author Profile
+        ↓
+Rich chapter treatment
+```
+
+### Chapter writing
+
+```text
+Outline Chapter N
+      ↓
+Planning checklist
+      ↓
+Relevant Characters + World
+      ↓
+Author Profile
+      ↓
+Write Chapter
+      ↓
+Use remaining Context Size for output
+      ↓
+Evaluator
+      ├── complete → save
+      └── incomplete → fresh continuation
+```
+
+### Define Idea
+
+```text
+Author's rough idea
+        ↓
+Define Idea instruction
+        +
+Relevant Characters + World
+        +
+Author Profile + Writing Style
+        +
+Current Chat context
+        ↓
+Connected developed idea
+        ↓
+No chapter / world / character mutation
+```
+
+---
+
+## Model backends and cloud providers
+
+AI Story Studio has a shared model router so the writing workflows can use different backends through the same generation interface. The selected backend is determined by each task's model assignment.
+
+### Local GGUF models
+
+Run GGUF files on your own computer through `llama-cpp-python`. Local settings include context size, GPU layers, CPU threads, and generation parameters such as temperature, Top P, and Top K. GPU acceleration depends on your installed `llama-cpp-python` build and hardware.
+
+### Ollama
+
+Connect to an Ollama server (local by default, or a different server URL). The application can check the connection and list models already installed on that server. Pull models in Ollama first; AI Story Studio does not download Ollama models itself. Ollama manages model loading and its own runtime settings.
+
+### Cloud APIs and custom providers
+
+Use hosted models with your own provider credentials. Built-in provider presets are **OpenAI**, **Anthropic (Claude)**, **Google Gemini**, and **OpenRouter**. The **Custom OpenAI-compatible server** preset supports compatible APIs, gateways, proxies, or self-hosted endpoints that implement the OpenAI Chat Completions request format. Anthropic uses its Messages API format.
+
+Each provider can be configured with an API key (where required), a Base URL, and a list of model IDs. Use **Fetch model list** to query the provider, then assign a chosen model in **Text Models**. Cloud models run remotely, so prompts and story context included in the request are sent to that provider. Review that provider's data-handling terms before use.
+---
+
+## TODO
+
+### Character Generation / Extraction
+
+- Control the maximum number of traits per character.
+- Avoid redundant or overly generic traits.
+- Improve trait selection so only story-relevant traits are retained.
+- Validate relationships before adding them.
+- Prevent the model from inventing unsupported relationships.
+- Prevent duplicate or contradictory relationships.
+- Ensure both characters involved in a relationship actually exist.
+- Properly separate `role`, `traits`, `description`, and `backstory`.
+- Improve merging with existing characters without overwriting valid information.
+- Make Character Generation rely only on information explicitly stated or strongly supported by the Synopsis/Draft, Outline, and Chapters.
 
 ---
 
@@ -447,89 +621,53 @@ Use **Export Book** to save the current book as:
 
 ### Requirements
 
-- Python **3.10+**
+- Python 3.10+
 - PySide6
-- cryptography
-- A compatible local **GGUF** model with `llama-cpp-python` for AI text generation
-- The image-generation backend and model configuration when using **Images**
-- `python-docx` and `reportlab` when Word/PDF export support is needed
+- `llama-cpp-python`
+- Dependencies listed in `requirements.txt`
+- A local GGUF model if you want local inference through `llama-cpp-python`
+- Ollama installed and running if you want to use the Ollama backend
+- A network connection and provider API key when required if you want to use cloud models
+- Optional CUDA-capable GPU configuration for supported local GPU inference
 
-### Install
+### Run on Windows
 
-```bash
-git clone https://github.com/brucerc94/AIStoryWriter.git
-cd AIStoryWriter
-python -m venv .venv
+The repository includes `run.bat` for launching the application from the local virtual environment after setup.
+
+```text
+run.bat
 ```
 
-**Windows**
+### First launch
 
-```bat
-.venv\Scripts\activate
-```
-
-**Linux / macOS**
-
-```bash
-source .venv/bin/activate
-```
-
-Then:
-
-```bash
-pip install -r requirements.txt
-pip install llama-cpp-python
-```
-
-Optional Word/PDF export support:
-
-```bash
-pip install python-docx reportlab
-```
-
-### Run
-
-```bash
-python main.py
-```
-
-On Windows, `run.bat` is also available as a convenience launcher.
-
-### First setup in the app
-
-1. Open **Settings** and choose the **Models Directory**.
-2. Scroll to the bottom and click **Save App Settings**.
-3. Open **Models** and assign a GGUF model to the tasks you plan to use.
-4. Create a project from **Projects → + New**.
-5. Open **Story → Synopsis** and write or generate the synopsis. Click **Save** after manual edits.
-6. Open **Story → Outline** and generate or write the outline. Click **Save** after manual edits.
-7. Add **Characters**, **World**, and an **Author Profile** as needed. Click **Save** after manual World or Memory edits.
-8. Open **Story → Chapters** and generate chapters from the outline.
-9. Use **Chat**, **Images**, **Stats**, **Search**, and **Console** as needed.
-10. Export the finished manuscript with **Export Book**.
+1. Create or open a project.
+2. In **Settings**, configure the GGUF directory, Ollama connection, or Cloud API provider you want to use.
+3. Open **Models** and assign a model to the required tasks.
+4. Open **Synopsis / Draft** and write your story.
+5. Generate the normalized draft.
+6. Review Characters and World.
+7. Generate the Outline with the desired chapter count.
+8. Generate and revise chapters.
+9. Export the finished book.
 
 ---
 
-## Current scope
+## Known limitations
 
-AI Story Studio is a local desktop application. Language and image models are **not bundled** with the repository and must be provided by the user.
+- Chapter detection depends on the `## Chapter N: Title` heading format. Other formats may not be recognized.
+- Long-form generation is limited by the output budget (**Max Tokens per Pass**, 4000 by default for drafts and outline entries). A very long draft can be truncated; check the end of the result after generating.
+- Output quality and supported behavior depend on the selected model, provider, context limits, and API implementation. If a model returns empty output or invalid structure, the app reports an error and may leave the result unsaved.
+- Unlocking the Synopsis and generating the outline again replaces the existing outline.
 
-The main writing workflow is the **Story** workspace. Image generation is functional, but it is currently a standalone companion tool rather than part of the automatic story-generation pipeline.
+---
 
-This README intentionally follows the **UI currently shipped**. New user-facing features should be added here when they are actually visible and usable in the application.
+## Development status
 
-Because the project is still in development, behavior, UI details, and supported models may change before a stable release.
+AI Story Studio is an active development project. Local-model behavior can vary by model family, quantization, context size, and hardware; Ollama behavior depends on the selected local server/model; cloud behavior depends on provider availability, API compatibility, limits, and pricing.
 
-## Screenshot directory
+The repository contains automated tests covering important workflow, context, continuation, and outline behaviors.
 
-```text
-docs/
-└── screenshots/
-    ├── Animation.gif
-    ├── story.jpg
-    ├── chat.jpg
-    └── book.jpg
-```
+---
 
 ## License
 

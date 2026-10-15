@@ -1,7 +1,6 @@
 @echo off
 setlocal
 
-
 if not exist .venv (
     echo [ERROR] No se encontro el entorno virtual ".venv".
     echo Ejecuta primero setup.bat
@@ -16,11 +15,18 @@ if errorlevel 1 (
     exit /b 1
 )
 
+rem ============================================================
+rem stable-diffusion.cpp externo - Qwen Image 2.1 / Z-Image
+rem ============================================================
+set "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6"
+set "STABLE_DIFFUSION_CPP_LIB=G:\Documents\Varios\AIStoryWriter\sd-cpp\stable-diffusion.dll"
+set "PATH=G:\Documents\Varios\AIStoryWriter\sd-cpp;%CUDA_PATH%\bin;%PATH%"
+
 rem GTX 1660 Ti (Turing, CC 7.5) no tiene Tensor Cores reales:
 rem forzar MMQ para evitar los kernels cuBLAS/Tensor Core.
 rem engine\chat.py tambien lo detecta y aplica esto automaticamente,
 rem pero se fija aqui tambien por si el backend lo lee al arrancar.
-set GGML_CUDA_FORCE_MMQ=1
+set "GGML_CUDA_FORCE_MMQ=1"
 
 echo ================================================
 echo   AI Story Studio
