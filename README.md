@@ -131,9 +131,52 @@ Characters and World are extracted or updated **only after the final draft exist
 
 The internal project field remains `project.synopsis` for compatibility while the UI presents it as **Synopsis / Draft**.
 
+### Locked text and adding new material
+
+After **Generate Outline** uses the draft, the text it used becomes **locked**. The editor shows two colors:
+
+- **Gray**: text already used by the outline. It cannot be edited. The app protects it with a hash of the exact text.
+- **Purple**: new text that is not in the outline yet.
+
+A legend above the editor explains the colors. While locked text exists, the button reads **✨ Develop New Text**. It develops only the purple text. The gray text is kept exactly as it was, so the outline stays valid. Developed text is still "new" until **Generate Outline** uses it.
+
+To add material to a story that already has an outline:
+
+```text
+Write new text below the gray text
+      ↓
+Save, then press ✨ Develop New Text   (only the purple text is developed)
+      ↓
+Generate Outline → "How many NEW chapters do you want to add?"
+      ↓
+Existing chapters are not changed; new chapters are appended
+```
+
+- Characters and World are built from the new text when it is developed.
+- If there is no new text, Generate Outline shows a message and changes nothing.
+- If the gray text was edited, the app refuses the change and tells you to unlock it.
+
+**Unlock Synopsis to Regenerate** allows editing the gray text. After unlocking, the next **Generate Outline** creates the whole outline again and **replaces** the existing chapters.
+
 ---
 
 ## Outline
+
+### Required format
+
+The app finds chapters by their headings, so the outline must use this format:
+
+```text
+## Chapter N: Title
+```
+
+- Write the outline **in English**.
+- The heading must be exactly `## Chapter N:` followed by the title. Use the number of the chapter (1, 2, 3...).
+- Labels inside the outline, such as `Chapter Plan:` and `Continuity:`, must stay in English.
+- The narrative text follows the response language set in **Settings**. If you write narrative text in another language, the headings and labels must still be English, or chapters will not be detected.
+- `## Capítulo N` and other variants are not reliably detected. Chapter writing, Export, and Generate Full Book rely on `## Chapter N`.
+
+If a heading is missing or written differently, that chapter may not be found by Write Chapter, Review, Export, or Generate Full Book.
 
 ### Generate Outline
 
@@ -159,25 +202,25 @@ The chapter treatment is a **rich planning artifact**. It can contain character 
 
 `Generate Outline` does **not** create or update Characters or World as a side effect.
 
+### Adding chapters from new draft text
+
+When the Synopsis / Draft already has locked text, **Generate Outline** opens in **Add Chapters** mode:
+
+- It asks for the number of **new** chapters, not the total. A suggestion is based on the length of the new text.
+- The Author Profile and Writing Style in that dialog are saved to the project and applied to the new chapters.
+- Existing chapters are not changed.
+
+The new text is split into exactly that many chronological blocks, using the same pipeline as the first outline. Each new chapter is then written from its own block, with relevant Characters, relevant World, and the Author Profile. Characters and World are not extracted again, because they were built when the draft was developed.
+
 ### Extend Outline
 
-`Extend Outline` works from an existing outline plus new material entered by the user. It generates the requested new chapters without rewriting earlier ones.
+**Extend Outline** is a separate button. It adds chapters from a short **cover request** that describes what the new chapters should cover (for example, "the confrontation at the harbor and its aftermath"). It does not use the new text in the Synopsis / Draft.
 
-For each new chapter it uses:
+- It generates the requested number of chapters without rewriting earlier ones.
+- The planner uses the cover request, a short tail of the existing outline, relevant Characters, relevant World, and the Author Profile.
+- After the chapters are generated, **Characters and World are updated from the cover request text**. This lets an extension introduce characters, relationships, locations, or world information that the draft did not contain.
 
-```text
-New chapter source
-      +
-Relevant Characters
-      +
-Relevant World
-      +
-Author Profile
-      ↓
-Rich chapter treatment
-```
-
-After all requested chapters have been successfully generated, **Characters and World are updated from the user's original extension material**. This allows a user extension to introduce new characters, relationships, locations, or world information that did not exist in the original draft.
+To add chapters from new story material, use **Add Chapters** in Generate Outline (above), not Extend Outline.
 
 ---
 
@@ -354,8 +397,8 @@ Chat history is not automatically carried into Write Chapter or Change Chapter.
 | Area | What it does |
 |---|---|
 | 📚 **Projects** | Create, open, search, rename, and delete projects. |
-| ✍️ **Synopsis / Draft** | Write or paste story material, validate consistency, repair contradictions, develop the draft with the Author Profile, then build Characters and World from the finalized draft. |
-| 🧭 **Outline** | Split the story into chronological chapter source blocks, generate rich chapter treatments, edit them, and extend an existing outline. |
+| ✍️ **Synopsis / Draft** | Write or paste story material, validate consistency, repair contradictions, develop the draft with the Author Profile, then build Characters and World from the finalized draft. Text already used by the outline is locked (gray); new text is purple and can be developed on its own with **Develop New Text**. |
+| 🧭 **Outline** | Split the story into chronological chapter source blocks, generate rich chapter treatments, add chapters from new draft text (Add Chapters mode), and extend an existing outline with a cover request. Requires the `## Chapter N: Title` format in English. |
 | 👤 **Characters** | Manage character details, traits, backstories, relationships, and portraits. |
 | 🌍 **World** | Manage reusable setting and world information. |
 | 📖 **Chapters** | Generate, continue, review, change, edit, save, and delete chapters. Generate the remaining book sequentially. |
@@ -379,6 +422,8 @@ Use **Projects** to create a project or continue an existing one.
 
 ### 2. Configure models
 
+The interface is shown in English. The **response language** in Settings controls the language of generated story text, not the interface.
+
 Open **Settings** to configure the models directory and local generation settings. **Context Size** controls the total model window (prompt + reply). **Max Tokens per Pass** is an explicit reply cap for workflows that use it; long-form **Write Chapter / Generate Full Book** generation uses the available context budget instead of being artificially limited by this value. Use **Models** to assign GGUF models to the required tasks.
 
 ### 3. Write the story
@@ -387,23 +432,30 @@ Open **Story → Synopsis / Draft**, write or paste your story, then press **Gen
 
 ### 4. Generate the outline
 
-Open **Story → Outline**, choose the chapter count, and press **Generate Outline**.
+Open **Story → Outline**, choose the chapter count, and press **Generate Outline**. The outline must use the `## Chapter N: Title` format in English (see [Required format](#required-format)).
 
-### 5. Extend the outline
+### 5. Add chapters from new material
 
-Use **Extend Outline** when you want to add new story material and additional chapters to an existing outline.
+1. Open **Synopsis / Draft** and write the new text **below** the gray (locked) text.
+2. Save, then press **✨ Develop New Text**. Only the purple text is developed.
+3. Open **Outline** and press **Generate Outline**. Enter the number of **new** chapters.
+4. The new chapters are appended. Existing chapters are not changed.
 
-### 6. Review the canon
+### 6. Extend the outline with a cover request
+
+Use **Extend Outline** to add chapters from a short description of what they should cover.
+
+### 7. Review the canon
 
 Inspect **Characters** and **World** after the draft or an outline extension has updated them. Manual editing remains available.
 
-### 7. Chat and Define Idea
+### 8. Chat and Define Idea
 
 Open **Chat** for general story discussion. Enable **Define Idea** when you want the model to turn a rough request into a developed narrative idea while using relevant story context and the configured Author Profile / Writing Style.
 
 Define Idea keeps the response in development form and does not modify Characters, World, or chapter content.
 
-### 8. Write chapters
+### 9. Write chapters
 
 Open **Story → Chapters** and use:
 
@@ -418,7 +470,7 @@ Save
 Delete
 ```
 
-### 9. Export
+### 10. Export
 
 Use **Export Book** to create the final manuscript in a supported format.
 
@@ -592,6 +644,15 @@ run.bat
 6. Generate the Outline with the desired chapter count.
 7. Generate and revise chapters.
 8. Export the finished book.
+
+---
+
+## Known limitations
+
+- Chapter detection depends on the `## Chapter N: Title` heading format. Other formats may not be recognized.
+- Long-form generation is limited by the output budget (**Max Tokens per Pass**, 4000 by default for drafts and outline entries). A very long draft can be truncated; check the end of the result after generating.
+- Output quality depends on the local model. If a model returns empty output or invalid structure, the app reports an error and saves nothing.
+- Unlocking the Synopsis and generating the outline again replaces the existing outline.
 
 ---
 
