@@ -95,6 +95,7 @@ class EmptyStateCard(QWidget):
         parent=None,
     ) -> None:
         super().__init__(parent)
+        self.tertiary_btn = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -154,13 +155,12 @@ class EmptyStateCard(QWidget):
                 sep.setStyleSheet("color: transparent;")
                 link_row.addWidget(sep)
             if tertiary_label:
-                tertiary_btn = QPushButton(tertiary_label)
-                tertiary_btn.setObjectName("emptyStateLink")
-                tertiary_btn.setCursor(Qt.PointingHandCursor)
-                tertiary_btn.clicked.connect(self.tertiary_clicked)
-                link_row.addWidget(tertiary_btn)
+                self.tertiary_btn = QPushButton(tertiary_label)
+                self.tertiary_btn.setObjectName("emptyStateLink")
+                self.tertiary_btn.setCursor(Qt.PointingHandCursor)
+                self.tertiary_btn.clicked.connect(self.tertiary_clicked)
+                link_row.addWidget(self.tertiary_btn)
             link_row.addStretch()
             card_layout.addLayout(link_row)
 
         outer.addWidget(card, 0, Qt.AlignCenter)
-

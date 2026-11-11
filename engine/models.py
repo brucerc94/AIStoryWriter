@@ -452,9 +452,20 @@ class Project:
     recent_message_window: int = 20
     outline_source_length: int = 0
     outline_source_hash: str = ""
+    auto_book_status: str = "idle"
+    auto_book_stage: str = "idle"
+    auto_book_idea: str = ""
+    auto_book_characters_ready: bool = False
+    auto_book_memory_chapter: int = 0
+    auto_book_review: str = ""
+    auto_book_review_passed: bool = False
+    auto_book_review_signature: str = ""
+    auto_book_audit: str = ""
+    auto_book_audit_passed: bool = False
+    auto_book_audit_signature: str = ""
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "title": self.title, "synopsis": self.synopsis, "outline": self.outline, "world": self.world, "memory": self.memory, "chat_summary": self.chat_summary, "model_assignments": self.model_assignments.to_dict(), "task_temperatures": self.task_temperatures.to_dict(), "author_intent": self.author_intent.to_dict(), "writing_style": self.writing_style.to_dict(), "created_at": self.created_at, "updated_at": self.updated_at, "workflow_status": self.workflow_status.value, "current_chapter": self.current_chapter, "recent_message_window": self.recent_message_window, "outline_source_length": self.outline_source_length, "outline_source_hash": self.outline_source_hash}
+        return {"id": self.id, "title": self.title, "synopsis": self.synopsis, "outline": self.outline, "world": self.world, "memory": self.memory, "chat_summary": self.chat_summary, "model_assignments": self.model_assignments.to_dict(), "task_temperatures": self.task_temperatures.to_dict(), "author_intent": self.author_intent.to_dict(), "writing_style": self.writing_style.to_dict(), "created_at": self.created_at, "updated_at": self.updated_at, "workflow_status": self.workflow_status.value, "current_chapter": self.current_chapter, "recent_message_window": self.recent_message_window, "outline_source_length": self.outline_source_length, "outline_source_hash": self.outline_source_hash, "auto_book_status": self.auto_book_status, "auto_book_stage": self.auto_book_stage, "auto_book_idea": self.auto_book_idea, "auto_book_characters_ready": self.auto_book_characters_ready, "auto_book_memory_chapter": self.auto_book_memory_chapter, "auto_book_review": self.auto_book_review, "auto_book_review_passed": self.auto_book_review_passed, "auto_book_review_signature": self.auto_book_review_signature, "auto_book_audit": self.auto_book_audit, "auto_book_audit_passed": self.auto_book_audit_passed, "auto_book_audit_signature": self.auto_book_audit_signature}
 
     @classmethod
     def from_dict(cls, d: dict) -> "Project":
@@ -462,7 +473,7 @@ class Project:
         tt = TaskTemperatures.from_dict(d.get("task_temperatures", {}))
         ai = AuthorIntent.from_dict(d.get("author_intent", {}))
         ws = WritingStyle.from_dict(d.get("writing_style", {}))
-        return cls(id=d.get("id", str(uuid.uuid4())), title=d["title"], synopsis=d.get("synopsis", ""), outline=d.get("outline", ""), world=d.get("world", ""), memory=d.get("memory", ""), chat_summary=d.get("chat_summary", ""), model_assignments=ma, task_temperatures=tt, author_intent=ai, writing_style=ws, created_at=d.get("created_at", datetime.now().isoformat()), updated_at=d.get("updated_at", datetime.now().isoformat()), workflow_status=WorkflowStatus(d.get("workflow_status", "idle")), current_chapter=d.get("current_chapter", 0), recent_message_window=d.get("recent_message_window", 20), outline_source_length=d.get("outline_source_length", 0), outline_source_hash=d.get("outline_source_hash", ""))
+        return cls(id=d.get("id", str(uuid.uuid4())), title=d["title"], synopsis=d.get("synopsis", ""), outline=d.get("outline", ""), world=d.get("world", ""), memory=d.get("memory", ""), chat_summary=d.get("chat_summary", ""), model_assignments=ma, task_temperatures=tt, author_intent=ai, writing_style=ws, created_at=d.get("created_at", datetime.now().isoformat()), updated_at=d.get("updated_at", datetime.now().isoformat()), workflow_status=WorkflowStatus(d.get("workflow_status", "idle")), current_chapter=d.get("current_chapter", 0), recent_message_window=d.get("recent_message_window", 20), outline_source_length=d.get("outline_source_length", 0), outline_source_hash=d.get("outline_source_hash", ""), auto_book_status=d.get("auto_book_status", "idle"), auto_book_stage=d.get("auto_book_stage", "idle"), auto_book_idea=d.get("auto_book_idea", ""), auto_book_characters_ready=d.get("auto_book_characters_ready", False), auto_book_memory_chapter=d.get("auto_book_memory_chapter", 0), auto_book_review=d.get("auto_book_review", ""), auto_book_review_passed=d.get("auto_book_review_passed", False), auto_book_review_signature=d.get("auto_book_review_signature", ""), auto_book_audit=d.get("auto_book_audit", ""), auto_book_audit_passed=d.get("auto_book_audit_passed", False), auto_book_audit_signature=d.get("auto_book_audit_signature", ""))
 
 
 @dataclass

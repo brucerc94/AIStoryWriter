@@ -13,6 +13,7 @@ which ChatPanel owns and drives.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -35,6 +36,7 @@ from PySide6.QtWidgets import (
 from agents.manager import ManagerAgent
 from engine import storage
 from engine import export as book_export
+from engine.book_validation import book_export_errors
 from engine.models import AppSettings, Project, TaskType
 from ui.chat import ChatPanel
 from ui.console import ConsolePanel
@@ -157,6 +159,7 @@ class MainWindow(QMainWindow):
         self._current_project: Optional[Project] = None
         self._manager = ManagerAgent()
         self._suggested_task: Optional[TaskType] = None
+        self._book_progress_total = 0
 
         self._build_ui()
         self._wire_signals()
@@ -401,6 +404,28 @@ class MainWindow(QMainWindow):
             self._ab_label.setText(msg)
             self._ab_spinner_lbl.show()
             self._ab_progress.show()
+            book_start = re.search(r"Writing (?:Full )?Book \((\d+)/(\d+)\)", msg)
+            chapter = re.search(r"Writing Chapter (\d+)/(\d+)", msg)
+            memory = re.search(r"Updating Story Memory for Chapter (\d+)", msg)
+            if book_start:
+                self._book_progress_total = int(book_start.group(2))
+                self._ab_progress.setRange(0, max(1, self._book_progress_total))
+                self._ab_progress.setValue(int(book_start.group(1)))
+            elif chapter:
+                self._book_progress_total = int(chapter.group(2))
+                self._ab_progress.setRange(0, max(1, self._book_progress_total))
+                self._ab_progress.setValue(max(0, int(chapter.group(1)) - 1))
+            elif memory and self._book_progress_total:
+                self._ab_progress.setRange(0, self._book_progress_total)
+                self._ab_progress.setValue(min(int(memory.group(1)), self._book_progress_total))
+            elif any(
+                token in msg.lower()
+                for token in ("literary review", "reviewing the complete novel", "final audit")
+            ) and self._book_progress_total:
+                self._ab_progress.setRange(0, self._book_progress_total)
+                self._ab_progress.setValue(self._book_progress_total)
+            else:
+                self._ab_progress.setRange(0, 0)
             if not self._ab_timer.isActive():
                 self._ab_timer.start()
         else:
@@ -414,6 +439,8 @@ class MainWindow(QMainWindow):
             self._ab_spinner_lbl.hide()
             self._ab_spinner_lbl.setText("")
             self._ab_progress.hide()
+            self._ab_progress.setRange(0, 0)
+            self._book_progress_total = 0
             self._ab_timer.stop()
 
     def _ab_tick(self) -> None:
@@ -549,6 +576,15 @@ class MainWindow(QMainWindow):
     def _show_export_menu(self) -> None:
         if not self._current_project:
             self.status.showMessage("Open a project first.", 3000)
+            return
+        export_errors = book_export_errors(self._current_project)
+        if export_errors:
+            QMessageBox.warning(
+                self,
+                "Book Not Ready",
+                "Export is available only after the global review and final audit pass.\n\n"
+                + "\n".join(f"• {error}" for error in export_errors),
+            )
             return
 
         menu = QMenu(self)

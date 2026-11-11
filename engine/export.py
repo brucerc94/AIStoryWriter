@@ -9,6 +9,16 @@ RuntimeError with an install hint that the UI surfaces to the user.
 from __future__ import annotations
 
 from engine.models import Project
+from engine.book_validation import book_export_errors
+
+
+def _require_finished_book(project: Project) -> None:
+    errors = book_export_errors(project)
+    if errors:
+        raise RuntimeError(
+            "This project cannot be exported as a finished book:\n- "
+            + "\n- ".join(errors)
+        )
 
 
 def _paragraphs(text: str) -> list[str]:
@@ -20,6 +30,7 @@ def _paragraphs(text: str) -> list[str]:
 
 def export_to_docx(project: Project, output_path: str) -> None:
     """Write the full novel (title, synopsis, chapters) to a .docx file."""
+    _require_finished_book(project)
     try:
         from docx import Document
         from docx.shared import Pt
@@ -52,6 +63,7 @@ def export_to_docx(project: Project, output_path: str) -> None:
 
 def export_to_pdf(project: Project, output_path: str) -> None:
     """Write the full novel (title, synopsis, chapters) to a .pdf file."""
+    _require_finished_book(project)
     try:
         from reportlab.lib.pagesizes import LETTER
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -110,6 +122,7 @@ def export_to_pdf(project: Project, output_path: str) -> None:
 
 def export_to_txt(project: Project, output_path: str) -> None:
     """Write the full novel to a plain-text file — no dependencies needed."""
+    _require_finished_book(project)
     lines: list[str] = []
 
     lines.append(project.title.upper())
@@ -142,6 +155,7 @@ def export_to_txt(project: Project, output_path: str) -> None:
 
 def export_to_markdown(project: Project, output_path: str) -> None:
     """Write the full novel to a Markdown (.md) file — no dependencies needed."""
+    _require_finished_book(project)
     lines: list[str] = []
 
     lines.append(f"# {project.title}")

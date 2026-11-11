@@ -298,16 +298,27 @@ The rewrite uses scoped chapter context and does not automatically import UI Cha
 
 ### Generate Full Book
 
-`Generate Full Book` is an orchestration layer over `Write Chapter`.
+**Create Full Book** accepts the free-form text in Draft and runs the existing
+draft, Characters, World, Outline, chapter-writing, and Story Memory workflows.
+It chooses chapter count through outline generation, writes chapters in order,
+and updates memory after each accepted chapter. If the application closes, the
+saved project records the current stage, completed chapters, and the last
+chapter whose memory update completed. Running Create Full Book again resumes
+from the next unfinished chapter or stage.
 
-It:
+After chapter writing, the workflow runs a global literary review using compact
+per-chapter evidence and canon rather than resending the full manuscript. It
+applies at most two targeted corrections through Change Chapter and verifies
+the result with a second review. The final audit requires every outline chapter
+to exist exactly once, in order, with non-empty accepted text, and the global
+review to approve a developed ending. Failed review or audit leaves the book
+paused and not exportable.
 
-- writes remaining chapters sequentially using the normal `Write Chapter` workflow;
-- therefore inherits the same long-form output budgeting used by `Write Chapter`;
-- keeps Chat cleanup between chapters;
-- reloads the project between chapters;
-- stops if a chapter is incomplete;
-- does **not** automatically update Story Memory.
+The activity bar shows the current phase and chapter progress. Stop finishes
+the current chapter and its memory update; Create Full Book then becomes
+Resume Full Book. DOCX, PDF, Markdown, and TXT exports are enabled only after
+the review and final audit pass. Any subsequent change to the story or
+manuscript invalidates the audit and requires a new review before export.
 
 ---
 

@@ -37,6 +37,7 @@ from engine.models import (
 from engine import storage
 from engine import prompts
 from engine import change_chapter
+from engine.book_validation import book_content_signature, validate_book_structure
 from engine.character_dedup import find_existing_character, merge_nonempty_fields
 
 
@@ -349,7 +350,7 @@ class WorkflowWorker(QObject):
         super().__init__()
         self.project = project
         self.task = task
-        self.extra_input = extra_input
+        self.extra_input = str(extra_input or "")
         self.settings = settings
         self.include_story_context = include_story_context
         self.chat_mode = chat_mode
@@ -357,6 +358,388 @@ class WorkflowWorker(QObject):
         self._stop_after_current_chapter = False
         self._approval_result: Optional[bool] = None
         self._approval_event = __import__("threading").Event()
+
+    def _checkpoint_auto_book(self, stage: str | None = None, status: str | None = None) -> None:
+        if stage is not None:
+            self.project.auto_book_stage = stage
+        if status is not None:
+            self.project.auto_book_status = status
+        storage.save_project(self.project)
+
+    def _ensure_auto_book_foundation(self) -> bool:
+        """Resume or create the idea, character/world bible, and outline stages."""
+        project = self.project
+        idea = (
+            project.auto_book_idea.strip()
+            or (self.extra_input or "").strip()
+            or project.synopsis.strip()
+        )
+        if not idea:
+            self.error_occurred.emit("Enter a free-form story idea in Draft before creating the book.")
+            return False
+
+        if not project.auto_book_idea:
+            project.auto_book_idea = idea
+            project.auto_book_review_passed = False
+            project.auto_book_audit_passed = False
+            project.auto_book_review_signature = ""
+            project.auto_book_audit_signature = ""
+        project.auto_book_status = "running"
+        self._checkpoint_auto_book()
+
+        # A fresh full-book request without an outline treats the submitted Draft
+        # text as source material and runs the existing draft normalization flow.
+        if not project.outline.strip() and project.auto_book_stage in {"idle", "idea", "draft"}:
+            self._checkpoint_auto_book(stage="draft")
+            saved_extra = self.extra_input
+            self.extra_input = idea
+            self.step_started.emit("Developing the story idea into a synopsis...")
+            try:
+                self._run_write_synopsis()
+            finally:
+                self.extra_input = saved_extra
+            if self._cancelled or not project.synopsis.strip():
+                return False
+            project.auto_book_characters_ready = bool(project.characters)
+            self._checkpoint_auto_book(stage="characters")
+
+        if not project.synopsis.strip():
+            project.synopsis = idea
+            storage.save_project(project)
+
+        if not project.auto_book_characters_ready:
+            self._checkpoint_auto_book(stage="characters")
+            self.step_started.emit("Building main and supporting characters...")
+            before_count = len(project.characters)
+            self._extract_and_merge_characters(project.synopsis)
+            project.auto_book_characters_ready = bool(project.characters)
+            storage.save_project(project)
+            if self._cancelled:
+                return False
+            if not project.auto_book_characters_ready:
+                project.auto_book_status = "paused"
+                project.auto_book_audit = (
+                    "Character extraction did not produce any characters; "
+                    "book generation stopped before chapter writing."
+                )
+                storage.save_project(project)
+                self.error_occurred.emit(
+                    "Could not build the story characters. Check the Update Memory model assignment and resume."
+                )
+                return False
+            logger.info(
+                "[write_book] Character bible ready (%d character(s), %d newly extracted).",
+                len(project.characters),
+                len(project.characters) - before_count,
+            )
+
+        world_facts = re.sub(
+            r"(?m)^\s*#{1,6}\s+.+$",
+            "",
+            project.world or "",
+        ).strip()
+        if not world_facts:
+            self._checkpoint_auto_book(stage="world")
+            self.step_started.emit("Building the world bible...")
+            self._run_generate_world()
+            if self._cancelled:
+                return False
+            if not project.world.strip():
+                self.error_occurred.emit(
+                    "World generation did not produce a world bible. Check the World model assignment and resume."
+                )
+                return False
+            world_facts = re.sub(
+                r"(?m)^\s*#{1,6}\s+.+$",
+                "",
+                project.world,
+            ).strip()
+            if not world_facts:
+                self.error_occurred.emit(
+                    "World generation produced only section headings. The book remains paused."
+                )
+                return False
+
+        if not project.outline.strip():
+            self._checkpoint_auto_book(stage="outline")
+            self.step_started.emit("Generating the chapter outline...")
+            self._run_generate_outline()
+            if self._cancelled:
+                return False
+            if not self._outline_chapter_numbers():
+                self.error_occurred.emit(
+                    "Outline generation did not produce detectable chapters. Review the Outline model and resume."
+                )
+                return False
+
+        if not project.synopsis.strip() or not project.outline.strip():
+            return False
+        if not project.auto_book_characters_ready:
+            return False
+        self._checkpoint_auto_book(stage="writing_chapters")
+        return True
+
+    def _next_book_chapter_number(self) -> int:
+        outline_numbers = self._outline_chapter_numbers()
+        if not outline_numbers:
+            return self._next_chapter_number()
+        by_number: dict[int, list[Chapter]] = {}
+        for chapter in self.project.chapters:
+            by_number.setdefault(chapter.number, []).append(chapter)
+        for number in outline_numbers:
+            matches = by_number.get(number, [])
+            if (
+                len(matches) != 1
+                or not matches[0].content.strip()
+                or matches[0].generation_status != "accepted"
+            ):
+                return number
+        return 0
+
+    def _next_book_memory_chapter_number(self) -> int:
+        outline_numbers = set(self._outline_chapter_numbers())
+        pending_memory = [
+            chapter.number
+            for chapter in self.project.chapters
+            if chapter.number > self.project.auto_book_memory_chapter
+            and (not outline_numbers or chapter.number in outline_numbers)
+            and chapter.content.strip()
+            and chapter.generation_status == "accepted"
+        ]
+        return min(pending_memory, default=0)
+
+    def _auto_book_review_context(self, max_chars: int = 8000) -> str:
+        project = self.project
+        canon_parts = [
+            f"TITLE: {project.title}",
+            f"SYNOPSIS:\n{project.synopsis[:850]}",
+            f"OUTLINE:\n{project.outline[:1300]}",
+            f"WORLD:\n{project.world[:600] or '(none)'}",
+            f"STORY MEMORY:\n{project.memory[-1400:] or '(none)'}",
+            "CHARACTERS:\n" + (format_characters_block(project.characters) or "(none)")[:900],
+            f"AUTHOR INTENT:\n{project.author_intent.to_prompt_fragment()[:500] or '(none)'}",
+            f"WRITING STYLE:\n{project.writing_style.to_prompt_fragment()[:500] or '(none)'}",
+        ]
+        canon = "\n\n".join(canon_parts)
+        chapters = sorted(project.chapters, key=lambda item: item.number)
+        per_chapter_limit = max(
+            50, (max_chars - len(canon) - 2 * len(chapters)) // max(1, len(chapters))
+        )
+        chapter_parts = []
+        for chapter in chapters:
+            content = chapter.content.strip()
+            plan = self._extract_chapter_outline_section(chapter.number)
+            summary = chapter.summary.strip()
+            source = summary or content
+            chapter_text = f"CH{chapter.number} {chapter.title}: {plan} {source}"
+            if content and content != source:
+                chapter_text += f" END: {content[-min(240, per_chapter_limit // 3):]}"
+            if len(chapter_text) > per_chapter_limit:
+                half = per_chapter_limit // 2
+                chapter_text = f"{chapter_text[:half]} [...] {chapter_text[-half:]}"
+            chapter_parts.append(chapter_text)
+        return "\n\n".join([canon] + chapter_parts)
+
+    @staticmethod
+    def _parse_auto_book_review(raw: str) -> dict | None:
+        text = (raw or "").strip()
+        start, end = text.find("{"), text.rfind("}")
+        if start < 0 or end <= start:
+            return None
+        try:
+            result = json.loads(text[start:end + 1])
+        except (json.JSONDecodeError, TypeError):
+            return None
+        if not isinstance(result, dict) or not isinstance(result.get("issues"), list):
+            return None
+        return result
+
+    def _request_auto_book_review(self) -> dict | None:
+        if not self._load_model_for_task(TaskType.REVIEW_CHAPTER):
+            return None
+        try:
+            context_limit = self._model_context_limit()
+        except RuntimeError:
+            context_limit = getattr(self.settings, "default_context_size", 4096)
+        review_budget = min(20000, max(2400, (context_limit - 1100) * 3))
+        language = self._response_language()
+        language_note = f"Write findings in {language}. " if language else ""
+        system = (
+            "You are a senior literary editor auditing a completed novel. "
+            "Review the whole book for continuity, contradictions, character arcs, "
+            "chronology, repetition, pacing, dialogue, transitions, and whether the ending "
+            "is fully developed. Distinguish major issues from minor preferences. "
+            "Return only one JSON object with keys status ('pass' or 'needs_revision'), "
+            "ending_complete (boolean), and issues (array). Each issue must have "
+            "chapter (integer), severity ('critical', 'major', or 'minor'), category, "
+            "and a concise actionable instruction. Include only evidence-supported issues. "
+            "A pass requires a developed ending and no critical or major issues. "
+            + language_note
+        )
+        self.step_started.emit("Reviewing the complete novel for continuity, pacing, and ending...")
+        raw = self._run_lean_inference(
+            TaskType.REVIEW_CHAPTER,
+            system,
+            self._auto_book_review_context(review_budget),
+            max_tokens=700,
+        )
+        return self._parse_auto_book_review(raw)
+
+    def _run_auto_book_literary_review(self) -> bool:
+        signature = book_content_signature(self.project)
+        if (
+            self.project.auto_book_review_passed
+            and self.project.auto_book_review_signature == signature
+        ):
+            return True
+
+        self._checkpoint_auto_book(stage="literary_review")
+        review = self._request_auto_book_review()
+        if review is None:
+            self.project.auto_book_review_passed = False
+            self.project.auto_book_review = "Global review returned invalid or empty structured results."
+            self._checkpoint_auto_book(status="paused")
+            self.error_occurred.emit(
+                "The global literary review could not be parsed. The book remains unfinished; resume to retry."
+            )
+            return False
+
+        issues = [
+            issue for issue in review["issues"]
+            if isinstance(issue, dict)
+            and str(issue.get("severity", "")).lower() in {"critical", "major"}
+        ]
+        actionable = [
+            issue for issue in issues
+            if isinstance(issue.get("chapter"), int)
+            and issue.get("chapter") > 0
+            and str(issue.get("instruction", "")).strip()
+        ]
+        corrections = actionable[:2]
+        applied = 0
+        for issue in corrections:
+            if self._cancelled:
+                return False
+            chapter_number = issue["chapter"]
+            chapter = next(
+                (item for item in self.project.chapters if item.number == chapter_number),
+                None,
+            )
+            if chapter is None:
+                continue
+            original = chapter.content
+            original_extra = self.extra_input
+            original_current = self.project.current_chapter
+            self.project.current_chapter = chapter_number
+            self.extra_input = (
+                "Apply this targeted global-review correction without changing unrelated "
+                f"material: {issue['instruction']}"
+            )
+            self._checkpoint_auto_book(stage=f"correcting_chapter_{chapter_number}")
+            self.step_started.emit(f"Applying a targeted correction to Chapter {chapter_number}...")
+            try:
+                self._run_change_chapter()
+            finally:
+                self.extra_input = original_extra
+                self.project.current_chapter = max(original_current, chapter_number)
+            updated = next(
+                (item for item in self.project.chapters if item.number == chapter_number),
+                None,
+            )
+            if updated is not None and updated.content.strip() != original.strip():
+                applied += 1
+                storage.save_project(self.project)
+                self.project.current_chapter = chapter_number
+                if not self._run_update_memory():
+                    self.project.auto_book_review_passed = False
+                    self._checkpoint_auto_book(status="paused")
+                    self.error_occurred.emit(
+                        f"Story Memory could not be reconciled after correcting Chapter {chapter_number}."
+                    )
+                    return False
+
+        if issues:
+            if applied == 0 or len(issues) > applied:
+                self.project.auto_book_review = json.dumps(review, ensure_ascii=False, indent=2)
+                self.project.auto_book_review_passed = False
+                self._checkpoint_auto_book(status="paused")
+                self.error_occurred.emit(
+                    "The global review found important issues that could not all be corrected safely. "
+                    "The project is not marked complete; resolve the findings and resume."
+                )
+                return False
+            review = self._request_auto_book_review()
+            if review is None:
+                self._checkpoint_auto_book(status="paused")
+                self.error_occurred.emit("Could not verify the targeted corrections. Resume to retry review.")
+                return False
+            remaining_issues = [
+                issue for issue in review["issues"]
+                if isinstance(issue, dict)
+                and str(issue.get("severity", "")).lower() in {"critical", "major"}
+            ]
+            if remaining_issues:
+                self.project.auto_book_review = json.dumps(review, ensure_ascii=False, indent=2)
+                self.project.auto_book_review_passed = False
+                self._checkpoint_auto_book(status="paused")
+                self.error_occurred.emit(
+                    "Important issues remain after targeted corrections. The book is not complete."
+                )
+                return False
+
+        passed = (
+            str(review.get("status", "")).lower() == "pass"
+            and bool(review.get("ending_complete"))
+            and not any(
+                isinstance(issue, dict)
+                and str(issue.get("severity", "")).lower() in {"critical", "major"}
+                for issue in review["issues"]
+            )
+        )
+        self.project.auto_book_review = json.dumps(review, ensure_ascii=False, indent=2)
+        self.project.auto_book_review_passed = passed
+        if passed:
+            self.project.auto_book_review_signature = book_content_signature(self.project)
+            self._checkpoint_auto_book(stage="final_audit")
+            return True
+
+        self._checkpoint_auto_book(status="paused")
+        self.error_occurred.emit(
+            "The global literary review did not approve the novel or its ending. "
+            "The book remains unfinished."
+        )
+        return False
+
+    def _run_auto_book_final_audit(self) -> bool:
+        self._checkpoint_auto_book(stage="final_audit")
+        self.step_started.emit("Running final audit: checking chapter order, completion, and reviewed ending...")
+        issues = validate_book_structure(self.project)
+        if not self.project.auto_book_review_passed:
+            issues.append("The global literary review has not passed.")
+        if (
+            self.project.auto_book_review_signature
+            != book_content_signature(self.project)
+        ):
+            issues.append("The manuscript changed after the global literary review.")
+        self.project.auto_book_audit = (
+            "Final audit passed: all outline chapters are present, ordered, non-empty, "
+            "accepted, and the global review approved the developed ending."
+            if not issues else "Final audit failed:\n- " + "\n- ".join(issues)
+        )
+        self.project.auto_book_audit_passed = not issues
+        if not issues:
+            self.project.auto_book_audit_signature = book_content_signature(self.project)
+            self.project.auto_book_status = "completed"
+            self.project.auto_book_stage = "completed"
+            self._checkpoint_auto_book()
+            self.step_started.emit("Final audit passed — the complete book is ready to export.")
+            return True
+        self.project.auto_book_status = "paused"
+        self._checkpoint_auto_book()
+        self.error_occurred.emit(
+            "Final audit failed; the book cannot be marked complete:\n- " + "\n- ".join(issues)
+        )
+        return False
 
     def cancel(self) -> None:
         self._cancelled = True
@@ -1045,6 +1428,12 @@ class WorkflowWorker(QObject):
             logger.info(f"[workflow] Task finished: {self.task.value}")
         except Exception as e:
             logger.error(f"[workflow] Task error: {self.task.value}: {e}\n{traceback.format_exc()}")
+            if self.task == TaskType.WRITE_BOOK:
+                self.project.auto_book_status = "paused"
+                self.project.auto_book_audit_passed = False
+                self.project.auto_book_audit = f"Creation stopped at {self.project.auto_book_stage}: {e}"
+                storage.save_project(self.project)
+                self.step_finished.emit("Full Book Progress", self.project.auto_book_audit)
             self.error_occurred.emit(f"Workflow error: {e}\n{traceback.format_exc()}")
         finally:
             self.finished.emit()
@@ -1119,9 +1508,10 @@ class WorkflowWorker(QObject):
 
     def _run_chat_continue_chapter(self, chapter_num: int) -> None:
         chapter = next((c for c in self.project.chapters if c.number == chapter_num), None)
+        request_text = self.extra_input or ""
         if not chapter:
 
-            result = self._run_inference(TaskType.CHAT, self.extra_input, add_to_chat=True)
+            result = self._run_inference(TaskType.CHAT, request_text, add_to_chat=True)
             if result:
                 self._maybe_summarize()
                 storage.save_project(self.project)
@@ -1139,8 +1529,8 @@ class WorkflowWorker(QObject):
         )
         if tail:
             model_prompt += f"\n\nThe chapter currently ends with:\n...{tail}"
-        if self.extra_input.strip():
-            model_prompt += f"\n\nAuthor's note for this continuation: {self.extra_input.strip()}"
+        if request_text.strip():
+            model_prompt += f"\n\nAuthor's note for this continuation: {request_text.strip()}"
 
 
         result = self._run_inference(
@@ -1151,7 +1541,7 @@ class WorkflowWorker(QObject):
             chapter.content = (chapter.content.rstrip() + sep + result).strip()
             chapter.reviewed = False
 
-            user_msg = ChatMessage(role=MessageRole.USER, content=self.extra_input)
+            user_msg = ChatMessage(role=MessageRole.USER, content=request_text)
             assistant_msg = ChatMessage(
                 role=MessageRole.ASSISTANT,
                 content=(
@@ -1169,9 +1559,9 @@ class WorkflowWorker(QObject):
 
     def _run_chat(self) -> None:
         self.step_started.emit("Generating response...")
+        request_text = self.extra_input or ""
 
-
-        if self.extra_input.startswith(CHAT_CHAPTER_ATTACHMENT_MARKER):
+        if request_text.startswith(CHAT_CHAPTER_ATTACHMENT_MARKER):
             self._run_chat_with_chapter_attachment()
             return
 
@@ -1180,13 +1570,13 @@ class WorkflowWorker(QObject):
         # chapter content, characters, and world.
         target_chapter_num = None
         if self.chat_mode != ChatMode.DEFINE_IDEA:
-            target_chapter_num = self._detect_chapter_continuation_request(self.extra_input)
+            target_chapter_num = self._detect_chapter_continuation_request(request_text)
 
         if target_chapter_num is not None:
             self._run_chat_continue_chapter(target_chapter_num)
             return
 
-        result = self._run_inference(TaskType.CHAT, self.extra_input, add_to_chat=True)
+        result = self._run_inference(TaskType.CHAT, request_text, add_to_chat=True)
         if result:
             self._maybe_summarize()
             storage.save_project(self.project)
@@ -1194,7 +1584,8 @@ class WorkflowWorker(QObject):
 
     def _run_chat_with_chapter_attachment(self) -> None:
 
-        body = self.extra_input[len(CHAT_CHAPTER_ATTACHMENT_MARKER):].lstrip("\n")
+        request_text = self.extra_input or ""
+        body = request_text[len(CHAT_CHAPTER_ATTACHMENT_MARKER):].lstrip("\n")
 
         # New format supports multiple chapter attachments.
         if body.startswith("===CHAPTER_ATTACHMENT===\n"):
@@ -1304,11 +1695,8 @@ class WorkflowWorker(QObject):
 
     def _run_write_synopsis(self) -> None:
         self.step_started.emit("Writing draft...")
-        prompt = (
-            self.extra_input
-            if self.extra_input
-            else f"Write a synopsis for a novel titled '{self.project.title}'."
-        )
+        request_text = self.extra_input or ""
+        prompt = request_text if request_text else f"Write a synopsis for a novel titled '{self.project.title}'."
         result = self._run_inference(TaskType.WRITE_SYNOPSIS, prompt, add_to_chat=True, max_tokens=1024)
         if result:
             self.project.synopsis = result
@@ -1322,10 +1710,11 @@ class WorkflowWorker(QObject):
     def _run_generate_outline(self) -> None:
 
         self.step_started.emit("Generating outline...")
-        if self.extra_input.startswith(OUTLINE_EXTEND_MARKER):
+        request_text = self.extra_input or ""
+        if request_text.startswith(OUTLINE_EXTEND_MARKER):
             self._run_extend_outline()
             return
-        if self.extra_input.startswith(OUTLINE_SUGGESTION_MARKER):
+        if request_text.startswith(OUTLINE_SUGGESTION_MARKER):
             self._run_regenerate_outline_with_suggestion()
             return
 
@@ -1333,12 +1722,12 @@ class WorkflowWorker(QObject):
             f"Generate a complete chapter-by-chapter outline for '{self.project.title}'.\n"
             "Use the structured format with Chapter Plan and Continuity for each chapter."
         )
-        if self.extra_input:
-            base_prompt += f"\n\n{self.extra_input}"
+        if request_text:
+            base_prompt += f"\n\n{request_text}"
         if self.project.synopsis:
             base_prompt += f"\n\nSynopsis: {self.project.synopsis}"
 
-        requested_n = self._extract_requested_chapter_count(self.extra_input)
+        requested_n = self._extract_requested_chapter_count(request_text)
 
         _outline_template_key = "task_instructions/generate_outline"
         _requested_count_str = str(requested_n) if requested_n is not None else "(not specified)"
@@ -1455,7 +1844,8 @@ class WorkflowWorker(QObject):
 
     def _run_regenerate_outline_with_suggestion(self) -> None:
 
-        suggestion = self.extra_input.split(OUTLINE_SUGGESTION_MARKER, 1)[1].strip()
+        request_text = self.extra_input or ""
+        suggestion = request_text.split(OUTLINE_SUGGESTION_MARKER, 1)[1].strip() if OUTLINE_SUGGESTION_MARKER in request_text else ""
         if not suggestion:
             self.error_occurred.emit("No outline suggestion was provided.")
             return
@@ -1592,7 +1982,8 @@ class WorkflowWorker(QObject):
 
     def _run_extend_outline(self) -> None:
 
-        payload = self.extra_input.split(OUTLINE_EXTEND_MARKER, 1)[1].strip("\n")
+        request_text = self.extra_input or ""
+        payload = request_text.split(OUTLINE_EXTEND_MARKER, 1)[1].strip("\n") if OUTLINE_EXTEND_MARKER in request_text else ""
 
         count_line, _, rest = payload.partition("\n")
         try:
@@ -2357,7 +2748,7 @@ class WorkflowWorker(QObject):
                 prev_tail = prev.content[-800:].strip()
 
         selection_source = "\n\n".join(
-            part for part in (outline_entry, checklist, prev_tail, self.extra_input.strip()) if part
+            part for part in (outline_entry, checklist, prev_tail, (self.extra_input or "").strip()) if part
         )
         relevant_characters, relevant_world = build_relevant_chapter_context(
             self.project, selection_source, max_character_chars=5000, max_world_chars=6000
@@ -2403,8 +2794,8 @@ class WorkflowWorker(QObject):
         if intent_lines:
             sections.append(prompts.render("change_chapter/section", heading="AUTHOR INTENT", body="\n".join(intent_lines)))
 
-        if self.extra_input and self.extra_input.strip():
-            sections.append(prompts.render("change_chapter/section", heading="AUTHOR'S REQUEST", body=self.extra_input.strip()))
+        if (self.extra_input or "").strip():
+            sections.append(prompts.render("change_chapter/section", heading="AUTHOR'S REQUEST", body=(self.extra_input or "").strip()))
 
         return prompts.render(
             "write_chapter/generation_user",
@@ -2414,8 +2805,9 @@ class WorkflowWorker(QObject):
         )
 
     def _run_write_chapter(self) -> None:
-        if self.extra_input.startswith(WRITE_CHAPTER_TARGET_MARKER):
-            chapter_num = int(self.extra_input[len(WRITE_CHAPTER_TARGET_MARKER):].strip())
+        request_text = self.extra_input or ""
+        if request_text.startswith(WRITE_CHAPTER_TARGET_MARKER):
+            chapter_num = int(request_text[len(WRITE_CHAPTER_TARGET_MARKER):].strip())
         else:
 
             chapter_num = self._next_chapter_number()
@@ -2589,6 +2981,11 @@ class WorkflowWorker(QObject):
             self.step_finished.emit(f"Chapter {chapter_num}", chapter_text)
 
     def _run_write_book(self) -> None:
+
+        if not self.project.outline.strip():
+            self._ensure_auto_book_foundation()
+        elif not self.project.synopsis.strip():
+            self._ensure_auto_book_foundation()
 
         logger.info("[write_book] Clearing chat before Chapter 1.")
         self._clear_temporary_chat_history()
@@ -2807,7 +3204,7 @@ class WorkflowWorker(QObject):
 
         change_chapter.run(self)
 
-    def _run_update_memory(self) -> None:
+    def _run_update_memory(self) -> bool:
         self.step_started.emit("Updating story memory...")
 
         chapter_num = self.project.current_chapter
@@ -2821,7 +3218,7 @@ class WorkflowWorker(QObject):
 
         if not chapter:
             self.error_occurred.emit("No chapter found to extract memory from.")
-            return
+            return False
 
         existing_memory = self.project.memory.strip() or "(empty)"
         world = self.project.world.strip() or "(none)"
@@ -2858,8 +3255,14 @@ class WorkflowWorker(QObject):
         if result:
             self.project.memory = result.strip()
             self.project.current_chapter = chapter_num
+            self.project.auto_book_memory_chapter = max(
+                self.project.auto_book_memory_chapter,
+                chapter_num,
+            )
             storage.save_project(self.project)
             self.step_finished.emit("Story Memory", result)
+            return True
+        return False
 
     def _run_conversation_summary(self) -> None:
         self.step_started.emit("Summarizing conversation history...")

@@ -355,9 +355,10 @@ def _extract_requested_chapter_count(worker) -> int | None:
 
 
 def run_generate_outline(worker) -> None:
-    if worker.extra_input.startswith(OUTLINE_EXTEND_MARKER):
+    request_text = worker.extra_input or ""
+    if request_text.startswith(OUTLINE_EXTEND_MARKER):
         return _run_extend_outline(worker)
-    if worker.extra_input.startswith(OUTLINE_SUGGESTION_MARKER):
+    if request_text.startswith(OUTLINE_SUGGESTION_MARKER):
         handler = getattr(worker, "_run_regenerate_outline_with_suggestion", None)
         if handler is None:
             worker.error_occurred.emit("Outline suggestion handler is unavailable.")
@@ -468,7 +469,10 @@ def run_generate_outline(worker) -> None:
 
 
 def _parse_extend_payload(worker) -> tuple[int, str] | None:
-    payload = worker.extra_input.split(OUTLINE_EXTEND_MARKER, 1)[1].strip("\n")
+    request_text = worker.extra_input or ""
+    if OUTLINE_EXTEND_MARKER not in request_text:
+        return None
+    payload = request_text.split(OUTLINE_EXTEND_MARKER, 1)[1].strip("\n")
     count_line, _, request = payload.partition("\n")
     try:
         count = int(count_line.strip())

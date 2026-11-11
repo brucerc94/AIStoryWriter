@@ -697,11 +697,12 @@ def run(worker) -> None:
     if not chapter.content.strip():
         worker.error_occurred.emit(f"Chapter {chapter_num} has no content yet. Write it first.")
         return
-    if not worker.extra_input.strip():
+    request = (worker.extra_input or "").strip()
+    if not request:
         worker.error_occurred.emit("No change instructions provided.")
         return
 
-    instruction = worker.extra_input.strip()
+    instruction = request
     original_content = chapter.content
 
 

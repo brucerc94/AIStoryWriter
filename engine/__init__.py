@@ -76,13 +76,20 @@ class _EngineModuleLoader(importlib.abc.Loader):
                 worker_cls._run_generate_outline = _run_generate_outline_with_start_status
                 worker_cls._outline_start_status_installed = True
 
-            # Generate Full Book is a sequential orchestrator around Write
-            # Chapter. Keep its established chat reset/reload lifecycle, but do
-            # not run Story Memory between chapters.
+            # Keep the existing sequential Write Chapter pipeline, adding
+            # durable checkpoints and the final review/audit stages.
             original_write_book = getattr(worker_cls, "_run_write_book", None) if worker_cls else None
             if worker_cls and original_write_book and not getattr(worker_cls, "_write_book_no_memory_installed", False):
-                def _run_write_book_without_memory(worker):
+                def _run_write_book_with_completion_pipeline(worker):
                     logger = getattr(module, "logger", None)
+                    if not worker._ensure_auto_book_foundation():
+                        worker.project.auto_book_status = "paused"
+                        worker._checkpoint_auto_book()
+                        worker.step_finished.emit(
+                            "Full Book Progress",
+                            worker.project.auto_book_audit or worker.project.auto_book_stage,
+                        )
+                        return
                     logger.info("[write_book] Clearing chat before Chapter 1.") if logger else None
                     worker._clear_temporary_chat_history()
                     worker.clear_chat_requested.emit()
@@ -98,8 +105,30 @@ class _EngineModuleLoader(importlib.abc.Loader):
                         if not worker._reload_project_from_storage():
                             break
 
+                        pending_memory = worker._next_book_memory_chapter_number()
+                        if pending_memory:
+                            worker.project.current_chapter = pending_memory
+                            worker._checkpoint_auto_book(stage=f"memory_chapter_{pending_memory}")
+                            worker.step_started.emit(
+                                f"Updating Story Memory for Chapter {pending_memory}..."
+                            )
+                            if not worker._run_update_memory():
+                                worker.project.auto_book_status = "paused"
+                                worker._checkpoint_auto_book()
+                                worker.error_occurred.emit(
+                                    f"Story Memory was not updated for Chapter {pending_memory}; "
+                                    "generation paused before the next chapter."
+                                )
+                                break
+                            worker.project.auto_book_memory_chapter = max(
+                                worker.project.auto_book_memory_chapter,
+                                pending_memory,
+                            )
+                            worker._checkpoint_auto_book(stage="writing_chapters")
+                            continue
+
                         current_outline_numbers = worker._outline_chapter_numbers()
-                        pending = worker._next_chapter_number()
+                        pending = worker._next_book_chapter_number()
                         if pending <= 0:
                             break
 
@@ -112,6 +141,7 @@ class _EngineModuleLoader(importlib.abc.Loader):
                             break
 
                         worker.project.current_chapter = pending - 1
+                        worker._checkpoint_auto_book(stage=f"writing_chapter_{pending}")
                         worker.step_started.emit(f"Writing Chapter {pending}/{total}...")
                         if logger:
                             logger.info(f"[write_book] Writing Chapter {pending}/{total} via Write Chapter.")
@@ -130,24 +160,45 @@ class _EngineModuleLoader(importlib.abc.Loader):
                                 logger.warning(
                                     f"[write_book] Chapter {pending} was not produced; stopping."
                                 )
+                            worker.project.auto_book_status = "paused"
+                            worker._checkpoint_auto_book()
                             break
 
-                        if chapter.generation_status == "incomplete":
+                        if chapter.generation_status != "accepted":
                             worker.step_started.emit(
-                                f"Chapter {pending} did not pass completion checks. "
+                                f"Chapter {pending} is not accepted by completion checks. "
                                 "Stopping book generation — please review or regenerate it."
                             )
                             if logger:
                                 logger.warning(
-                                    f"[write_book] Chapter {pending} is incomplete; stopping full-book generation."
+                                    f"[write_book] Chapter {pending} is not accepted; stopping full-book generation."
                                 )
+                            worker.project.auto_book_status = "paused"
+                            worker._checkpoint_auto_book()
                             break
 
                         worker.project.current_chapter = pending
+                        logger.info(f"[write_book] Updating Story Memory for Chapter {pending}.") if logger else None
+                        worker.step_started.emit(f"Updating Story Memory for Chapter {pending}...")
+                        if not worker._run_update_memory():
+                            worker.project.auto_book_status = "paused"
+                            worker._checkpoint_auto_book(stage=f"memory_chapter_{pending}")
+                            worker.error_occurred.emit(
+                                f"Story Memory was not updated for Chapter {pending}; "
+                                "generation paused before the next chapter."
+                            )
+                            break
+                        worker.project.auto_book_memory_chapter = max(
+                            worker.project.auto_book_memory_chapter,
+                            pending,
+                        )
+                        worker._checkpoint_auto_book(stage="writing_chapters")
 
                         if worker._stop_after_current_chapter:
                             if logger:
                                 logger.info("[write_book] Stop requested after current chapter.")
+                            worker.project.auto_book_status = "paused"
+                            worker._checkpoint_auto_book()
                             break
 
                         if not worker._reload_project_from_storage():
@@ -174,7 +225,43 @@ class _EngineModuleLoader(importlib.abc.Loader):
                         else:
                             logger.info(f"[write_book] Finished writing {written} chapter(s).")
 
-                worker_cls._run_write_book = _run_write_book_without_memory
+                    if worker._cancelled or worker._stop_after_current_chapter:
+                        worker.project.auto_book_status = "paused"
+                        worker._checkpoint_auto_book()
+                        return
+                    if worker.project.auto_book_status == "paused":
+                        worker.step_finished.emit(
+                            "Full Book Progress",
+                            worker.project.auto_book_audit or worker.project.auto_book_stage,
+                        )
+                        return
+
+                    from engine.book_validation import validate_book_structure
+                    structural_issues = validate_book_structure(worker.project)
+                    if structural_issues:
+                        worker.project.auto_book_status = "paused"
+                        worker.project.auto_book_audit_passed = False
+                        worker.project.auto_book_audit = (
+                            "Pre-review validation failed:\n- " + "\n- ".join(structural_issues)
+                        )
+                        worker._checkpoint_auto_book(stage="final_audit")
+                        worker.step_finished.emit("Full Book Progress", worker.project.auto_book_audit)
+                        worker.error_occurred.emit(
+                            "The manuscript is not ready for global review:\n- "
+                            + "\n- ".join(structural_issues)
+                        )
+                        return
+
+                    if not worker._run_auto_book_literary_review():
+                        worker.step_finished.emit(
+                            "Full Book Progress",
+                            worker.project.auto_book_review or worker.project.auto_book_audit,
+                        )
+                        return
+                    worker._run_auto_book_final_audit()
+                    worker.step_finished.emit("Full Book Progress", worker.project.auto_book_audit)
+
+                worker_cls._run_write_book = _run_write_book_with_completion_pipeline
                 worker_cls._write_book_no_memory_installed = True
 
             original_parse_json_object = getattr(module, "_parse_json_object", None)

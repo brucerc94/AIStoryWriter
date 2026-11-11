@@ -147,7 +147,7 @@ def install_change_run(module) -> None:
     original_run = module.run
 
     def run_with_consistency(worker) -> None:
-        request = worker.extra_input.strip()
+        request = (getattr(worker, "extra_input", "") or "").strip()
         if not request:
             original_run(worker)
             return

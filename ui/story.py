@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
 )
 
 from engine import storage
+from engine.book_validation import book_export_errors
 from engine.character_images import PortraitOutcome, mark_generating, record_outcome
 from engine.models import AuthorIntent, Chapter, Character, CharacterRelationship, Project, TaskType, WritingStyle
 from engine.workflow import OUTLINE_EXTEND_MARKER, OUTLINE_SUGGESTION_MARKER, WRITE_CHAPTER_TARGET_MARKER
@@ -1946,12 +1947,12 @@ class ChaptersTab(QWidget):
             icon="📖",
             title="No chapters yet",
             description=(
-                "Generate an outline first, then let the AI draft your opening "
-                "chapter from it — or add one manually and write it yourself."
+                "Enter a free-form idea in Draft, then create the complete book "
+                "in one run — or add a chapter manually."
             ),
             primary_label="✍ Generate Chapter",
             secondary_label="+ Add Chapter Manually",
-            tertiary_label="📚 Generate Full Book",
+            tertiary_label="📚 Create Full Book",
         )
         self._chapters_empty_card.primary_clicked.connect(self._write_chapter)
         self._chapters_empty_card.secondary_clicked.connect(self._add_chapter)
@@ -2066,8 +2067,11 @@ class ChaptersTab(QWidget):
         self.write_btn.clicked.connect(self._write_chapter)
         action_row.addWidget(self.write_btn)
 
-        self.write_book_btn = QPushButton("📚 Generate Full Book")
-        self.write_book_btn.setToolTip("Writes every remaining chapter in the outline, one after another.")
+        self.write_book_btn = QPushButton("📚 Create Full Book")
+        self.write_book_btn.setToolTip(
+            "Develop the idea into a draft, generate the outline, write every chapter in sequence, "
+            "update memory, and stop if a chapter fails completion checks."
+        )
         self.write_book_btn.clicked.connect(self._write_book)
         action_row.addWidget(self.write_book_btn)
 
@@ -2099,6 +2103,14 @@ class ChaptersTab(QWidget):
         self.content_stack.addWidget(self.edit_view)
         editor_area_layout.addWidget(self.content_stack, 1)
         right_layout.addWidget(self._editor_area, 1)
+
+        self.book_progress_lbl = QLabel()
+        self.book_progress_lbl.setWordWrap(True)
+        self.book_progress_lbl.setStyleSheet(
+            f"color: {COLOR_TEXT_MUTED}; font-size: 11px; padding: 4px 8px;"
+        )
+        self.book_progress_lbl.hide()
+        right_layout.addWidget(self.book_progress_lbl)
 
         splitter.addWidget(right)
         splitter.setSizes([220, 700])
@@ -2429,6 +2441,45 @@ class ChaptersTab(QWidget):
         has_chapters = bool(self._project and self._project.chapters)
         self._chapters_empty_card.setVisible(not has_chapters)
         self._editor_area.setVisible(has_chapters)
+        self._update_book_progress()
+
+    def _update_book_progress(self) -> None:
+        project = self._project
+        if project is None or project.auto_book_status == "idle":
+            self.book_progress_lbl.hide()
+            self.write_book_btn.setText("📚 Create Full Book")
+            if self._chapters_empty_card.tertiary_btn is not None:
+                self._chapters_empty_card.tertiary_btn.setText("📚 Create Full Book")
+            return
+
+        outline_numbers = outline_chapter_numbers(project.outline)
+        accepted = sum(
+            1 for number in outline_numbers
+            if any(
+                chapter.number == number
+                and chapter.content.strip()
+                and chapter.generation_status == "accepted"
+                for chapter in project.chapters
+            )
+        )
+        total = len(outline_numbers)
+        if project.auto_book_status == "completed" and not book_export_errors(project):
+            status = f"Complete: {accepted}/{total} chapters · literary review passed · final audit passed · ready to export."
+            button_text = "✓ Book Complete"
+        else:
+            stage = project.auto_book_stage.replace("_", " ")
+            review_state = "passed" if project.auto_book_review_passed else "pending"
+            status = (
+                f"Book creation {project.auto_book_status}: {accepted}/{total or 'auto'} chapters · "
+                f"stage: {stage} · literary review: {review_state}. "
+                "Click Resume to continue from the last saved checkpoint."
+            )
+            button_text = "↻ Resume Full Book"
+        self.write_book_btn.setText(button_text)
+        if self._chapters_empty_card.tertiary_btn is not None:
+            self._chapters_empty_card.tertiary_btn.setText(button_text)
+        self.book_progress_lbl.setText(status)
+        self.book_progress_lbl.show()
 
     def _on_chapter_selected(self, row: int) -> None:
         if not self._project or row < 0:
@@ -2511,7 +2562,7 @@ class ChaptersTab(QWidget):
         if not busy:
             self.write_btn.setToolTip("Writes the currently selected chapter.")
             self.write_book_btn.setToolTip(
-                "Writes every remaining chapter in the outline, one after another."
+                "Creates or resumes the book from its saved stage and chapter checkpoints."
             )
             self.write_next_btn.setToolTip(
                 "Writes the first chapter in the outline that doesn't have content yet."
@@ -2581,38 +2632,52 @@ class ChaptersTab(QWidget):
     def _write_book(self) -> None:
         if not self._project:
             return
-        if not self._project.outline.strip():
+        idea = self._project.auto_book_idea.strip() or self._project.synopsis.strip()
+        if not idea:
             QMessageBox.information(
-                self, "No Outline Yet",
-                "Generate an outline first (Outline tab) — \"Generate Full Book\" writes "
-                "one chapter per heading in the outline, so it needs one to follow.",
+                self,
+                "Story Idea Needed",
+                "Enter a free-form idea in Draft before creating the complete book.",
             )
             return
+
+        if self._project.auto_book_status == "completed" and not book_export_errors(self._project):
+            QMessageBox.information(
+                self,
+                "Book Complete",
+                "The global review and final audit have passed. The complete manuscript is ready to export.",
+            )
+            return
+
         outline_numbers = outline_chapter_numbers(self._project.outline)
         total = len(outline_numbers)
-        written = len([
-            c for c in self._project.chapters
-            if c.number in outline_numbers and c.content.strip()
-        ])
-        remaining = max(total - written, 0)
-        if remaining == 0:
-            QMessageBox.information(
-                self, "Book Complete",
-                f"All {total} chapter(s) in the outline already have content. "
-                "Add more chapters to the outline to continue, or edit chapters "
-                "individually from this tab.",
+        written = sum(
+            1 for number in outline_numbers
+            if any(
+                chapter.number == number
+                and chapter.content.strip()
+                and chapter.generation_status == "accepted"
+                for chapter in self._project.chapters
             )
-            return
+        )
+        remaining = max(total - written, 0) if total else None
+        is_resume = self._project.auto_book_status in {"running", "paused"}
+        title = "Resume Full Book" if is_resume else "Create Full Book"
+        chapter_description = (
+            f"{remaining} chapter(s) remain in the outline."
+            if remaining is not None else "The chapter count will be determined from the story idea."
+        )
         reply = QMessageBox.question(
-            self, "Generate Full Book",
-            f"This will write {remaining} remaining chapter(s) (of {total} in the "
-            "outline) one after another, updating Story Memory in between. This "
-            "can take a while, especially for longer books.\n\nContinue?",
+            self, title,
+            f"{chapter_description} The workflow will develop the idea, prepare Characters "
+            "and World, create or resume the outline, write chapters sequentially, update "
+            "Story Memory, run a global literary review, and perform a final audit. "
+            "You can stop after the current chapter and resume later.\n\nContinue?",
             QMessageBox.Yes | QMessageBox.Cancel,
         )
         if reply != QMessageBox.Yes:
             return
-        self.task_requested.emit(TaskType.WRITE_BOOK, "")
+        self.task_requested.emit(TaskType.WRITE_BOOK, idea)
 
     def _review_chapter(self) -> None:
         if not self._current_chapter or not self._project:
