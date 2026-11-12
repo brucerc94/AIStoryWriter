@@ -8,6 +8,7 @@ Supports streaming token output, message bubbles, summarized message indicators.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -205,9 +206,9 @@ class MessageBubble(QFrame):
 
 
 class StreamingBubble(QFrame):
-    """Temporary bubble shown while streaming. Replaced by MessageBubble when done."""
+    """Temporary, live-updating bubble for any workflow inference."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, stage_label: str = "", parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 10, 16, 10)
@@ -220,9 +221,12 @@ class StreamingBubble(QFrame):
             }}
         """)
 
-        role_lbl = QLabel("Assistant")
+        label = (stage_label or "").strip()
+        heading = f"AI Story Studio · {label}" if label else "AI Story Studio · Writing live"
+        role_lbl = QLabel(heading)
+        role_lbl.setWordWrap(True)
         role_lbl.setStyleSheet(
-            f"color: {COLOR_TEXT_DIM}; font-size: 11px; font-weight: 600; "
+            f"color: {COLOR_ACCENT}; font-size: 11px; font-weight: 700; "
             "text-transform: uppercase; background: transparent; border: none;"
         )
         layout.addWidget(role_lbl)
@@ -239,6 +243,14 @@ class StreamingBubble(QFrame):
             }}
         """)
         layout.addWidget(self.content_edit)
+        self.stats_lbl = QLabel("0 words · writing live")
+        self.stats_lbl.setStyleSheet(
+            f"color: {COLOR_TEXT_MUTED}; font-size: 10px; "
+            "background: transparent; border: none;"
+        )
+        layout.addWidget(self.stats_lbl)
+        self._token_updates = 0
+        self._last_stats_update = 0.0
         QTimer.singleShot(0, self.content_edit._update_height)
 
     def append_token(self, token: str) -> None:
@@ -247,10 +259,13 @@ class StreamingBubble(QFrame):
             cursor.movePosition(QTextCursor.End)
             cursor.insertText(token)
             self.content_edit.setTextCursor(cursor)
+            self._token_updates += 1
+            now = time.monotonic()
+            if self._token_updates % 12 == 0 or now - self._last_stats_update >= 0.25:
+                words = len(self.content_edit.toPlainText().split())
+                self.stats_lbl.setText(f"{words:,} words · writing live")
+                self._last_stats_update = now
         except RuntimeError:
-
-
-
             pass
 
     def get_text(self) -> str:
@@ -301,7 +316,7 @@ class ChatMessagesArea(QWidget):
         bubble = MessageBubble(message)
         self._layout.insertWidget(self._layout.count() - 1, bubble)
 
-    def begin_streaming(self) -> None:
+    def begin_streaming(self, stage_label: str = "") -> None:
         """Show a streaming bubble for the incoming assistant response.
 
         Safe to call even if a previous streaming bubble was never
@@ -317,7 +332,7 @@ class ChatMessagesArea(QWidget):
                 stale.deleteLater()
             except RuntimeError:
                 pass
-        self._streaming_bubble = StreamingBubble()
+        self._streaming_bubble = StreamingBubble(stage_label=stage_label)
         self._layout.insertWidget(self._layout.count() - 1, self._streaming_bubble)
 
     def append_streaming_token(self, token: str) -> None:
@@ -926,7 +941,7 @@ class ChatPanel(QWidget):
 
 
 
-        self.messages_widget.begin_streaming()
+        self.messages_widget.begin_streaming(desc)
         self._scroll_to_bottom()
 
     def _on_model_loading(self, msg: str) -> None:
