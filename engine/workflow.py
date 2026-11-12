@@ -1108,7 +1108,7 @@ class WorkflowWorker(QObject):
                             max_tokens=effective_max_tokens,
                             temperature=0.2,
                             stream=True,
-                            stream_callback=lambda _t: None,
+                            stream_callback=self.token_received.emit,
                             cancel_check=lambda: self._cancelled,
                         )
                 except Exception as e:
@@ -1413,7 +1413,7 @@ class WorkflowWorker(QObject):
                     top_p=top_p,
                     top_k=top_k,
                     stream=True,
-                    stream_callback=lambda _t: None,
+                    stream_callback=self.token_received.emit,
                     cancel_check=lambda: self._cancelled,
                 )
         except Exception as e:
